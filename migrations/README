@@ -1,0 +1,9 @@
+Alembic migrations for the planner database.
+
+- env.py takes the database address from the planner's settings: DATABASE_URL in .env, or data/planner.db.
+  It renders SQLite changes in batch mode, because SQLite cannot alter most columns in place.
+- versions/0001_baseline.py creates the 16 tables. Later changes are added as new files in versions/.
+- script.py.mako is the template Alembic uses when it writes a new migration file.
+
+The planner applies these migrations every time it starts. To add one, follow "Adding a change to the schema"
+in database/README.md.

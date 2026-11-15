@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Explore timetables from official feeds and plan clearly labelled future bus scenarios for 2027 to 2030.">
+  <meta name="theme-color" content="#0b5cad">
+  <meta name="color-scheme" content="light dark">
+  <title>BMTC Future Transit Planner</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <button id="navToggle" class="icon-btn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+    <div class="brand">BMTC Future Transit Planner</div>
+    <label class="year-picker">
+      <span class="sr-only">Planning year</span>
+      <select id="yearSelect" aria-label="Planning year">
+        <option value="2027">2027</option>
+        <option value="2028">2028</option>
+        <option value="2029">2029</option>
+        <option value="2030">2030</option>
+      </select>
+    </label>
+  </header>
+
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Main navigation">
+      <a href="#/routes" data-nav>Routes and timetables</a>
+      <a href="#/stops" data-nav>Stops</a>
+      <a href="#/journey" data-nav>Direct journeys</a>
+      <a href="#/scenarios" data-nav>Future scenarios</a>
+      <a href="#/compare" data-nav>Compare</a>
+      <a href="#/sources" data-nav>Data sources</a>
+      <a href="#/admin" data-nav>Administration</a>
+    </nav>
+
+    <main id="main" class="content" tabindex="-1">
+      <section id="yearStatus" class="status-panel" aria-live="polite"></section>
+      <div id="view"></div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>

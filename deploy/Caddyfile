@@ -1,0 +1,8 @@
+# Caddy: HTTPS for the planner. Caddy obtains and renews the certificate for PLANNER_DOMAIN by itself.
+# Ports 80 and 443 must reach this server from the internet. Caddy adds X-Forwarded-For and X-Forwarded-Proto;
+# the planner believes them only from this container's fixed address (see docker-compose.yml).
+{$PLANNER_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=15552000"
+	reverse_proxy planner:8000
+}

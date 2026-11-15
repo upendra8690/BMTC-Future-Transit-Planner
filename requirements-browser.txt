@@ -1,0 +1,5 @@
+# Optional: browser checks in tests/browser. Install after requirements-dev.txt:
+#   python -m pip install -r requirements-browser.txt
+# Then either run: python -m playwright install chromium
+# or pass --chrome to tests/browser/run_browser_checks.py with an installed Chrome or Chromium.
+playwright==1.65.2

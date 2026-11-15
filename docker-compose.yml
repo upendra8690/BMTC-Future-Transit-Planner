@@ -1,0 +1,59 @@
+# Planner stack: the planner API and dashboard, behind Caddy, which serves HTTPS for PLANNER_DOMAIN.
+#
+#   cp .env.example .env        then edit .env: ADMIN_API_KEY, PLANNER_DOMAIN, SERVICE_TIMEZONE
+#   docker compose up -d --build
+#   docker compose ps           the planner should show "healthy"
+#
+# docs/DEPLOY.md has the full steps, backups and updates.
+name: bmtc-planner
+
+services:
+  planner:
+    build: .
+    image: bmtc-planner:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Caddy's fixed address on planner_net (below). Only Caddy may supply X-Forwarded-For to the planner.
+      FORWARDED_ALLOW_IPS: "172.28.0.20"
+    volumes:
+      - planner-data:/app/data
+    # No ports are published: the planner is reachable only through Caddy.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      planner_net:
+        ipv4_address: 172.28.0.10
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - planner
+    environment:
+      PLANNER_DOMAIN: ${PLANNER_DOMAIN:?Set PLANNER_DOMAIN in .env to the public host name, for example planner.example.org}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      planner_net:
+        ipv4_address: 172.28.0.20
+
+networks:
+  planner_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  planner-data:
+  caddy-data:
+  caddy-config:

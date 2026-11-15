@@ -1,0 +1,39 @@
+# Lint settings for `ruff check .` (ruff is listed in requirements-dev.txt).
+# Formatting is not enforced; run `ruff check .` only.
+target-version = "py311"
+line-length = 120
+extend-exclude = ["dashboard/vendor", "android", "data", "backups", "dist", ".venv"]
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import order
+    "B",    # bugbear: likely bugs
+    "UP",   # pyupgrade: current syntax
+    "SIM",  # simplifications
+    "C4",   # comprehensions
+    "S",    # security checks (bandit rules)
+    "N",    # naming
+    "RUF",  # ruff-specific checks
+    "ARG",  # unused arguments
+    "PT",   # pytest style
+    "T20",  # print statements
+]
+ignore = []
+
+[lint.per-file-ignores]
+# Tests use assert, build subprocess calls and temporary paths on purpose.
+"tests/**" = ["S101", "S603", "S607", "S108", "ARG001", "ARG002", "PT011"]
+# Command-line scripts print their results as JSON, and some call the local interpreter.
+"scripts/**" = ["T201", "S603", "S607"]
+"tests/browser/**" = ["T201", "S603", "S607"]
+# The mutation check prints one line per broken rule and its result.
+"tests/mutation/**" = ["T201"]
+# Alembic's generated environment and migrations use module-level code and fixed names.
+"migrations/**" = ["N999", "E402", "ARG001"]
+
+[lint.flake8-bugbear]
+# FastAPI declares parameters with these calls in default values; that is the framework's documented style.
+extend-immutable-calls = ["fastapi.Query", "fastapi.File", "fastapi.Form", "fastapi.Body", "fastapi.Header", "fastapi.Depends", "fastapi.Path"]

@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+backups/
+dist/
+
+# Tool caches and coverage
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Flutter and Android build output, signing material
+android/**/build/
+android/**/.dart_tool/
+android/**/.gradle/
+*.apk
+*.aab
+*.jks
+*.keystore
+key.properties
+
+# Logs
+*.log

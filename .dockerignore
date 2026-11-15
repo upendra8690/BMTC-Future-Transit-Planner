@@ -1,0 +1,24 @@
+# Keep secrets, data and build leftovers out of the image.
+.env
+.env.*
+!.env.example
+data
+backups
+dist
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.hypothesis
+.mypy_cache
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.log
+tests
+docs
+android
+tools
+.git
+.gitignore

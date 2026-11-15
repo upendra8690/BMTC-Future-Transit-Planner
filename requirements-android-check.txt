@@ -1,0 +1,6 @@
+# Packages for android/check_starter.py only: static checks of the Flutter starter. They are not needed to run the planner.
+# Install into a separate virtual environment:  python -m pip install -r requirements-android-check.txt
+# Verified with Python 3.13.18 on Linux; the check passed with these exact versions.
+pyyaml==6.0.3
+tree-sitter==0.26.1
+tree-sitter-dart==0.1.0
