@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, func, inspect, select
+from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
 
@@ -50,14 +51,19 @@ def _sqlite_revision(conn: sqlite3.Connection) -> str | None:
     return row[0] if row else None
 
 
+def _count_statement(name: str) -> str:
+    """SQL that counts one planner table. SQLAlchemy builds it from the model metadata, so the name is quoted."""
+    table = Base.metadata.tables[name]
+    return str(select(func.count()).select_from(table).compile(dialect=sqlite_dialect.dialect()))
+
+
 def _sqlite_counts(conn: sqlite3.Connection) -> dict[str, int | None]:
     """Row count per planner table. None means the table is missing."""
     present = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     counts: dict[str, int | None] = {}
     for name in expected_tables():
         if name in present:
-            # The table name comes from the model metadata (expected_tables), never from user input.
-            counts[name] = conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]  # noqa: S608  # nosec B608
+            counts[name] = conn.execute(_count_statement(name)).fetchone()[0]
         else:
             counts[name] = None
     return counts
@@ -76,24 +82,28 @@ def backup_sqlite(source: Path, backup_dir: Path, *, when: dt.datetime) -> Path:
     """Copy a live SQLite database with SQLite's online backup API. Safe while the server is running.
 
     The copy is written as one self-contained file (journal mode DELETE), so copying that file is enough to keep it.
+    A copy that fails part-way is removed and reported as MaintenanceError, whether SQLite or the file system failed.
     """
     if not source.is_file():
         raise MaintenanceError(f"Database file not found: {source.name}")
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    target = _free_name(backup_dir, f"planner_backup_{when:%Y%m%d_%H%M%S}")
-    src = sqlite3.connect(_read_only_uri(source), uri=True)
+    target: Path | None = None
     try:
-        dst = sqlite3.connect(str(target))
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        target = _free_name(backup_dir, f"planner_backup_{when:%Y%m%d_%H%M%S}")
+        src = sqlite3.connect(_read_only_uri(source), uri=True)
         try:
-            src.backup(dst)
-            dst.execute("PRAGMA journal_mode=DELETE").fetchall()
+            dst = sqlite3.connect(str(target))
+            try:
+                src.backup(dst)
+                dst.execute("PRAGMA journal_mode=DELETE").fetchall()
+            finally:
+                dst.close()
         finally:
-            dst.close()
-    except sqlite3.Error as exc:
-        target.unlink(missing_ok=True)
+            src.close()
+    except (sqlite3.Error, OSError) as exc:
+        if target is not None:
+            target.unlink(missing_ok=True)
         raise MaintenanceError(f"The backup could not be written: {exc}") from exc
-    finally:
-        src.close()
     return target
 
 

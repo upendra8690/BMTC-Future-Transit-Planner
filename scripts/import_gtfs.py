@@ -26,7 +26,12 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.config import Settings  # noqa: E402
 from app.database import Database  # noqa: E402
-from app.gtfs.importer import classification_for_source, import_feed, import_summary  # noqa: E402
+from app.gtfs.importer import (  # noqa: E402
+    classification_for_source,
+    fare_counts,
+    import_feed,
+    import_summary,
+)
 from app.models import (  # noqa: E402
     KIND_COMMUNITY,
     KIND_OFFICIAL,
@@ -142,7 +147,8 @@ def run(args: argparse.Namespace) -> int:
                 session, feed, filename=safe_filename(args.file.name), source=source,
                 settings=settings, actor="cli",
             )
-            output["import"] = import_summary(imp)
+            fares = fare_counts(session, [imp.id]).get(imp.id, 0)
+            output["import"] = import_summary(imp, fares)
             if imp.status != STATUS_COMPLETED:
                 exit_code = EXIT_REJECTED
         if args.verify or args.revoke:

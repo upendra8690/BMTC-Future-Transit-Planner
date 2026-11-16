@@ -1,37 +1,46 @@
 <div align="center">
 
-<img src="assets/banner.svg" alt="BMTC Future Transit Planner: Bengaluru bus timetables and future scenarios for 2027 to 2030" width="100%">
+<img src="assets/banner.svg" alt="BMTC Future Transit Planner: unofficial Bengaluru bus timetables and 2027 to 2030 scenarios" width="100%">
 
 <br>
 
-![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
-![GTFS](https://img.shields.io/badge/Data-GTFS-F97316?style=for-the-badge)
-![Tests 159 passing](https://img.shields.io/badge/Tests-159%20passing-2EA44F?style=for-the-badge)
-![English, Kannada, Hindi](https://img.shields.io/badge/UI-English%20%C2%B7%20%E0%B2%95%E0%B2%A8%E0%B3%8D%E0%B2%A8%E0%B2%A1%20%C2%B7%20%E0%A4%B9%E0%A4%BF%E0%A4%A8%E0%A5%8D%E0%A4%A6%E0%A5%80-6E40C9?style=for-the-badge)
+# 🚌 BMTC Future Transit Planner 3.0
 
-**[What it does](#-what-it-does-in-30-seconds)  ·  [Screenshots](#-screenshots)  ·  [Try it](#-try-it-in-60-seconds)  ·  [Features](#-features)  ·  [How it works](#-how-it-works)  ·  [Quality](#-quality-and-testing)  ·  [Glossary](#-glossary)**
+**Plan Bengaluru bus journeys today and sketch the network of 2027 to 2030, without ever mixing guesses with facts.**
+
+[![CI](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/ci.yml/badge.svg)](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/ci.yml)
+![Version 3.0.0](https://img.shields.io/badge/version-3.0.0-0B5CAD?style=flat-square)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![SQLite / Alembic](https://img.shields.io/badge/SQLite-Alembic-003B57?style=flat-square&logo=sqlite&logoColor=white)
+![GTFS](https://img.shields.io/badge/data-GTFS-F97316?style=flat-square)
+![PWA](https://img.shields.io/badge/PWA-offline%20ready-5A0FC8?style=flat-square&logo=pwa&logoColor=white)
+
+![Tests](https://img.shields.io/badge/tests-366%20passing-2EA44F?style=flat-square&logo=pytest&logoColor=white)
+![Browser checks](https://img.shields.io/badge/browser%20checks-121%20passing-2EA44F?style=flat-square&logo=googlechrome&logoColor=white)
+![WCAG 2.1 AA](https://img.shields.io/badge/axe--core-WCAG%202.1%20AA-2EA44F?style=flat-square)
+![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?style=flat-square&logo=ruff&logoColor=black)
+![Languages](https://img.shields.io/badge/UI-English%20%C2%B7%20%E0%B2%95%E0%B2%A8%E0%B3%8D%E0%B2%A8%E0%B2%A1%20%C2%B7%20%E0%B0%A4%E0%B1%86%E0%B0%B2%E0%B1%81%E0%B0%97%E0%B1%81%20%C2%B7%20%E0%A4%B9%E0%A4%BF%E0%A4%A8%E0%A5%8D%E0%A4%A6%E0%A5%80-6E40C9?style=flat-square)
+
+[**Why**](#-why-this-exists) · [**Screenshots**](#-screenshots) · [**What's new**](#-whats-new-in-30) · [**Quick start**](#-quick-start) · [**Features**](#-features) · [**API**](#-api-in-30-seconds) · [**Architecture**](#%EF%B8%8F-architecture) · [**Quality**](#-quality) · [**Roadmap**](#%EF%B8%8F-roadmap)
+
+<sub>⚠️ Unofficial. Not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro or any transport operator. Ships no official BMTC timetable data.</sub>
 
 </div>
 
-<br>
+---
 
-## 👋 What it does, in 30 seconds
+## 💡 Why this exists
 
-Bengaluru is growing fast, and people want to know: *what will the buses look like in 2027, 2028, 2029, 2030?*
+Bengaluru is growing fast, and people want to know what the buses will look like in **2027, 2028, 2029 and 2030**. Nobody has official timetables for those years yet. A planning tool that blurs guesses with facts is worse than no tool at all.
 
-The problem is that **nobody has official timetables for those years yet**, and a planning tool that blurs guesses with
-facts is worse than no tool at all.
-
-**BMTC Future Transit Planner keeps three kinds of information strictly apart**, and labels every screen so you always
-know what you are looking at:
+This planner keeps **three kinds of information strictly apart**, and labels every screen, every journey and every export:
 
 | | Classification | What it means |
 |:---:|---|---|
-| 🟢 | **Official verified** | Timetables from an `OFFICIAL` source that an administrator has checked and verified. |
-| 🟡 | **Unverified feed** | Any other GTFS feed: community, third-party or demo. Shown separately, always labelled. |
-| 🟣 | **Estimated scenario** | Your own "what if" bus route for a future year, with journey time worked out from labelled assumptions. **Never** an official announcement. |
+| 🟢 | **`OFFICIAL_VERIFIED`** | Timetables from an `OFFICIAL` source that an administrator has checked and verified. Empty until that happens. |
+| 🟡 | **`UNVERIFIED_FEED`** | Any other GTFS feed: community, third-party or demo. Shown separately, always labelled with its source. |
+| 🟣 | **`ESTIMATED_SCENARIO`** | Your own "what if" route for a future year, with journey time worked out from labelled assumptions. **Never** an official announcement. |
 
 When there is no verified timetable for a year, the planner says so plainly instead of inventing one:
 
@@ -39,13 +48,9 @@ When there is no verified timetable for a year, the planner says so plainly inst
 
 <div align="center">
 
-### 📊 At a glance
-
-| **159** | **36** | **5 / 5** | **35** | **2027 – 2030** |
-|:---:|:---:|:---:|:---:|:---:|
-| automated tests passing | browser checks passing | deliberately broken safety rules caught | API operations | planning years |
-
-<sub>Test runs were on Linux with Python 3.13. See <a href="#-quality-and-testing">Quality and testing</a> for exactly what was and wasn't checked.</sub>
+| **366** | **121** | **20 / 20** | **38** | **4** | **2027 – 2030** |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| automated tests | browser checks | broken rules caught by mutation checks | API operations | UI languages | planning years |
 
 </div>
 
@@ -53,334 +58,285 @@ When there is no verified timetable for a year, the planner says so plainly inst
 
 <table>
 <tr>
-<td width="50%"><img src="assets/screenshot-routes.png" alt="Routes and timetables page with official, unverified and estimated banners for 2027"></td>
-<td width="50%"><img src="assets/screenshot-sources.png" alt="Data sources page explaining each classification and listing the demo feed as unverified"></td>
+<td width="50%"><img src="assets/screenshot-journey.png" alt="Plan a journey: Demo Central to Demo Lake View on route DEMO-1, labelled as unverified feed data, with the transfer assumptions stated"></td>
+<td width="50%"><img src="assets/screenshot-routes.png" alt="Routes and timetables page with official, unverified and estimated status banners for 2027 and the two demo routes"></td>
 </tr>
 <tr>
-<td align="center"><b>Routes and timetables</b><br><sub>Every page opens with the status of the chosen year for each classification.</sub></td>
-<td align="center"><b>Data sources</b><br><sub>Every source shows its publisher, licence and whether anyone verified it.</sub></td>
+<td align="center"><b>🧭 Journey planner</b><br><sub>Up to two changes, ranked by arrival. Every ride names its feed and every assumption is stated.</sub></td>
+<td align="center"><b>🗓️ Routes and timetables</b><br><sub>Each page opens with the status of the chosen year for each classification.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/screenshot-sources.png" alt="Data sources page listing the synthetic demo feed as unverified"></td>
+<td width="50%" align="center"><img src="assets/screenshot-mobile-kn.png" alt="Phone layout of the dashboard in Kannada" width="60%"></td>
+</tr>
+<tr>
+<td align="center"><b>🗂️ Data sources</b><br><sub>Where every timetable came from, and how it is classified.</sub></td>
+<td align="center"><b>📱 Phone layout, in Kannada</b><br><sub>English, ಕನ್ನಡ, తెలుగు and हिन्दी.</sub></td>
 </tr>
 </table>
 
-<sub>Real screenshots of the running app, using the invented demo feed. No official BMTC data is shown.</sub>
+<sub>Screenshots show the invented <code>SYNTHETIC_DEMO</code> feed (routes DEMO-1 and DEMO-2). They are not BMTC routes.</sub>
 
-## 🪤 Why this is harder than it looks
+## ✨ What's new in 3.0
 
-| Situation | The trap | ✅ What the planner does |
-|---|---|---|
-| A community feed has a route called `500D` | It looks official, but nobody verified it | Shows it only under **Unverified feed**, never mixed with official data |
-| A user plans a new route for 2029 | It could be mistaken for a real BMTC plan | Stamps it **ESTIMATED SCENARIO** everywhere, including CSV and PDF exports |
-| A scenario reuses an official route number | People could confuse the two | The API returns a **warning** when the code matches an official route |
-| A feed covers only half of 2028 | "Has data for 2028" would overstate it | Reports coverage as **all**, **part** or **none** of each year |
-| Someone uploads a malicious ZIP | Zip bombs, path tricks, huge files | Checks size, member count, compression ratio and paths, then **rejects** the feed with a report |
-| An admin verifies the wrong source | Bad data becomes "official" | Only `OFFICIAL` sources can be verified, every change is **audit logged**, and verification can be **revoked** |
+| | Feature | Details |
+|:---:|---|---|
+| 🔀 | **Journeys with up to two changes** | `GET /api/plan` returns options ranked by arrival, then by changes, and labels `EARLIEST_ARRIVAL` and `FEWEST_CHANGES`. |
+| 💸 | **Fares from GTFS** | `fare_attributes.txt` and `fare_rules.txt` are imported (migration `0002_fares`). A fare is shown only when exactly one applies. |
+| 📴 | **Offline timetables** | The service worker keeps up to 120 saved API answers, shows an offline banner and retries after reconnecting. |
+| 🌐 | **Telugu** | A fourth language, 344 keys in each. |
+| 🕒 | **Service clock** | `/api/clock` reports the feed's own time zone, with `Asia/Kolkata` as the fallback. |
+| 🛡️ | **Security mapping** | `docs/SECURITY_ASVS.md` maps the planner to OWASP ASVS 5.0.0 and the Top 10:2025, gaps included. |
+| ♿ | **Accessibility engine** | Browser checks run axe-core 4.14.0 against WCAG 2.1 AA. |
 
-## 🚀 Try it in 60 seconds
+Full list in [`CHANGELOG.md`](CHANGELOG.md).
 
-You need [Python 3.11 or newer](https://www.python.org/downloads/).
+## 🚀 Quick start
+
+### 🪟 Windows (two clicks)
+
+```bat
+scripts\setup_windows.bat    :: once: creates .venv, installs packages, prepares the database
+scripts\run_windows.bat      :: then open http://127.0.0.1:8000/
+```
+
+Set `ADMIN_API_KEY` in `.env` to enable the Administration page. Full guide in [`docs/INSTALL_WINDOWS.md`](docs/INSTALL_WINDOWS.md).
+
+### 🐧 Linux / macOS / any Python 3.11+
 
 ```bash
-# 1. Download the project
-git clone https://github.com/upendra8690/BMTC-Future-Transit-Planner.git
-cd BMTC-Future-Transit-Planner
+git clone https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0.git
+cd BMTC-Future-Transit-Planner-3.0
 
-# 2. Create a virtual environment and install
-python -m venv .venv
-. .venv/bin/activate                 # Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt
-
-# 3. Configure (then set ADMIN_API_KEY to a long random value)
-cp .env.example .env                 # Windows: copy .env.example .env
-
-# 4. Create the database
+python -m venv .venv && . .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+cp .env.example .env
 python scripts/migrate_database.py
 
-# 5. (Optional) load the invented demo feed so there is something to explore
+# Load the invented demo feed so there is something to explore
 python scripts/make_synthetic_gtfs.py --out data/demo_feed.zip
-python scripts/import_gtfs.py --file data/demo_feed.zip --new-source "Demo publisher" --kind SYNTHETIC_DEMO
+python scripts/import_gtfs.py --file data/demo_feed.zip --new-source "Synthetic demo" --kind SYNTHETIC_DEMO
 
-# 6. Start the planner
 python -m uvicorn app.main:create_app --factory --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Then open **http://127.0.0.1:8000/** for the dashboard, or **http://127.0.0.1:8000/api/docs** for the interactive API docs.
+Open **http://127.0.0.1:8000/**, switch to **Unverified feed**, and plan a trip from *Demo Central* to *Demo Lake View*. Interactive API docs are at **/api/docs**.
 
-> [!TIP]
-> **On Windows?** Run `scripts\setup_windows.bat` once, set `ADMIN_API_KEY` in `.env`, then double-click
-> `scripts\run_windows.bat`. The full guide is in [docs/INSTALL_WINDOWS.md](docs/INSTALL_WINDOWS.md).
-
-<details>
-<summary><b>🔌 Call the API directly</b></summary>
-
-<br>
+### 🐳 Docker + Caddy (HTTPS)
 
 ```bash
-# Health check
-curl http://127.0.0.1:8000/api/health
-
-# Search the unverified demo routes
-curl "http://127.0.0.1:8000/api/routes?classification=UNVERIFIED_FEED&q=DEMO"
-
-# Coverage of every planning year
-curl http://127.0.0.1:8000/api/years/compare
+cp .env.example .env     # set ADMIN_API_KEY and PLANNER_DOMAIN
+docker compose up -d --build
 ```
 
-All 35 operations are listed in [docs/API.md](docs/API.md).
+See [`docs/DEPLOY.md`](docs/DEPLOY.md). The Compose file is validated, but the image has not yet been built or run.
 
-</details>
-
-## ✨ Features
+## 🧩 Features
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-### 🧭 For riders and planners
-- 🔎 **Route and stop search**, by number, name or GTFS ID
-- 🕐 **Timetables by date**, with CSV download
-- 📍 **Nearby stops** within a radius you choose
-- 🚏 **Direct journeys** between two stops
-- 🗺️ **Map view** with Leaflet and OpenStreetMap
-- ⭐ **Saved routes** and preferences per device
-- 🌐 **English, ಕನ್ನಡ and हिन्दी** interface
-- 📱 **Installable web app** with an offline shell
+**🗺️ Planning**
+- Timetables by route and date, route and stop search
+- Departures from a stop, nearby stops on a Leaflet map
+- Journeys with 0, 1 or 2 changes, walks marked as estimates
+- Fares straight from the feed
+- Saved routes per device
 
 </td>
 <td width="50%" valign="top">
 
-### 🔮 For future scenarios
-- ➕ **Create scenarios** for 2027 to 2030: route, stops, first and last bus, frequency, days
-- 📐 **Transparent estimates** of distance and journey time
-- ⚖️ **Side-by-side comparison** of two scenarios
-- 📄 **PDF and CSV export**, labelled as estimates
-- 🔐 **Private to each device**, identified by a hashed device key
+**🔮 Future scenarios**
+- Owner-scoped "what if" routes for 2027 to 2030
+- Distance, journey time and frequency from labelled assumptions
+- Side-by-side comparison
+- CSV and PDF export
 
 </td>
 </tr>
 <tr>
-<td width="50%" valign="top">
+<td valign="top">
 
-### 🛠️ For administrators
-- 📦 **GTFS import** from the dashboard or the command line
-- 🛡️ **Hostile-archive checks** and duplicate warnings
-- ✅ **Verify or revoke** official sources
-- 📝 **Audit log** of every administrative action
-- 💾 **Verified SQLite backups** and a database check
+**🛠️ Administration**
+- GTFS import from the CLI or the dashboard, checked before storing
+- Verification and revocation of `OFFICIAL` sources
+- Audit log of every admin action
+- Verified SQLite backups, database check, restore drill
 
 </td>
-<td width="50%" valign="top">
+<td valign="top">
 
-### 🔒 Built-in safety
-- 🔑 Admin routes are **off** until an admin key is set
-- 🚦 **Rate limiting** per client IP
-- 🧱 **Content Security Policy** on the dashboard
-- #️⃣ Device keys are stored only as **SHA-256 hashes**
-- 🐳 **Docker and Caddy** setup for HTTPS hosting
+**📱 Everywhere**
+- Installable PWA with offline shell and saved timetables
+- English, Kannada, Telugu, Hindi
+- Times in the service time zone
+- 38 documented API operations with OpenAPI
 
 </td>
 </tr>
 </table>
 
-## 🧠 How it works
+## ⚡ API in 30 seconds
 
-**In simple terms:**
+```bash
+curl "http://127.0.0.1:8000/api/plan?origin=Demo%20Central&destination=Demo%20Lake%20View&classification=UNVERIFIED_FEED"
+```
 
-1. 📥 **Import** a GTFS feed (the standard zip format transit agencies publish timetables in).
-2. 🛡️ **Check** it for size, structure and safety. A bad feed is rejected with a clear report.
-3. 🏷️ **Classify** it. Only a verified `OFFICIAL` source becomes *Official verified*. Everything else is *Unverified feed*.
-4. 🗄️ **Store** it in SQLite, managed with Alembic migrations.
-5. 🖥️ **Serve** it through a FastAPI backend to a plain HTML, CSS and JavaScript dashboard, with every result labelled.
+```jsonc
+{
+  "classification": "UNVERIFIED_FEED",
+  "max_changes": 2,
+  "options": [{
+    "changes": 0,
+    "departs_at": "2026-11-16T10:30+05:30",
+    "arrives_at": "2026-11-16T10:46+05:30",
+    "duration_minutes": 16,
+    "fare": { "code": "NOT_IN_FEED", "total": null },
+    "labels": ["EARLIEST_ARRIVAL"],
+    "legs": [{ "type": "ride", "timing": "scheduled", "route_number": "DEMO-1", "...": "..." }]
+  }]
+}
+```
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/meta` | Version, classifications, affiliation notice, estimate assumptions |
+| `GET /api/clock` | Service time zone, local time and feed coverage for today |
+| `GET /api/routes` · `GET /api/stops` | Search routes and stops for one classification |
+| `GET /api/plan` | Journeys with up to two changes |
+| `GET /api/docs` | Interactive OpenAPI docs |
+
+All 38 operations are documented in [`docs/API.md`](docs/API.md).
+
+## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
-    A["📦 GTFS ZIP"] --> B["🛡️ Safety checks<br/>size, paths, ratio"]
-    B -->|rejected| R["❌ REJECTED<br/>with report"]
-    B -->|passed| C{"🏷️ Source verified<br/>as OFFICIAL?"}
-    C -->|yes| D["🟢 Official verified"]
-    C -->|no| E["🟡 Unverified feed"]
-    S["✏️ Your scenario"] --> F["🟣 Estimated scenario"]
-    D --> G[("🗄️ SQLite")]
-    E --> G
-    F --> G
-    G --> H["⚡ FastAPI"]
-    H --> I["🖥️ Dashboard<br/>EN · KN · HI"]
-    H --> J["📄 CSV / PDF"]
+    G[GTFS ZIP] -->|CLI or admin upload| I[Importer<br/>checks + audit]
+    I -->|COMPLETED| DB[(SQLite / SQLAlchemy<br/>Alembic migrations)]
+    I -->|REJECTED| X[No rows stored]
+    DB --> API[FastAPI<br/>38 operations]
+    API --> P[Journey planner<br/>0–2 changes, fares]
+    API --> S[Scenarios<br/>labelled estimates]
+    API --> D[Dashboard PWA<br/>4 languages, offline]
+    A[Admin key] -.->|verify OFFICIAL source| DB
 ```
 
-### 📐 How scenario estimates are calculated
-
-```text
-distance      = straight-line distance between stops × detour factor
-journey time  = distance ÷ average speed  +  dwell time × stops in between
-```
-
-| Assumption | Default | Setting in `.env` |
-|---|:---:|---|
-| Average bus speed | 15 km/h | `AVG_BUS_SPEED_KMPH` |
-| Dwell time per stop | 0.5 min | `STOP_DWELL_MINUTES` |
-| Road detour factor | 1.3 | `DETOUR_FACTOR` |
-
-> [!NOTE]
-> These are **placeholders**, not measured values. They are shown next to every estimate, and they should be calibrated
-> against real data before anyone relies on them.
-
-<details>
-<summary><b>🔧 Tech stack</b></summary>
-
-<br>
-
-| Layer | Technology |
+| Layer | Stack |
 |---|---|
-| API | FastAPI, Pydantic, Uvicorn |
-| Database | SQLAlchemy 2, SQLite, Alembic migrations |
-| Dashboard | Plain HTML, CSS and JavaScript, Leaflet 1.9.4 (vendored), service worker |
-| Exports | ReportLab for PDF, standard library for CSV |
-| Deployment | Docker, Docker Compose, Caddy for HTTPS |
-| Quality | pytest, Playwright browser checks, ruff, bandit, pip-audit, mutation checks |
-| Mobile | Flutter WebView starter in `android/` (not built yet) |
+| Backend | Python, FastAPI, SQLAlchemy, Alembic, uvicorn |
+| Data | GTFS static feeds, SQLite (PostgreSQL possible but untested) |
+| Frontend | Plain HTML, CSS and JavaScript, Leaflet 1.9.4, service worker |
+| Deploy | Docker, Caddy (automatic HTTPS) |
+| Mobile | Flutter WebView starter in `android/` (not yet built) |
 
-</details>
+More in [`docs/architecture.md`](docs/architecture.md).
 
-## 📈 Quality and testing
+## ✅ Quality
 
 | Check | Result |
-|---|:---:|
-| ✅ Automated tests (`python -m pytest`) | **159 passed** |
-| ✅ Browser checks in headless Chrome, desktop and Pixel 7 profile | **36 passed** |
-| ✅ Mutation checks: five safety rules broken on purpose | **5 / 5 caught** |
-| ✅ Lint (`ruff check .`) | **clean** |
-| ✅ Security scan (`bandit`) | **no issues** |
-| ✅ Dependency audit (`pip-audit`) | **no known vulnerabilities** |
-| ✅ Backup restore drill | **passed** |
-
-> [!IMPORTANT]
-> **How to read these results:** the checks ran on Linux with Python 3.13. Windows `.bat` launchers, Python 3.11 and
-> 3.12, PostgreSQL, real phones and the Docker image have **not** been tested yet. The full output is in
-> [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
-
-<details>
-<summary><b>🔁 Reproduce these results</b></summary>
-
-<br>
-
-```bash
-python -m pytest
-ruff check .
-
-# Browser checks (optional)
-pip install -r requirements-browser.txt
-python -m playwright install chromium
-python tests/browser/run_browser_checks.py
-
-# Mutation checks (optional, a few minutes)
-python tests/mutation/mutation_check.py
-```
-
-</details>
-
-## 📂 About the data
-
-> [!WARNING]
-> **This is not an official BMTC product, and it contains no official BMTC timetable data.**
-
-- 🏛️ **Official data:** the official candidate, the DULT Transport Data Hub, could not be reached during the build, and
-  its licence was not found. [SOURCES.md](SOURCES.md) lists everything that was reviewed and why.
-- 🧪 **Demo data:** `scripts/make_synthetic_gtfs.py` creates an **invented** feed. Routes such as `DEMO-1` are not BMTC
-  routes. It is for trying the app only.
-- 🚫 **Never used:** reverse-engineered app APIs, scraped app data and datasets built from them.
-
-## ⚠️ Known limitations
-
-Knowing what's missing matters as much as knowing what works.
-
-| Area | Status |
 |---|---|
-| Official 2027 – 2030 timetables | ❌ None loaded, because none is available from a verified source |
-| Journeys with transfers | ❌ Direct trips only |
-| Live bus positions and delays | ❌ No authorised live feed is connected |
-| Public HTTPS hosting | 🟡 Docker and Caddy files exist, but the image hasn't been built or run yet |
-| Android app | 🟡 Flutter starter only, not compiled |
-| Kannada and Hindi text | 🟡 First draft, needs review by native speakers |
+| 🧪 Automated tests | **366 passed** on Linux, Python 3.13. On Windows with Python 3.12: 361 passed, 5 skipped (the DejaVu Sans font is not installed) |
+| 🌐 Browser checks | **121 passed** in headless Chrome, including axe-core WCAG 2.1 AA |
+| 🧬 Mutation checks | **10 / 10** broken rules caught in each of two harnesses |
+| 💾 Restore drill | **29 / 29** checks passed |
+| 🧹 Lint | `ruff check .` clean |
+| 🔒 Static security | bandit: no issues in the documented scope |
+| 📦 Dependency audit | No known vulnerabilities in the pinned versions |
+
+Every command and number is in [`docs/TEST_RESULTS.md`](docs/TEST_RESULTS.md). CI runs lint, migrations and tests on Python 3.12 and 3.13 for every push.
+
+## 🛡️ Security in brief
+
+- 🔑 Admin functions need `ADMIN_API_KEY`. They return 503 while it is empty and 401 for a wrong key. The key is compared in constant time and never stored in the browser.
+- 🧾 Devices are identified by a random `X-Client-Key`, and only its SHA-256 hash is stored.
+- 🚦 Each client IP is limited to 120 requests a minute by default, with `429` and `Retry-After`.
+- 🧱 A strict Content Security Policy allows scripts only from the planner's own origin.
+- 🌍 Plain HTTP is the default. Use HTTPS (the Docker + Caddy kit) for anything beyond a trusted network.
 
 ## 🗺️ Roadmap
 
-- [ ] Load an official BMTC feed once a source and licence are confirmed
-- [ ] Journeys with one transfer
-- [ ] Calibrate scenario assumptions against real trip data
-- [ ] Build and run the Docker image, and host the planner over HTTPS
-- [ ] Build the Android app and test on real phones
-- [ ] Native-speaker review of the Kannada and Hindi text
-- [ ] Test on Windows, Python 3.11 and 3.12, and PostgreSQL
+- [x] Journeys with up to two changes
+- [x] GTFS fares
+- [x] Offline timetables and installable PWA
+- [x] Telugu translation
+- [ ] Verified official BMTC GTFS feed (needs a reachable source with a clear licence, see [`SOURCES.md`](SOURCES.md))
+- [ ] Namma Metro integration
+- [ ] Live bus positions from a verified GTFS-Realtime feed
+- [ ] Native-speaker review of Kannada, Telugu and Hindi
+- [ ] Android APK build and on-device PWA install test
+- [ ] Production deployment testing
 
-## 📖 Glossary
-
-| Term | Meaning |
-|---|---|
-| **BMTC** | Bangalore Metropolitan Transport Corporation, Bengaluru's city bus operator |
-| **GTFS** | General Transit Feed Specification, the standard zip format for public transport timetables |
-| **Feed** | One GTFS zip file from one publisher |
-| **DULT** | Directorate of Urban Land Transport, Karnataka |
-| **Scenario** | A proposed future bus service that you design, with estimated times |
-| **Dwell time** | How long a bus waits at each stop |
-| **Detour factor** | How much longer the road route is than a straight line |
-| **Audit log** | A permanent record of who changed what, and when |
-| **PWA** | Progressive web app: a website you can install on a phone like an app |
-
-## 📁 What's in this repo
-
-```text
-├── backend/app/        # FastAPI app: API, services, GTFS importer, security, database
-├── dashboard/          # Web dashboard: HTML, CSS, JS, translations, service worker, Leaflet
-├── scripts/            # Command-line tools and Windows launchers
-├── migrations/         # Alembic migrations (baseline creates 16 tables)
-├── tests/              # pytest suite, browser checks and mutation checks
-├── docs/               # Install, API, architecture, deploy, phone access, test results
-├── database/           # Database guide: tables, backups, restore
-├── android/            # Flutter WebView starter (not built)
-├── deploy/Caddyfile    # HTTPS reverse proxy config
-├── docker-compose.yml  # Planner and Caddy stack
-└── assets/             # README graphics
-```
-
-## 📚 Documentation
-
-| Guide | What's inside |
-|---|---|
-| [INSTALL_WINDOWS.md](docs/INSTALL_WINDOWS.md) | Install, run, load data, back up and restore on Windows |
-| [API.md](docs/API.md) | Every endpoint, authentication and examples |
-| [architecture.md](docs/architecture.md) | Components, data flow, security model and its limits |
-| [DEPLOY.md](docs/DEPLOY.md) | Docker and Caddy deployment with HTTPS |
-| [PHONE_ACCESS.md](docs/PHONE_ACCESS.md) | Opening the planner on phones |
-| [TRANSLATION.md](docs/TRANSLATION.md) | Adding or reviewing a language |
-| [PRIVACY.md](docs/PRIVACY.md) | What the planner stores about devices |
-| [TEST_RESULTS.md](docs/TEST_RESULTS.md) | Exactly what was tested, with real output |
-| [SOURCES.md](SOURCES.md) | Data sources reviewed and the rules for official data |
-
-## 🔒 Security in brief
-
-- 🔑 The admin key protects uploads, verification, backups and the audit log. With no key set, those routes return `503`.
-- 📱 Each device sends a key in the `X-Client-Key` header, and only its SHA-256 hash is stored.
-- 🌐 Plain HTTP is the default. Anyone on the network can read the keys, so **use HTTPS** for anything beyond a trusted
-  network.
-
-## 🤝 Built with
-
-- 🐍 **Python**, **FastAPI**, **SQLAlchemy** and **Alembic**
-- 🗺️ **[Leaflet](https://leafletjs.com/)** and **[OpenStreetMap](https://www.openstreetmap.org/)** for maps
-- 📄 **[ReportLab](https://www.reportlab.com/)** for PDF export
-- 🤖 **Claude (Anthropic)** as an AI coding assistant
-
-## 📜 Licence
-
-No licence has been chosen for this project yet, so no licence file is included. The vendored Leaflet 1.9.4 is under
-the BSD 2-Clause licence (see `dashboard/vendor/leaflet/`). Other dependencies have their own licences.
+<details>
+<summary><b>⚠️ Known limits of this build (click to expand)</b></summary>
 
 <br>
 
+- No official BMTC timetable is loaded, and none is shown for 2027 to 2030.
+- No Namma Metro data. Journeys ignore route type.
+- No live bus positions or delays.
+- Only the synthetic demo feed has been tested. No real city feed has been tested.
+- Kannada, Telugu and Hindi text is a first draft. Right-to-left languages have not been tested.
+- The Docker image has not been built, and the Android starter has not been compiled.
+- Nothing has been run on a real phone. Phone layout was checked in headless Chrome only.
+- Fares that depend on origin, destination or zone, and transfer fare rules, are not applied.
+- Scenario estimates use placeholder assumptions (15 km/h average speed, 0.5 min dwell per stop, detour factor 1.3) that need calibrating against real data.
+- Not production ready.
+
+</details>
+
+## 📚 Documentation
+
+| Document | For |
+|---|---|
+| [`docs/INSTALL_WINDOWS.md`](docs/INSTALL_WINDOWS.md) | Installing, running, loading data, backups and restore on Windows |
+| [`docs/PHONE_ACCESS.md`](docs/PHONE_ACCESS.md) | Using the planner from phones |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | Linux server with Docker and Caddy |
+| [`docs/API.md`](docs/API.md) | The full API |
+| [`docs/architecture.md`](docs/architecture.md) | Components, data flow and the security model |
+| [`docs/SECURITY_ASVS.md`](docs/SECURITY_ASVS.md) | OWASP ASVS 5.0.0 and Top 10:2025 mapping |
+| [`docs/TRANSLATION.md`](docs/TRANSLATION.md) | Adding or reviewing a language |
+| [`docs/PRIVACY.md`](docs/PRIVACY.md) | What data is kept, where and for how long |
+| [`docs/TEST_RESULTS.md`](docs/TEST_RESULTS.md) | Every verification run, with real results |
+| [`database/README.md`](database/README.md) | Tables, migrations, backups |
+| [`SOURCES.md`](SOURCES.md) | Data sources and what official data would need |
+
+<details>
+<summary><b>📁 Repository layout</b></summary>
+
+```
+backend/app/        API, journey planner, services, GTFS importer, security, database, service clock
+dashboard/          web dashboard, translations, service worker, manifest, vendored Leaflet
+scripts/            CLI tools, benchmark, restore drill, Windows launchers (.bat)
+migrations/         Alembic: 0001 baseline, 0002 fares
+tests/              pytest suite, browser checks (with vendored axe-core), mutation checks
+docs/               guides, architecture, security mapping, test results
+deploy/             Caddy configuration
+android/            Flutter WebView starter (not built)
+assets/             banner and screenshots
+```
+
+</details>
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. Please:
+
+1. Keep the three classifications apart. Never present unverified or estimated data as official.
+2. Run `python -m ruff check .` and `python -m pytest` before opening a PR.
+3. Native speakers of Kannada, Telugu or Hindi: reviews of `dashboard/i18n.js` are especially valuable. See [`docs/TRANSLATION.md`](docs/TRANSLATION.md).
+
+## 📄 Licence
+
+No licence has been chosen for this project yet, so default copyright applies. Vendored Leaflet 1.9.4 is BSD 2-Clause (`dashboard/vendor/leaflet/`). axe-core 4.14.0, used only by the browser checks, is MPL 2.0 (`tests/browser/vendor/axe-core/`).
+
 <div align="center">
 
-**Built by [Mopuru Upendra Reddy](https://github.com/upendra8690)** 🚌 for a better-planned Bengaluru.
+<br>
 
-⭐ If you found this useful, consider giving it a star.
+**If this project is useful to you, please ⭐ star the repo!**
+
+<sub>Made for Bengaluru commuters, planners and transit enthusiasts. Unofficial, and proud of saying so.</sub>
 
 </div>

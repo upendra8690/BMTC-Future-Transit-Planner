@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .api import router
 from .config import DASHBOARD_DIR, Settings
@@ -21,6 +22,7 @@ LOG = logging.getLogger("bmtc_planner")
 
 DASHBOARD_CSP = (
     "default-src 'self'; "
+    "object-src 'none'; "
     "script-src 'self'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https://*.tile.openstreetmap.org; "
@@ -36,13 +38,27 @@ DASHBOARD_CSP = (
 PERMISSIONS_POLICY = "geolocation=(self), camera=(), microphone=(), payment=(), usb=()"
 
 
+# Responses of the API may be read by other sites' pages only through CORS, and the dashboard only by its own site.
+CORP_API = "same-site"
+CORP_DASHBOARD = "same-origin"
+MIN_ADMIN_KEY_LENGTH = 32
+GZIP_MIN_BYTES = 1024
+
+
 def _apply_security_headers(response: Response, path: str) -> None:
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Permissions-Policy", PERMISSIONS_POLICY)
-    if not path.startswith("/api/"):
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    if path.startswith("/api/"):
+        response.headers.setdefault("Cross-Origin-Resource-Policy", CORP_API)
+    else:
+        response.headers.setdefault("Cross-Origin-Resource-Policy", CORP_DASHBOARD)
         response.headers.setdefault("Content-Security-Policy", DASHBOARD_CSP)
+        # Dashboard files are revalidated on every load, so a new release is never hidden behind an old copy.
+        response.headers.setdefault("Cache-Control", "no-cache")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -63,7 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="BMTC Future Transit Planner API",
-        version="1.0.0",
+        version="3.0.0",
         description=(
             "Verified timetables are shown separately from unverified feeds. "
             "Future scenarios are always labelled ESTIMATED_SCENARIO and are not official announcements."
@@ -76,6 +92,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.db = db
     limiter = RateLimiter(settings.rate_limit_per_minute)
+    if settings.admin_api_key and len(settings.admin_api_key) < MIN_ADMIN_KEY_LENGTH:
+        # A short key still works, so existing deployments keep running. The warning tells the owner to replace it.
+        LOG.warning(
+            "ADMIN_API_KEY is shorter than %d characters. Replace it with a long random value.", MIN_ADMIN_KEY_LENGTH
+        )
+    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES)
 
     if settings.cors_origins:
         app.add_middleware(

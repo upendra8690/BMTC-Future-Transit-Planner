@@ -1,7 +1,9 @@
-"""Timetable queries over imported GTFS data: year coverage, operating days, search, timetables and direct journeys.
+"""Timetable queries over imported GTFS data: coverage, operating days, search, timetables, departures and journeys.
 
 Every query takes one classification, so official and unverified data are never mixed in a result.
 Years are filtered by real feed coverage. Nothing is extended into a year the feed does not cover.
+Times are reported two ways: the GTFS time as written in the feed, and the absolute local time in the feed's own
+time zone. Live bus positions are never implied; every time shown here is a scheduled time.
 """
 
 from __future__ import annotations
@@ -10,14 +12,17 @@ import datetime as dt
 import math
 from collections.abc import Iterable
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
+from .. import clock
 from ..models import (
     CLASS_OFFICIAL,
     STATUS_COMPLETED,
     WEEKDAYS,
+    Agency,
     GtfsImport,
     Route,
     ServiceCalendar,
@@ -27,10 +32,14 @@ from ..models import (
     StopTime,
     Trip,
 )
+from .text import fold
 
 EARTH_RADIUS_KM = 6371.0088
 NO_OFFICIAL_MESSAGE = "No officially verified timetable is available for this future year."
 LIKE_ESCAPE = "\\"
+DEPARTURE_NOTE = "Scheduled times from the timetable. Live bus positions and delays are not available."
+JOURNEY_NOTE = "Only direct trips are listed. Trips that need a transfer are not calculated."
+FEED_STATES = ("NO_FEED", "COVERS_TODAY", "GAP_TODAY", "EXPIRED", "NOT_STARTED")
 
 
 def contains_pattern(text: str) -> str:
@@ -41,6 +50,17 @@ def contains_pattern(text: str) -> str:
     """
     escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
+
+
+def fold_column(session: Session, column: Any) -> Any:
+    """A case- and form-insensitive view of a text column, for comparing with fold() output.
+
+    SQLite uses the bmtc_fold function registered on each connection. Other databases fall back to lower(), which
+    folds ASCII only; PostgreSQL is not tested in this release.
+    """
+    if session.get_bind().dialect.name == "sqlite":
+        return func.bmtc_fold(column)
+    return func.lower(column)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -88,7 +108,29 @@ def eligible_import_ids(
     return list(session.scalars(stmt))
 
 
-def year_coverage(session: Session, classification: str, year: int) -> dict[str, Any]:
+def default_today() -> dt.date:
+    """Today in the default service zone, for callers that do not pass the service's own date."""
+    return clock.service_date(clock.zone(clock.DEFAULT_SERVICE_TIMEZONE), clock.utc_now())
+
+
+def _official_gap(period_year: int, today: dt.date, label: str) -> str:
+    """Required wording for a future year. A past or current period is named instead, so it is never 'future'."""
+    if period_year > today.year:
+        return NO_OFFICIAL_MESSAGE
+    return f"No officially verified timetable is available for {label}."
+
+
+def no_official_year_message(year: int, today: dt.date) -> str:
+    return _official_gap(year, today, str(year))
+
+
+def no_official_date_message(on_date: dt.date, today: dt.date) -> str:
+    return _official_gap(on_date.year, today, f"{on_date:%d %b %Y}")
+
+
+def year_coverage(
+    session: Session, classification: str, year: int, *, today: dt.date | None = None
+) -> dict[str, Any]:
     year_start, year_end = dt.date(year, 1, 1), dt.date(year, 12, 31)
     rows = session.execute(
         select(GtfsImport.id, GtfsImport.feed_start_date, GtfsImport.feed_end_date).where(
@@ -113,7 +155,7 @@ def year_coverage(session: Session, classification: str, year: int) -> dict[str,
 
     if classification == CLASS_OFFICIAL:
         if status == "NONE":
-            message = NO_OFFICIAL_MESSAGE
+            message = no_official_year_message(year, today or default_today())
         elif status == "PARTIAL":
             message = (
                 f"Officially verified timetable data covers {merged[0][0]:%d %b %Y} to {merged[-1][1]:%d %b %Y} "
@@ -137,6 +179,60 @@ def year_coverage(session: Session, classification: str, year: int) -> dict[str,
         "days_in_year": total_days,
         "import_ids": [row[0] for row in rows],
         "message": message,
+    }
+
+
+def import_zone(session: Session, import_id: int) -> ZoneInfo:
+    """The time zone the feed's agency declares. Imports validate it, so the fallback only covers older rows."""
+    name = session.scalar(
+        select(Agency.timezone).where(Agency.import_id == import_id).order_by(Agency.id).limit(1)
+    )
+    return clock.zone_or_none(name) or clock.zone(clock.DEFAULT_SERVICE_TIMEZONE)
+
+
+def service_zone(session: Session, default_name: str) -> tuple[ZoneInfo, str]:
+    """The zone for 'now' across the site: the newest active feed's agency zone, else the configured default."""
+    name = session.scalar(
+        select(Agency.timezone)
+        .join(GtfsImport, GtfsImport.id == Agency.import_id)
+        .where(GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True))
+        .order_by(GtfsImport.id.desc(), Agency.id)
+        .limit(1)
+    )
+    found = clock.zone_or_none(name)
+    if found is not None:
+        return found, "feed"
+    return clock.zone(default_name), "default"
+
+
+def feed_status(session: Session, classification: str, today: dt.date) -> dict[str, Any]:
+    """Whether the feeds of one classification cover the service's current date."""
+    rows = session.execute(
+        select(GtfsImport.feed_start_date, GtfsImport.feed_end_date).where(
+            GtfsImport.classification == classification,
+            GtfsImport.status == STATUS_COMPLETED,
+            GtfsImport.is_active.is_(True),
+        )
+    ).all()
+    if not rows:
+        state = "NO_FEED"
+    elif any(start <= today <= end for start, end in rows):
+        state = "COVERS_TODAY"
+    elif all(end < today for _, end in rows):
+        state = "EXPIRED"
+    elif all(start > today for start, _ in rows):
+        state = "NOT_STARTED"
+    else:
+        state = "GAP_TODAY"
+    earliest = min((start for start, _ in rows), default=None)
+    latest = max((end for _, end in rows), default=None)
+    return {
+        "classification": classification,
+        "state": state,
+        "covers_today": state == "COVERS_TODAY",
+        "imports": len(rows),
+        "earliest_start": earliest.isoformat() if earliest else None,
+        "latest_end": latest.isoformat() if latest else None,
     }
 
 
@@ -189,14 +285,14 @@ def search_routes(
     stmt = select(Route, GtfsImport.feed_start_date, GtfsImport.feed_end_date).join(
         GtfsImport, GtfsImport.id == Route.import_id
     ).where(Route.import_id.in_(import_ids))
-    term = query.strip().lower()
+    term = fold(query)
     if term:
         like = contains_pattern(term)
         stmt = stmt.where(
             or_(
-                func.lower(Route.short_name).like(like, escape=LIKE_ESCAPE),
-                func.lower(Route.long_name).like(like, escape=LIKE_ESCAPE),
-                func.lower(Route.gtfs_route_id) == term,
+                fold_column(session, Route.short_name).like(like, escape=LIKE_ESCAPE),
+                fold_column(session, Route.long_name).like(like, escape=LIKE_ESCAPE),
+                fold_column(session, Route.gtfs_route_id) == term,
             )
         )
     stmt = stmt.order_by(Route.short_name, Route.gtfs_route_id).limit(limit)
@@ -222,12 +318,12 @@ def search_stops(
     import_ids = eligible_import_ids(session, classification, year=year)
     if not import_ids:
         return []
-    term = query.strip().lower()
+    term = fold(query)
     stmt = select(Stop).where(Stop.import_id.in_(import_ids))
     if term:
         stmt = stmt.where(
-            func.lower(Stop.name).like(contains_pattern(term), escape=LIKE_ESCAPE)
-            | (func.lower(Stop.gtfs_stop_id) == term)
+            fold_column(session, Stop.name).like(contains_pattern(term), escape=LIKE_ESCAPE)
+            | (fold_column(session, Stop.gtfs_stop_id) == term)
         )
     stmt = stmt.order_by(Stop.name).limit(limit)
     return [stop_dict(stop, classification) for stop in session.scalars(stmt)]
@@ -364,10 +460,12 @@ def route_timetable(session: Session, route: Route, classification: str, on_date
         "first_departure": None,
         "last_arrival": None,
         "message": None,
+        "message_code": None,
     }
     services = active_service_ids(session, route.import_id, on_date)
     if not services:
         result["message"] = "No service operates on this date according to the feed."
+        result["message_code"] = "NO_SERVICE"
         return result
 
     rows = session.execute(
@@ -399,14 +497,46 @@ def route_timetable(session: Session, route: Route, classification: str, on_date
         stops = trip["stops"]
         trip["first_departure"] = stops[0]["departure"] or stops[0]["arrival"]
         trip["last_arrival"] = stops[-1]["arrival"] or stops[-1]["departure"]
-        trip.pop("_sort", None)
+        trip["first_departure_seconds"] = trip.pop("_sort")
     result["trips"] = ordered
     if ordered:
         result["first_departure"] = ordered[0]["first_departure"]
         result["last_arrival"] = max((t["last_arrival"] for t in ordered if t["last_arrival"]), default=None)
     else:
         result["message"] = "The feed lists no trips for this route on this date."
+        result["message_code"] = "NO_TRIPS"
     return result
+
+
+def _journey_row(
+    *, zone: ZoneInfo, day: dt.date, now: dt.datetime | None, classification: str, values: tuple[Any, ...]
+) -> tuple[dt.datetime, dict[str, Any]] | None:
+    dep, arr, o_seq, d_seq, trip_id, headsign, short, long_name, gtfs_route, o_nm, d_nm = values
+    if arr < dep:  # the feed says the bus arrives before it leaves; never show a negative journey
+        return None
+    instant = clock.departure_instant(zone, day, dep)
+    item = {
+        "classification": classification,
+        "trip_id": trip_id,
+        "route_number": short or gtfs_route,
+        "route_name": long_name,
+        "headsign": headsign,
+        "origin_stop": o_nm,
+        "destination_stop": d_nm,
+        "service_date": day.isoformat(),
+        "departure": fmt_gtfs_time(dep),
+        "arrival": fmt_gtfs_time(arr),
+        "departure_local": clock.local_time(zone, instant).isoformat(timespec="seconds"),
+        "next_day": clock.is_next_day(zone, day, instant),
+        "minutes_from_now": None if now is None else clock.whole_minutes_between(now, instant),
+        "duration_minutes": round((arr - dep) / 60),
+        "intermediate_stops": max(d_seq - o_seq - 1, 0),
+    }
+    return instant, item
+
+
+def _no_data_code(classification: str) -> str:
+    return "NO_OFFICIAL_DATA" if classification == CLASS_OFFICIAL else "NO_UNVERIFIED_DATA"
 
 
 def direct_journeys(
@@ -415,93 +545,188 @@ def direct_journeys(
     *,
     origin_query: str,
     destination_query: str,
-    on_date: dt.date,
+    on_date: dt.date | None = None,
+    not_before: dt.datetime | None = None,
+    today: dt.date | None = None,
     limit: int = 50,
 ) -> dict[str, Any]:
-    """Direct trips (no transfers) that call at a matching origin stop before a matching destination stop."""
-    import_ids = eligible_import_ids(session, classification, on_date=on_date)
+    """Direct trips (no transfers) that call at a matching origin stop before a matching destination stop.
+
+    Give on_date to list one service date, or not_before to list trips leaving at or after that moment ("leave now").
+    Each result is in the feed's own time zone and carries how many minutes away it leaves.
+    """
+    if (on_date is None) == (not_before is None):
+        raise ValueError("Give either on_date or not_before, not both and not neither.")
+    now = clock.as_utc(not_before) if not_before is not None else None
     result: dict[str, Any] = {
         "classification": classification,
-        "date": on_date.isoformat(),
+        "mode": "date" if now is None else "now",
+        "date": on_date.isoformat() if on_date is not None else None,
         "origin_query": origin_query,
         "destination_query": destination_query,
         "journeys": [],
         "message": None,
-        "note": "Only direct trips are listed. Trips that need a transfer are not calculated.",
+        "message_code": None,
+        "note": JOURNEY_NOTE,
+        "skipped_invalid": 0,
     }
-    if not import_ids:
-        result["message"] = (
-            NO_OFFICIAL_MESSAGE if classification == CLASS_OFFICIAL
-            else "No unverified feed covers this date."
-        )
+    origin_key, destination_key = fold(origin_query), fold(destination_query)
+    if not origin_key or not destination_key:
+        result["message"] = "Enter a name for both the origin and the destination."
+        result["message_code"] = "NEED_BOTH_STOPS"
         return result
 
-    if not origin_query.strip() or not destination_query.strip():
-        result["message"] = "Enter a name for both the origin and the destination."
+    if now is None:
+        import_ids = eligible_import_ids(session, classification, on_date=on_date)
+    else:
+        import_ids = eligible_import_ids(session, classification)
+    if not import_ids:
+        if now is None:
+            result["message"] = (
+                no_official_date_message(on_date, today or default_today())
+                if classification == CLASS_OFFICIAL
+                else "No unverified feed covers this date."
+            )
+        else:
+            result["message"] = (
+                "No officially verified timetable is loaded." if classification == CLASS_OFFICIAL
+                else "No unverified feed is loaded."
+            )
+        result["message_code"] = _no_data_code(classification)
         return result
-    origin_term = contains_pattern(origin_query.strip().lower())
-    destination_term = contains_pattern(destination_query.strip().lower())
-    journeys: list[dict[str, Any]] = []
+
+    origin_term = contains_pattern(origin_key)
+    destination_term = contains_pattern(destination_key)
+    found: list[tuple[dt.datetime, dict[str, Any]]] = []
     o_stop = aliased(StopTime)
     d_stop = aliased(StopTime)
     o_name = aliased(Stop)
     d_name = aliased(Stop)
 
     for import_id in import_ids:
-        services = active_service_ids(session, import_id, on_date)
-        if not services:
-            continue
+        zone = import_zone(session, import_id)
+        days = [on_date] if now is None else clock.candidate_service_dates(zone, now)
         origin_ids = list(session.scalars(select(Stop.id).where(
-            Stop.import_id == import_id, func.lower(Stop.name).like(origin_term, escape=LIKE_ESCAPE))))
+            Stop.import_id == import_id, fold_column(session, Stop.name).like(origin_term, escape=LIKE_ESCAPE))))
         destination_ids = list(session.scalars(select(Stop.id).where(
-            Stop.import_id == import_id, func.lower(Stop.name).like(destination_term, escape=LIKE_ESCAPE))))
+            Stop.import_id == import_id, fold_column(session, Stop.name).like(destination_term, escape=LIKE_ESCAPE))))
         if not origin_ids or not destination_ids:
             continue
-        stmt = (
-            select(
-                o_stop.departure_sec, d_stop.arrival_sec, o_stop.sequence, d_stop.sequence,
-                Trip.id, Trip.headsign, Route.short_name, Route.long_name, Route.gtfs_route_id,
-                o_name.name, d_name.name,
+        for day in days:
+            services = active_service_ids(session, import_id, day)
+            if not services:
+                continue
+            stmt = (
+                select(
+                    o_stop.departure_sec, d_stop.arrival_sec, o_stop.sequence, d_stop.sequence,
+                    Trip.id, Trip.headsign, Route.short_name, Route.long_name, Route.gtfs_route_id,
+                    o_name.name, d_name.name,
+                )
+                .select_from(o_stop)
+                .join(d_stop, and_(d_stop.trip_id == o_stop.trip_id, d_stop.sequence > o_stop.sequence))
+                .join(Trip, Trip.id == o_stop.trip_id)
+                .join(Route, Route.id == Trip.route_id)
+                .join(o_name, o_name.id == o_stop.stop_id)
+                .join(d_name, d_name.id == d_stop.stop_id)
+                .where(
+                    o_stop.import_id == import_id,
+                    o_stop.stop_id.in_(origin_ids),
+                    d_stop.stop_id.in_(destination_ids),
+                    Trip.service_id.in_(services),
+                    o_stop.departure_sec.is_not(None),
+                    d_stop.arrival_sec.is_not(None),
+                )
             )
-            .select_from(o_stop)
-            .join(d_stop, and_(d_stop.trip_id == o_stop.trip_id, d_stop.sequence > o_stop.sequence))
-            .join(Trip, Trip.id == o_stop.trip_id)
-            .join(Route, Route.id == Trip.route_id)
-            .join(o_name, o_name.id == o_stop.stop_id)
-            .join(d_name, d_name.id == d_stop.stop_id)
-            .where(
-                o_stop.import_id == import_id,
-                o_stop.stop_id.in_(origin_ids),
-                d_stop.stop_id.in_(destination_ids),
-                Trip.service_id.in_(services),
-                o_stop.departure_sec.is_not(None),
-                d_stop.arrival_sec.is_not(None),
-            )
-            .order_by(o_stop.departure_sec)
-            .limit(limit)
+            if now is not None:
+                stmt = stmt.where(o_stop.departure_sec >= clock.seconds_into_service_day(zone, day, now))
+            stmt = stmt.order_by(o_stop.departure_sec).limit(limit)
+            for values in session.execute(stmt).all():
+                row = _journey_row(zone=zone, day=day, now=now, classification=classification, values=values)
+                if row is None:
+                    result["skipped_invalid"] += 1
+                else:
+                    found.append(row)
+
+    found.sort(key=lambda pair: (pair[0], pair[1]["route_number"] or ""))
+    result["journeys"] = [item for _, item in found[:limit]]
+    if not result["journeys"]:
+        result["message"] = (
+            "No direct service found in this classification's timetable for that date."
+            if now is None
+            else "No direct service is scheduled from this stop pair in the coming service days."
         )
-        journey_rows = session.execute(stmt)
-        for dep, arr, o_seq, d_seq, trip_id, headsign, short, long_name, gtfs_route, o_nm, d_nm in journey_rows:
-            journeys.append(
+        result["message_code"] = "NO_DIRECT_SERVICE"
+    return result
+
+
+def stop_departures(
+    session: Session, stop: Stop, classification: str, *, now: dt.datetime, limit: int = 20
+) -> dict[str, Any]:
+    """The next scheduled departures from one stop, earliest first.
+
+    The search covers the service days from the lookback to the days ahead (see clock.candidate_service_dates).
+    A trip that ends at this stop is not listed, even when the feed gives it a time there.
+    """
+    zone = import_zone(session, stop.import_id)
+    upcoming: list[tuple[dt.datetime, dict[str, Any]]] = []
+    later_stop = aliased(StopTime)
+    # A stop time with no later stop in its trip is the trip's last stop: the bus ends there and does not leave.
+    has_later_stop = (
+        select(later_stop.id)
+        .where(later_stop.trip_id == StopTime.trip_id, later_stop.sequence > StopTime.sequence)
+        .exists()
+    )
+    for day in clock.candidate_service_dates(zone, now):
+        services = active_service_ids(session, stop.import_id, day)
+        if not services:
+            continue
+        rows = session.execute(
+            select(
+                StopTime.departure_sec, Trip.id, Trip.headsign,
+                Route.short_name, Route.long_name, Route.gtfs_route_id,
+            )
+            .join(Trip, Trip.id == StopTime.trip_id)
+            .join(Route, Route.id == Trip.route_id)
+            .where(
+                StopTime.import_id == stop.import_id,
+                StopTime.stop_id == stop.id,
+                StopTime.departure_sec.is_not(None),
+                StopTime.departure_sec >= clock.seconds_into_service_day(zone, day, now),
+                Trip.service_id.in_(services),
+                has_later_stop,
+            )
+            .order_by(StopTime.departure_sec)
+            .limit(limit)
+        ).all()
+        for dep, trip_id, headsign, short, long_name, gtfs_route in rows:
+            instant = clock.departure_instant(zone, day, dep)
+            upcoming.append((
+                instant,
                 {
-                    "classification": classification,
                     "trip_id": trip_id,
                     "route_number": short or gtfs_route,
                     "route_name": long_name,
                     "headsign": headsign,
-                    "origin_stop": o_nm,
-                    "destination_stop": d_nm,
-                    "departure": fmt_gtfs_time(dep),
-                    "arrival": fmt_gtfs_time(arr),
-                    "duration_minutes": round((arr - dep) / 60),
-                    "intermediate_stops": max(d_seq - o_seq - 1, 0),
-                }
-            )
-    journeys.sort(key=lambda j: (j["departure"] or "", j["route_number"] or ""))
-    result["journeys"] = journeys[:limit]
-    if not journeys:
-        result["message"] = "No direct service found in this classification's timetable for that date."
-    return result
+                    "service_date": day.isoformat(),
+                    "gtfs_time": fmt_gtfs_time(dep),
+                    "departure_local": clock.local_time(zone, instant).isoformat(timespec="seconds"),
+                    "next_day": clock.is_next_day(zone, day, instant),
+                    "minutes_from_now": clock.whole_minutes_between(now, instant),
+                    "live": False,
+                },
+            ))
+    upcoming.sort(key=lambda pair: (pair[0], pair[1]["route_number"] or ""))
+    departures = [item for _, item in upcoming[:limit]]
+    return {
+        "classification": classification,
+        "stop": stop_dict(stop, classification),
+        "service_timezone": zone.key,
+        "now_local": clock.local_time(zone, now).isoformat(timespec="seconds"),
+        "departures": departures,
+        "message": None if departures else "No scheduled departures from this stop in the coming service days.",
+        "message_code": None if departures else "NO_DEPARTURES",
+        "note": DEPARTURE_NOTE,
+    }
 
 
 def stop_has_timetable(session: Session, stop: Stop) -> bool:

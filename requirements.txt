@@ -5,3 +5,5 @@ alembic>=1.13,<2.0
 pydantic>=2.7,<3.0
 python-multipart>=0.0.9
 reportlab>=4.0,<6.0
+# Time-zone data for zoneinfo on systems (such as Windows) that do not ship the IANA database.
+tzdata>=2024.1

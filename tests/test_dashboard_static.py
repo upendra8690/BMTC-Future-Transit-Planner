@@ -1,7 +1,7 @@
 """Static checks on the dashboard files. They need no browser, so they also run on a machine without Chrome.
 
 They cover the rules that a browser run would otherwise be the only check for: no inline script and no code built
-from strings, local references that resolve, the three languages agreeing with each other, every translation key
+from strings, local references that resolve, the four languages agreeing with each other, every translation key
 the code asks for existing and being used, and the rules that keep the admin key and API answers out of the
 browser's storage and cache.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 from app.main import DASHBOARD_CSP
 
 DASHBOARD = Path(__file__).resolve().parents[1] / "dashboard"
-LANGUAGES = ("en", "kn", "hi")
+LANGUAGES = ("en", "kn", "te", "hi")
 # Text that is the same in every language on purpose: product name, format strings, abbreviations.
 ALLOWED_UNTRANSLATED = {"app.brand", "clock.line", "common.pdf", "route.col_seq", "admin.col_id"}
 # Keys whose full name is built at run time from a prefix, such as "cls." + classification code.
@@ -68,16 +68,16 @@ def literal_keys_in_code() -> set[str]:
 
 # ---------------------------------------------------------------- languages
 
-def test_the_dictionary_lists_the_three_languages_and_nothing_else():
+def test_the_dictionary_lists_the_four_languages_and_nothing_else():
     source = read("i18n.js")
     codes = re.findall(r'\{\s*code:\s*"([a-z]+)"', source)
     assert sorted(codes) == sorted(LANGUAGES), codes
-    assert "messages: { en: en, kn: kn, hi: hi }" in source
+    assert "messages: { en: en, kn: kn, te: te, hi: hi }" in source
 
 
 def test_every_language_has_exactly_the_same_keys():
     en = set(dictionary("en"))
-    for language in ("kn", "hi"):
+    for language in ("kn", "te", "hi"):
         keys = set(dictionary(language))
         assert keys == en, (
             f"{language}: missing {sorted(en - keys)}, extra {sorted(keys - en)}"
@@ -94,7 +94,7 @@ def test_no_translation_is_empty_and_each_keeps_its_placeholders():
 
 def test_english_is_copied_into_another_language_only_on_purpose():
     en = dictionary("en")
-    for language in ("kn", "hi"):
+    for language in ("kn", "te", "hi"):
         copies = {
             key for key, text in dictionary(language).items()
             if text == en[key] and re.search(r"[A-Za-z]{2,}", text)
@@ -109,6 +109,44 @@ def test_every_translation_key_the_code_asks_for_exists():
     assert not missing, f"keys used by the code but not defined: {missing}"
     for prefix in DYNAMIC_PREFIXES:
         assert any(key.startswith(prefix) for key in en), f"no key starts with {prefix}"
+
+
+# ---------------------------------------------------------------- message codes
+
+BACKEND = Path(__file__).resolve().parents[1] / "backend" / "app"
+# Every code the server can send with an answer. The server source is searched below: a code set there but missing from
+# this list fails the test, and so does a listed code that the source no longer sets.
+SERVER_MESSAGE_CODES = {
+    "DESTINATION_NOT_FOUND", "DESTINATION_NOT_SERVED", "NEED_BOTH_STOPS", "NOT_COVERED", "NO_DEPARTURES",
+    "NO_DIRECT_SERVICE", "NO_OFFICIAL_DATA", "NO_PLANNED_JOURNEY", "NO_SERVICE", "NO_TRIPS", "NO_UNVERIFIED_DATA",
+    "ORIGIN_NOT_FOUND", "ORIGIN_NOT_SERVED", "SAME_STOP",
+}
+
+
+def codes_set_in_server_source() -> set[str]:
+    """The codes the server sets: message_code assignments, _with_message calls and returns."""
+    source = "\n".join(path.read_text(encoding="utf-8") for path in BACKEND.rglob("*.py"))
+    found = set(re.findall(r'message_code"\]\s*=\s*"([A-Z_]+)"', source))
+    found |= set(re.findall(r'"message_code":[^\n]*?"([A-Z_]+)"', source))
+    found |= set(re.findall(r'_with_message\(\s*result,\s*(?:"[^"\n]*"|[A-Za-z_]+),\s*"([A-Z_]+)"', source))
+    for first, second in re.findall(r'return "([A-Z_]+)" if [^\n]*?else "([A-Z_]+)"', source):
+        found |= {first, second}
+    return found
+
+
+def test_the_server_sets_only_the_codes_on_the_list():
+    found = codes_set_in_server_source()
+    assert found == SERVER_MESSAGE_CODES, (
+        f"set in the server but not listed: {sorted(found - SERVER_MESSAGE_CODES)}; "
+        f"listed but not set in the server: {sorted(SERVER_MESSAGE_CODES - found)}"
+    )
+
+
+def test_every_message_code_the_server_can_send_is_translated_in_every_language():
+    for language in LANGUAGES:
+        entries = dictionary(language)
+        missing = sorted(code for code in SERVER_MESSAGE_CODES if f"msgcode.{code}" not in entries)
+        assert not missing, f"{language}: no translation for message codes {missing}"
 
 
 def test_no_translation_is_defined_and_then_left_unused():
@@ -127,6 +165,20 @@ def test_the_indic_fonts_have_their_own_rules():
     assert "Noto Sans Kannada" in css
     assert "html:lang(hi)" in css
     assert "Noto Sans Devanagari" in css
+    assert "html:lang(te)" in css
+    assert "Noto Sans Telugu" in css
+
+
+def test_the_default_font_rule_leaves_out_exactly_the_languages_with_their_own_font():
+    # The default rule is more specific than a plain html:lang(...) rule, so a language it does not leave out
+    # would have its own font stack replaced without any error.
+    css = read("styles.css")
+    own_rules = re.findall(r"html:lang\((\w+)\)\s*\{[^}]*font-family", css)
+    default = re.search(r"html((?::not\(:lang\(\w+\)\))+)\s*\{", css)
+    assert own_rules, "no language has its own font rule"
+    assert default, "the default font rule is missing"
+    left_out = re.findall(r":lang\((\w+)\)", default.group(1))
+    assert sorted(left_out) == sorted(own_rules), f"default rule leaves out {left_out}, own rules are {own_rules}"
 
 
 # ---------------------------------------------------------------- page and scripts
@@ -208,10 +260,24 @@ def test_browser_storage_is_used_only_by_the_storage_wrapper_and_holds_no_admin_
     assert not any("admin" in key.lower() for key in written)
 
 
-def test_the_service_worker_never_stores_or_answers_api_requests():
+def test_the_service_worker_saves_only_public_timetable_answers():
+    """Offline reading uses an allowlist: nothing that depends on the time, the device or administration."""
     sw = read("sw.js")
-    assert re.search(r'if \(request\.method !== "GET"\) return;', sw)
-    assert re.search(r'pathname\.indexOf\("/api/"\)\s*===\s*0\)\s*return;', sw)
+    assert 'if (request.method !== "GET") return;' in sw
+    assert "if (SAVED_API.test(url.pathname)) event.respondWith(savedAnswer(event));" in sw, "the guard is missing"
+    assert 'searchParams.get("q")' in sw, "a search with typed words must never be kept on the device"
+    found = re.search(r"var SAVED_API = (/.*/);", sw)
+    assert found, "SAVED_API allowlist not found in sw.js"
+    allowed = re.compile(found.group(1)[1:-1])
+    for path in ["/api/routes", "/api/routes/R1", "/api/routes/R1/timetable", "/api/stops", "/api/data-sources"]:
+        assert allowed.fullmatch(path), f"should be kept for offline reading: {path}"
+    never_kept = [
+        "/api/clock", "/api/meta", "/api/health", "/api/journey", "/api/plan", "/api/stops/nearby",
+        "/api/stops/S1/departures", "/api/routes/R1/timetable.csv", "/api/years/2027/status",
+        "/api/scenarios", "/api/scenarios/compare", "/api/saved-routes", "/api/preferences", "/api/admin/stats",
+    ]
+    for path in never_kept:
+        assert not allowed.fullmatch(path), f"must never be kept: {path}"
 
 
 def test_every_file_the_service_worker_stores_exists():
@@ -234,3 +300,13 @@ def test_the_manifest_declares_language_direction_standalone_display_and_icons()
     assert {"192x192", "512x512"} <= sizes, sizes
     for icon in data["icons"]:
         assert (DASHBOARD / icon["src"].lstrip("/")).is_file(), icon["src"]
+
+
+def test_verification_is_asked_for_on_the_page_and_never_in_a_browser_dialog():
+    source = read("app.js")
+    assert "window.prompt" not in source
+    assert "prompt(" not in source
+    assert 'id="sourceDecisionForm"' in source
+    assert 'case "sourceDecisionForm":' in source
+    assert 'data-action="decision-cancel"' in source
+

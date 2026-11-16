@@ -8,6 +8,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from .services.text import FOLD_FUNCTION, fold
+
 
 class Base(DeclarativeBase):
     pass
@@ -32,6 +34,8 @@ class Database:
                 cursor.execute("PRAGMA busy_timeout=5000")
                 cursor.execute("PRAGMA journal_mode=WAL")
                 cursor.close()
+                # SQLite's own lower() only changes ASCII letters. This lets search fold Unicode text too.
+                dbapi_connection.create_function(FOLD_FUNCTION, 1, fold, deterministic=True)
         self._sessionmaker = sessionmaker(bind=self.engine, autoflush=False, expire_on_commit=False)
 
     def create_schema(self) -> str:

@@ -3,9 +3,11 @@
 ## Status: not built
 
 - **No APK is included.** The build environment could not download the Flutter SDK, the Android SDK or the Maven and
-  Google repositories. Each of those hosts refused the connection, so no Flutter or Android build was run.
+  Google repositories. None of those hosts could be reached from the build sandbox, so no Flutter or Android build was run.
 - **The starter is not compiled.** Only these static checks were run: `pubspec.yaml` and `analysis_options.yaml` were
-  parsed as YAML, and `lib/main.dart` was parsed with a Dart grammar (tree-sitter) and reported zero syntax errors. Run the same checks with `python android/check_starter.py` after installing `pyyaml`, `tree-sitter` and `tree-sitter-dart`.
+  parsed as YAML, and `lib/main.dart` was parsed with a Dart grammar (tree-sitter) and reported zero syntax errors. Run the same checks with `python android/check_starter.py`. Install the exact versions that passed, in a separate
+  virtual environment, with `python -m pip install -r requirements-android-check.txt`. Those packages are not needed to
+  run the planner.
 - **Nothing was run on a phone or an emulator.** Geolocation, the service worker and the back button inside the
   WebView have not been tested.
 

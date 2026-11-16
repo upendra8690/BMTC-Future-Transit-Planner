@@ -3,3 +3,6 @@ pytest>=8.0
 httpx>=0.27
 ruff>=0.6,<1.0
 bandit>=1.7,<2.0
+hypothesis>=6.100,<7.0
+freezegun>=1.5,<2.0
+pypdf>=5.0,<7.0

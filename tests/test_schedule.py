@@ -75,9 +75,28 @@ def test_partial_coverage_is_reported_exactly(database, settings):
 def test_official_year_without_verified_data_shows_the_required_message(database, settings):
     with database.session() as session:
         load_demo(session, settings)  # unverified data only
-        official = sched.year_coverage(session, CLASS_OFFICIAL, 2029)
+        official = sched.year_coverage(session, CLASS_OFFICIAL, 2029, today=TODAY)
         assert official["status"] == "NONE"
         assert official["message"] == "No officially verified timetable is available for this future year."
+
+
+def test_a_past_or_current_year_without_official_data_is_named_not_called_future(database, settings):
+    with database.session() as session:
+        load_demo(session, settings)
+        current = sched.year_coverage(session, CLASS_OFFICIAL, 2026, today=TODAY)
+        assert current["message"] == "No officially verified timetable is available for 2026."
+        past = sched.year_coverage(session, CLASS_OFFICIAL, 2005, today=TODAY)
+        assert past["message"] == "No officially verified timetable is available for 2005."
+
+
+def test_a_date_without_official_data_is_named_unless_it_is_in_a_future_year(database, settings):
+    with database.session() as session:
+        load_demo(session, settings)
+        gap = sched.direct_journeys(
+            session, CLASS_OFFICIAL,
+            origin_query="Demo Central", destination_query="Demo Junction", on_date=TODAY, today=TODAY,
+        )
+        assert gap["message"] == "No officially verified timetable is available for 15 Nov 2026."
 
 
 # ---------------------------------------------------------------- operating days and timetables
@@ -215,7 +234,7 @@ def test_journeys_never_cross_classifications(database, settings):
         load_demo(session, settings)
         official = sched.direct_journeys(
             session, CLASS_OFFICIAL,
-            origin_query="Demo Central", destination_query="Demo Junction", on_date=MONDAY_2027,
+            origin_query="Demo Central", destination_query="Demo Junction", on_date=MONDAY_2027, today=TODAY,
         )
         assert official["journeys"] == []
         assert official["message"] == sched.NO_OFFICIAL_MESSAGE

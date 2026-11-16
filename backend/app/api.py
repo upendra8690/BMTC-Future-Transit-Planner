@@ -19,24 +19,28 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from .gtfs.importer import classification_for_source, import_feed, import_summary
+from . import clock
+from .gtfs.importer import classification_for_source, fare_counts, import_feed, import_summary
 from .models import (
     CLASS_OFFICIAL,
     CLASS_SCENARIO,
     CLASS_UNVERIFIED,
     DATA_CLASSIFICATIONS,
     STATUS_COMPLETED,
+    WEEKDAY_CODES,
     AuditLog,
     DataSource,
     GtfsImport,
     Route,
     SavedRoute,
     Scenario,
+    Stop,
     UserPreference,
     utcnow,
 )
 from .schemas import PLANNING_YEARS, DataSourceIn, PreferencesIn, SavedRouteIn, ScenarioIn, VerificationIn
 from .security import client_ip, optional_client_hash, require_admin, require_client_key, safe_filename
+from .services import planner
 from .services import scenarios as scn
 from .services import schedule as sched
 from .services.audit import record_audit
@@ -83,10 +87,16 @@ def _route_or_404(db: Session, route_id: int) -> tuple[Route, GtfsImport]:
     return route, imp
 
 
-def _no_timetable_message(classification: str) -> str:
+def _no_timetable_message(classification: str, on_date: dt.date, today: dt.date) -> str:
     if classification == CLASS_OFFICIAL:
-        return sched.NO_OFFICIAL_MESSAGE
+        return sched.no_official_date_message(on_date, today)
     return "No unverified feed covers this date."
+
+
+def _service_today(request: Request, db: Session) -> dt.date:
+    """The service's own calendar date. The timetable means this when it says 'today'."""
+    zone, _source = sched.service_zone(db, request.app.state.settings.service_timezone)
+    return clock.service_date(zone, clock.utc_now())
 
 
 def _public_source(db: Session, source: DataSource) -> dict[str, Any]:
@@ -126,12 +136,50 @@ def health(db: DbSession) -> dict[str, str]:
     return {"status": "ok", "time_utc": utcnow().isoformat() + "Z"}
 
 
+@router.get("/clock", tags=["system"])
+def service_clock(request: Request, db: DbSession) -> dict[str, Any]:
+    """The service area's local time, its service date, and whether each kind of feed covers that date.
+
+    The time zone comes from the imported feed's agency, so the same code serves any GTFS feed in the world.
+    """
+    settings = request.app.state.settings
+    now = clock.utc_now()
+    zone, source = sched.service_zone(db, settings.service_timezone)
+    local = clock.local_time(zone, now)
+    today = local.date()
+    return {
+        "now_utc": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "service_timezone": zone.key,
+        "timezone_source": source,
+        "now_local": local.isoformat(timespec="seconds"),
+        "service_date": today.isoformat(),
+        "weekday": WEEKDAY_CODES[today.weekday()],
+        "feeds": [sched.feed_status(db, cls, today) for cls in DATA_CLASSIFICATIONS],
+        "note": "Scheduled times only. Live bus positions and delays are not available.",
+    }
+
+
 @router.get("/meta", tags=["system"])
 def meta(request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
     return {
         "name": "BMTC Future Transit Planner",
-        "version": "1.0.0",
+        "version": "3.0.0",
+        "unofficial": True,
+        "affiliation": (
+            "Not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro or any transport operator."
+        ),
+        "live_positions_available": False,
+        "live_positions_note": (
+            "No verified real-time feed is connected, so no live bus or train positions are shown. "
+            "Every time is scheduled."
+        ),
+        "journey_assumptions": {
+            "min_change_minutes": settings.min_transfer_minutes,
+            "max_walk_m": settings.max_transfer_walk_m,
+            "walk_speed_kmph": settings.walk_speed_kmph,
+            "max_changes": planner.MAX_CHANGES_LIMIT,
+        },
         "planning_years": list(PLANNING_YEARS),
         "classifications": {
             CLASS_OFFICIAL: "Data confirmed through an authoritative source and verified by an administrator.",
@@ -153,6 +201,7 @@ def meta(request: Request) -> dict[str, Any]:
 @router.get("/years/compare", tags=["years"])
 def compare_years(request: Request, db: DbSession) -> dict[str, Any]:
     owner = optional_client_hash(request)
+    today = _service_today(request, db)
     years = []
     for year in PLANNING_YEARS:
         own = 0
@@ -166,8 +215,8 @@ def compare_years(request: Request, db: DbSession) -> dict[str, Any]:
         years.append(
             {
                 "year": year,
-                "official": sched.year_coverage(db, CLASS_OFFICIAL, year),
-                "unverified": sched.year_coverage(db, CLASS_UNVERIFIED, year),
+                "official": sched.year_coverage(db, CLASS_OFFICIAL, year, today=today),
+                "unverified": sched.year_coverage(db, CLASS_UNVERIFIED, year, today=today),
                 "your_scenarios": own,
             }
         )
@@ -175,13 +224,14 @@ def compare_years(request: Request, db: DbSession) -> dict[str, Any]:
 
 
 @router.get("/years/{year}/status", tags=["years"])
-def year_status(year: Annotated[int, ApiPath(ge=2000, le=2100)], db: DbSession) -> dict[str, Any]:
+def year_status(year: Annotated[int, ApiPath(ge=2000, le=2100)], request: Request, db: DbSession) -> dict[str, Any]:
+    today = _service_today(request, db)
     return {
         "year": year,
         "is_planning_year": year in PLANNING_YEARS,
-        "is_future": year > dt.date.today().year,
-        "official": sched.year_coverage(db, CLASS_OFFICIAL, year),
-        "unverified": sched.year_coverage(db, CLASS_UNVERIFIED, year),
+        "is_future": year > today.year,
+        "official": sched.year_coverage(db, CLASS_OFFICIAL, year, today=today),
+        "unverified": sched.year_coverage(db, CLASS_UNVERIFIED, year, today=today),
     }
 
 
@@ -189,6 +239,7 @@ def year_status(year: Annotated[int, ApiPath(ge=2000, le=2100)], db: DbSession) 
 
 @router.get("/routes", tags=["timetables"])
 def search_routes(
+    request: Request,
     db: DbSession,
     classification: str = Query(CLASS_OFFICIAL),
     year: YearQuery = None,
@@ -199,7 +250,7 @@ def search_routes(
     return {
         "classification": cls,
         "year": year,
-        "coverage": sched.year_coverage(db, cls, year) if year else None,
+        "coverage": sched.year_coverage(db, cls, year, today=_service_today(request, db)) if year else None,
         "results": sched.search_routes(db, cls, year=year, query=q, limit=limit),
     }
 
@@ -211,7 +262,9 @@ def route_detail(route_id: int, db: DbSession) -> dict[str, Any]:
 
 
 @router.get("/routes/{route_id}/timetable", tags=["timetables"])
-def route_timetable(route_id: int, db: DbSession, on_date: dt.date = Query(..., alias="date")) -> dict[str, Any]:
+def route_timetable(
+    route_id: int, request: Request, db: DbSession, on_date: dt.date = Query(..., alias="date")
+) -> dict[str, Any]:
     route, imp = _route_or_404(db, route_id)
     result = sched.route_timetable(db, route, imp.classification, on_date)
     covered = bool(imp.feed_start_date and imp.feed_end_date and imp.feed_start_date <= on_date <= imp.feed_end_date)
@@ -219,17 +272,23 @@ def route_timetable(route_id: int, db: DbSession, on_date: dt.date = Query(..., 
     result["coverage_from"] = imp.feed_start_date.isoformat() if imp.feed_start_date else None
     result["coverage_to"] = imp.feed_end_date.isoformat() if imp.feed_end_date else None
     if not covered:
-        result["message"] = _no_timetable_message(imp.classification)
+        result["message"] = _no_timetable_message(imp.classification, on_date, _service_today(request, db))
+        result["message_code"] = "NOT_COVERED"
         result["trips"] = []
     return result
 
 
 @router.get("/routes/{route_id}/timetable.csv", tags=["timetables"])
-def route_timetable_csv(route_id: int, db: DbSession, on_date: dt.date = Query(..., alias="date")) -> Response:
+def route_timetable_csv(
+    route_id: int, request: Request, db: DbSession, on_date: dt.date = Query(..., alias="date")
+) -> Response:
     route, imp = _route_or_404(db, route_id)
     timetable = sched.route_timetable(db, route, imp.classification, on_date)
     if not (imp.feed_start_date and imp.feed_end_date and imp.feed_start_date <= on_date <= imp.feed_end_date):
-        raise HTTPException(status_code=404, detail=_no_timetable_message(imp.classification))
+        raise HTTPException(
+            status_code=404,
+            detail=_no_timetable_message(imp.classification, on_date, _service_today(request, db)),
+        )
     body = timetable_csv({"short_name": route.short_name, "gtfs_route_id": route.gtfs_route_id}, timetable)
     filename = f"timetable_{route.short_name or route.gtfs_route_id}_{on_date.isoformat()}_{imp.classification}.csv"
     return Response(
@@ -270,17 +329,76 @@ def nearby(
     }
 
 
+@router.get("/stops/{stop_id}/departures", tags=["timetables"])
+def stop_departures(
+    stop_id: int,
+    db: DbSession,
+    classification: str = Query(CLASS_OFFICIAL),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """The next scheduled departures from one stop, from the current moment in the feed's time zone."""
+    cls = _classification(classification)
+    stop = db.get(Stop, stop_id)
+    imp = _active_import(db, stop.import_id) if stop is not None else None
+    if stop is None or imp is None or imp.classification != cls:
+        raise HTTPException(status_code=404, detail="Stop not found in this classification's data.")
+    return sched.stop_departures(db, stop, cls, now=clock.utc_now(), limit=limit)
+
+
 @router.get("/journey", tags=["timetables"])
 def journey(
+    request: Request,
     db: DbSession,
     origin: str = Query(..., min_length=2, max_length=80),
     destination: str = Query(..., min_length=2, max_length=80),
-    on_date: dt.date = Query(..., alias="date"),
+    on_date: dt.date | None = Query(None, alias="date", description="Leave out to list trips leaving from now."),
     classification: str = Query(CLASS_OFFICIAL),
 ) -> dict[str, Any]:
     cls = _classification(classification)
-    return sched.direct_journeys(
-        db, cls, origin_query=origin, destination_query=destination, on_date=on_date
+    today = _service_today(request, db)
+    if on_date is None:
+        result = sched.direct_journeys(
+            db, cls, origin_query=origin, destination_query=destination, not_before=clock.utc_now(), today=today
+        )
+    else:
+        result = sched.direct_journeys(
+            db, cls, origin_query=origin, destination_query=destination, on_date=on_date, today=today
+        )
+    zone, source = sched.service_zone(db, request.app.state.settings.service_timezone)
+    result["service_timezone"] = zone.key
+    result["timezone_source"] = source
+    return result
+
+
+@router.get("/plan", tags=["timetables"])
+def plan_journey(
+    request: Request,
+    db: DbSession,
+    origin: str = Query(..., min_length=2, max_length=80),
+    destination: str = Query(..., min_length=2, max_length=80),
+    on_date: dt.date | None = Query(None, alias="date", description="Leave out to plan the next three hours from now."),
+    classification: str = Query(CLASS_OFFICIAL),
+    max_changes: int = Query(planner.DEFAULT_MAX_CHANGES, ge=0, le=planner.MAX_CHANGES_LIMIT),
+    limit: int = Query(5, ge=1, le=10),
+) -> dict[str, Any]:
+    """Journey options with up to two changes, across every feed of one classification.
+
+    Each option lists its legs in order: rides with their route, stops and times, and walks between stops. Every ride
+    names the feed it comes from. Times are scheduled times; live positions are never shown.
+    """
+    cls = _classification(classification)
+    settings = request.app.state.settings
+    return planner.plan_journeys(
+        db,
+        cls,
+        origin_query=origin,
+        destination_query=destination,
+        default_zone=settings.service_timezone,
+        plan=planner.PlanSettings.from_settings(settings),
+        max_changes=max_changes,
+        limit=limit,
+        on_date=on_date,
+        now=None if on_date is not None else clock.utc_now(),
     )
 
 
@@ -360,7 +478,7 @@ def export_compare_pdf(request: Request, db: DbSession, a: int = Query(...), b: 
     comparison = scn.compare_payloads(
         p_a, scn.settings_estimate(p_a, settings), p_b, scn.settings_estimate(p_b, settings)
     )
-    return Response(content=comparison_pdf(comparison), media_type="application/pdf",
+    return Response(content=comparison_pdf(comparison, font_path=settings.pdf_font_path), media_type="application/pdf",
                     headers={"Content-Disposition": 'attachment; filename="estimated_scenario_comparison.pdf"'})
 
 
@@ -399,7 +517,8 @@ def export_scenario_pdf(scenario_id: int, request: Request, db: DbSession) -> Re
     owner = require_client_key(request)
     payload = scn.scenario_payload(scn.get_owned(db, scenario_id, owner))
     estimate = scn.settings_estimate(payload, request.app.state.settings)
-    return Response(content=scenario_pdf(payload, estimate), media_type="application/pdf",
+    return Response(content=scenario_pdf(payload, estimate, font_path=request.app.state.settings.pdf_font_path),
+                    media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="estimated_scenario_{scenario_id}.pdf"'})
 
 
@@ -471,11 +590,21 @@ def get_preferences(request: Request, db: DbSession) -> dict[str, Any]:
     return {"values": {r.key: r.value for r in rows}}
 
 
+MAX_PREFERENCES_PER_DEVICE = 20
+
+
 @router.put("/preferences", tags=["user"])
 def put_preferences(data: PreferencesIn, request: Request, db: DbSession) -> dict[str, Any]:
+    """Add or change the given preferences. The device's other preferences are kept."""
     owner = require_client_key(request)
+    stored = {row.key: row for row in db.scalars(select(UserPreference).where(UserPreference.client_hash == owner))}
+    new_keys = [key for key in data.values if key not in stored]
+    if len(stored) + len(new_keys) > MAX_PREFERENCES_PER_DEVICE:
+        raise HTTPException(
+            status_code=422, detail=f"A device can keep at most {MAX_PREFERENCES_PER_DEVICE} preferences."
+        )
     for key, value in data.values.items():
-        row = db.scalar(select(UserPreference).where(UserPreference.client_hash == owner, UserPreference.key == key))
+        row = stored.get(key)
         if row is None:
             db.add(UserPreference(client_hash=owner, key=key, value=value))
         else:
@@ -527,10 +656,23 @@ def admin_verify_source(source_id: int, data: VerificationIn, request: Request, 
 def admin_list_imports(request: Request, db: DbSession) -> dict[str, Any]:
     require_admin(request)
     imports = db.scalars(select(GtfsImport).order_by(GtfsImport.id.desc()).limit(200)).all()
-    return {"imports": [import_summary(i) for i in imports]}
+    counts = fare_counts(db, [i.id for i in imports])
+    return {"imports": [import_summary(i, counts.get(i.id, 0)) for i in imports]}
 
 
-@router.post("/admin/imports", tags=["admin"])
+@router.post(
+    "/admin/imports",
+    status_code=201,
+    tags=["admin"],
+    responses={
+        422: {
+            "description": (
+                "The feed was checked and rejected, and nothing was stored. The body holds the import summary under "
+                "'import'."
+            )
+        }
+    },
+)
 async def admin_upload_import(
     request: Request,
     file: UploadFile = File(...),
@@ -553,7 +695,8 @@ async def admin_upload_import(
             if source is None:
                 raise HTTPException(status_code=404, detail="Data source not found.")
             imp = import_feed(session, data, filename=name, source=source, settings=settings, actor="admin", ip=ip)
-            return (201 if imp.status == STATUS_COMPLETED else 422), import_summary(imp)
+            fares = fare_counts(session, [imp.id]).get(imp.id, 0)
+            return (201 if imp.status == STATUS_COMPLETED else 422), import_summary(imp, fares)
         finally:
             session.close()
 

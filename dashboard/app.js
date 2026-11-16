@@ -1,562 +1,1327 @@
-/* BMTC Future Transit Planner - web dashboard.
- * No inline scripts or handlers (the CSP forbids them) and no third-party code from a CDN.
- * Official, unverified and estimated data are always rendered in separate, labelled places.
+/* BMTC Future Transit Planner - web dashboard (v3).
+ * No inline scripts or handlers (the CSP forbids them) and no code from a CDN.
+ * "Now" and "today" come from the server clock in the feed's time zone, never from this device alone.
+ * Official, unverified and estimated data are always shown in separate, labelled places.
+ * Syntax is kept to ES2017 (no optional chaining, no object spread, no nullish operator).
  */
 (function () {
   "use strict";
 
-  const PLANNING_YEARS = [2027, 2028, 2029, 2030];
-  const DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
-  const DAY_LABELS = { MON: "Mon", TUE: "Tue", WED: "Wed", THU: "Thu", FRI: "Fri", SAT: "Sat", SUN: "Sun" };
-  const CLS = {
-    OFFICIAL_VERIFIED: { label: "Official verified", css: "official" },
-    UNVERIFIED_FEED: { label: "Unverified feed", css: "unverified" },
-    ESTIMATED_SCENARIO: { label: "Estimated scenario", css: "scenario" },
-  };
-  const SCENARIO_NOTICE =
-    "ESTIMATED SCENARIO: an illustrative proposal only. It is not an official BMTC announcement, and no timetable has been confirmed.";
-  const MAX_TRIPS_SHOWN = 200;
-  const MAX_SCENARIO_STOPS = 30;
+  var PLANNING_YEARS = [2027, 2028, 2029, 2030];
+  var DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+  var FALLBACK_LANG = "en";
+  var MAX_TRIPS_SHOWN = 200;
+  var MAX_SCENARIO_STOPS = 30;
+  var REQUEST_TIMEOUT_MS = 15000;
+  var DOWNLOAD_TIMEOUT_MS = 60000;
+  var CLOCK_TIMEOUT_MS = 8000;
+  var CLOCK_TICK_MS = 30000;
+  var CLOCK_RESYNC_MS = 10 * 60 * 1000;
+  var IMPORT_TIMEOUT_MS = 5 * 60 * 1000;
+  var BACKUP_TIMEOUT_MS = 2 * 60 * 1000;
+  var PREFIX = "bmtc.";
+  var CSS_FOR = { OFFICIAL_VERIFIED: "official", UNVERIFIED_FEED: "unverified", ESTIMATED_SCENARIO: "scenario" };
 
-  const state = {
-    year: Number(localStorage.getItem("bmtc.year")) || 2027,
-    classification: localStorage.getItem("bmtc.classification") === "UNVERIFIED_FEED" ? "UNVERIFIED_FEED" : "OFFICIAL_VERIFIED",
-    adminKey: sessionStorage.getItem("bmtc.adminKey") || "",
+  // storage-begin
+  // Browser storage can be blocked (private windows, embedded frames). Reads then return null and writes are skipped.
+  var storage = (function () {
+    function store() {
+      try {
+        return window.localStorage || null;
+      } catch (_) {
+        return null;
+      }
+    }
+    return {
+      get: function (key) {
+        var area = store();
+        try {
+          return area ? area.getItem(key) : null;
+        } catch (_) {
+          return null;
+        }
+      },
+      set: function (key, value) {
+        var area = store();
+        try {
+          if (area) area.setItem(key, value);
+        } catch (_) {
+          /* full or blocked: the app keeps working without saving */
+        }
+      },
+    };
+  })();
+  // storage-end
+
+  var state = {
+    lang: FALLBACK_LANG,
+    year: 2027,
+    classification: "OFFICIAL_VERIFIED",
+    adminKey: "",
+    clock: null,
+    clockFailed: false,
+    clockOffsetMs: 0,
+    clockSyncedAt: 0,
+    lastServiceDate: null,
+    viewToken: 0,
+    searchToken: 0,
+    yearToken: 0,
+    timetableToken: 0,
     map: null,
+    markers: null,
     scenarioEditId: null,
     scenarioStops: [],
-    currentRoute: null,
+    route: null,
   };
 
-  const view = document.getElementById("view");
-  const yearStatus = document.getElementById("yearStatus");
-  const yearSelect = document.getElementById("yearSelect");
-  const sidebar = document.getElementById("sidebar");
-  const navToggle = document.getElementById("navToggle");
-  const toastEl = document.getElementById("toast");
-
-  // ------------------------------------------------------------------ helpers
-  const esc = (value) =>
-    String(value === null || value === undefined ? "" : value).replace(/[&<>"']/g, (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
-    );
-
-  const badge = (classification) => {
-    const info = CLS[classification] || { label: classification, css: "neutral" };
-    return `<span class="badge ${info.css}">${esc(info.label)}</span>`;
+  var el = {
+    view: document.getElementById("view"),
+    yearStatus: document.getElementById("yearStatus"),
+    yearSelect: document.getElementById("yearSelect"),
+    langSelect: document.getElementById("langSelect"),
+    clock: document.getElementById("serviceClock"),
+    offline: document.getElementById("offlineBanner"),
+    saved: document.getElementById("savedBanner"),
+    savedText: document.getElementById("savedText"),
+    sidebar: document.getElementById("sidebar"),
+    navToggle: document.getElementById("navToggle"),
+    toast: document.getElementById("toast"),
   };
 
-  const orDash = (value, suffix) => (value === null || value === undefined || value === "" ? "n/a" : `${value}${suffix || ""}`);
+  var catalogue = window.BMTC_I18N || { languages: [{ code: FALLBACK_LANG, name: "English" }], messages: {} };
 
-  function localIsoDate(date) {
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  // ---------------------------------------------------------------- text and language
+  function esc(value) {
+    return String(value === null || value === undefined ? "" : value).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
   }
 
-  function defaultDate() {
-    return state.year === new Date().getFullYear() ? localIsoDate(new Date()) : `${state.year}-01-01`;
+  function isLanguage(code) {
+    return catalogue.languages.some(function (item) {
+      return item.code === code;
+    });
   }
 
-  function toast(message) {
-    toastEl.textContent = message;
-    toastEl.hidden = false;
-    clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => { toastEl.hidden = true; }, 4500);
+  function lookup(key) {
+    var table = catalogue.messages[state.lang] || {};
+    var base = catalogue.messages[FALLBACK_LANG] || {};
+    if (Object.prototype.hasOwnProperty.call(table, key)) return table[key];
+    if (Object.prototype.hasOwnProperty.call(base, key)) return base[key];
+    return null;
   }
 
-  function clientKey() {
-    let key = localStorage.getItem("bmtc.clientKey");
-    if (!key || key.length < 16) {
-      const bytes = new Uint8Array(24);
-      crypto.getRandomValues(bytes);
-      key = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      localStorage.setItem("bmtc.clientKey", key);
+  function hasMessage(key) {
+    return lookup(key) !== null;
+  }
+
+  // Returns plain text. Callers must pass it through esc() before it goes into HTML.
+  function t(key, values) {
+    var text = lookup(key);
+    if (text === null) return key;
+    if (!values) return text;
+    return text.replace(/\{(\w+)\}/g, function (match, name) {
+      return Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match;
+    });
+  }
+
+  function localeTag() {
+    return state.lang === FALLBACK_LANG ? "en-IN" : state.lang;
+  }
+
+  function pickInitialLanguage() {
+    var saved = storage.get(PREFIX + "lang");
+    if (saved && isLanguage(saved)) return saved;
+    var wanted = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || FALLBACK_LANG];
+    for (var i = 0; i < wanted.length; i += 1) {
+      var code = String(wanted[i] || "").toLowerCase().split("-")[0];
+      if (isLanguage(code)) return code;
     }
+    return FALLBACK_LANG;
+  }
+
+  // ---------------------------------------------------------------- time (service zone, server clock)
+  function zoneName() {
+    if (state.clock && state.clock.service_timezone) return state.clock.service_timezone;
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    } catch (_) {
+      return "UTC";
+    }
+  }
+
+  function formatter(options) {
+    try {
+      return new Intl.DateTimeFormat(localeTag(), Object.assign({ timeZone: zoneName() }, options));
+    } catch (_) {
+      return new Intl.DateTimeFormat(localeTag(), options);
+    }
+  }
+
+  // Calendar parts of an instant in the service zone (always Latin digits, 24-hour clock).
+  function partsAt(ms) {
+    var options = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" };
+    var fmt;
+    try {
+      fmt = new Intl.DateTimeFormat("en-US", Object.assign({ timeZone: zoneName() }, options));
+    } catch (_) {
+      fmt = new Intl.DateTimeFormat("en-US", options);
+    }
+    var out = {};
+    fmt.formatToParts(new Date(ms)).forEach(function (part) {
+      out[part.type] = part.value;
+    });
+    return out;
+  }
+
+  function dateKeyAt(ms) {
+    var p = partsAt(ms);
+    return p.year + "-" + p.month + "-" + p.day;
+  }
+
+  // The server's time plus the offset measured when the clock was last read. Falls back to this device's time.
+  function serverNowMs() {
+    return Date.now() + (state.clock ? state.clockOffsetMs : 0);
+  }
+
+  function todayKey() {
+    return dateKeyAt(serverNowMs());
+  }
+
+  function isIsoDate(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+  }
+
+  function addDays(isoDate, days) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+    if (!m) return isoDate;
+    return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days)).toISOString().slice(0, 10);
+  }
+
+  function formatCalendarDate(isoDate) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ""));
+    if (!m) return t("common.na");
+    var date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    return new Intl.DateTimeFormat(localeTag(), { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(date);
+  }
+
+  // A clock time (for example 08:12) in the service zone, from an ISO string that carries its own offset.
+  function formatClockTime(iso) {
+    var ms = Date.parse(iso);
+    if (isNaN(ms)) return t("common.na");
+    return formatter({ hour: "2-digit", minute: "2-digit" }).format(new Date(ms));
+  }
+
+  function dayLabel(iso, today) {
+    var ms = Date.parse(iso);
+    if (isNaN(ms) || !today) return t("common.na");
+    var key = dateKeyAt(ms);
+    if (key === today) return t("time.today");
+    if (key === addDays(today, 1)) return t("time.tomorrow");
+    return formatCalendarDate(key);
+  }
+
+  // Scheduled GTFS times such as 08:12:00 or 25:10:00 (past midnight) as seconds from the service day's start.
+  function gtfsSeconds(value) {
+    var m = /^(\d+):(\d{2}):(\d{2})$/.exec(String(value || ""));
+    return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
+  }
+
+  function nowSecondsInZone() {
+    var p = partsAt(serverNowMs());
+    return Number(p.hour) * 3600 + Number(p.minute) * 60 + Number(p.second);
+  }
+
+  function fmtNum(value) {
+    if (value === null || value === undefined || value === "" || !isFinite(Number(value))) return t("common.na");
+    return new Intl.NumberFormat(localeTag()).format(Number(value));
+  }
+
+  function quantity(value, unitKey) {
+    if (value === null || value === undefined || value === "") return esc(t("common.na"));
+    return esc(t(unitKey, { n: fmtNum(value) }));
+  }
+
+  function naOr(value) {
+    return value === null || value === undefined || value === "" ? esc(t("common.na")) : esc(value);
+  }
+
+  function classLabel(code) {
+    return CSS_FOR[code] ? t("cls." + code) : String(code || "");
+  }
+
+  function badge(classification) {
+    var css = CSS_FOR[classification] || "neutral";
+    return '<span class="badge ' + css + '">' + esc(classLabel(classification)) + "</span>";
+  }
+
+  // Only http and https links are rendered as links. Anything else (javascript:, data:) is shown as text.
+  function safeHref(url) {
+    if (!url) return null;
+    try {
+      var parsed = new URL(String(url), window.location.href);
+      return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------- network
+  // Also kept in memory, so one page session keeps one device key even where browser storage is blocked.
+  var memoryClientKey = "";
+  function clientKey() {
+    var key = storage.get(PREFIX + "clientKey") || memoryClientKey;
+    if (!key || key.length < 16) {
+      if (!window.crypto || !window.crypto.getRandomValues) {
+        throw new Error(t("msg.unexpected"));
+      }
+      var bytes = new Uint8Array(24);
+      window.crypto.getRandomValues(bytes);
+      key = btoa(String.fromCharCode.apply(null, Array.prototype.slice.call(bytes)))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+      storage.set(PREFIX + "clientKey", key);
+    }
+    memoryClientKey = key;
     return key;
   }
 
+  function startTimer(ms) {
+    var controller = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = setTimeout(function () {
+      if (controller) controller.abort();
+    }, ms);
+    return {
+      signal: controller ? controller.signal : undefined,
+      stop: function () {
+        clearTimeout(timer);
+      },
+    };
+  }
+
+  async function send(url, init, signal) {
+    var options = Object.assign({ cache: "no-store", credentials: "same-origin" }, init);
+    if (signal) options.signal = signal;
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      throw new Error(err && err.name === "AbortError" ? t("msg.timeout") : t("msg.network"));
+    }
+  }
+
+  async function readJson(response) {
+    try {
+      return await response.json();
+    } catch (err) {
+      if (err && err.name === "AbortError") throw new Error(t("msg.timeout"));
+      return null;
+    }
+  }
+
   function messageFrom(data, status) {
-    const detail = data && data.detail;
+    var detail = data && data.detail;
     if (typeof detail === "string") return detail;
     if (Array.isArray(detail)) {
       return detail
-        .map((item) => (item.loc && item.loc.length > 1 ? `${item.loc.slice(1).join(".")}: ` : "") + item.msg)
+        .map(function (item) {
+          var where = item.loc && item.loc.length > 1 ? item.loc.slice(1).join(".") + ": " : "";
+          return where + (item.msg || "");
+        })
         .join("; ");
     }
     if (detail && typeof detail === "object") {
-      return detail.message || (detail.errors || []).join("; ") || "The request failed.";
+      if (detail.message) return detail.message;
+      if (Array.isArray(detail.errors) && detail.errors.length) return detail.errors.join("; ");
     }
-    return `The request failed (${status}).`;
+    return t("msg.failed", { status: status });
   }
 
-  async function api(path, options = {}) {
-    const { method = "GET", json, form, admin = false } = options;
-    const headers = { "X-Client-Key": clientKey() };
-    if (admin) {
-      if (!state.adminKey) throw new Error("Sign in with the admin key first.");
+  function httpError(response, data) {
+    var error = new Error(messageFrom(data, response.status));
+    error.status = response.status;
+    error.data = data;
+    if (response.status === 429) error.message = t("msg.rate_limited");
+    return error;
+  }
+
+  async function api(path, options) {
+    var opts = options || {};
+    var headers = { Accept: "application/json", "X-Client-Key": clientKey() };
+    var body;
+    if (opts.admin) {
+      if (!state.adminKey) throw new Error(t("admin.key_needed"));
       headers["X-Admin-Key"] = state.adminKey;
     }
-    let body;
-    if (form) {
-      body = form;
-    } else if (json !== undefined) {
+    if (opts.form) {
+      body = opts.form;
+    } else if (opts.json !== undefined) {
       headers["Content-Type"] = "application/json";
-      body = JSON.stringify(json);
+      body = JSON.stringify(opts.json);
     }
-    const response = await fetch(path, { method, headers, body });
-    if (response.status === 204) return null;
-    let data = null;
-    try { data = await response.json(); } catch (_) { data = null; }
-    if (!response.ok) {
-      const error = new Error(messageFrom(data, response.status));
-      error.status = response.status;
-      error.data = data;
-      if (response.status === 401 && admin) {
-        state.adminKey = "";
-        sessionStorage.removeItem("bmtc.adminKey");
+    var timer = startTimer(opts.timeout || REQUEST_TIMEOUT_MS);
+    try {
+      var response = await send(path, { method: opts.method || "GET", headers: headers, body: body }, timer.signal);
+      noteSource(response);
+      if (response.status === 204) return null;
+      var data = await readJson(response);
+      if (!response.ok) {
+        if (response.status === 401 && opts.admin) {
+          state.adminKey = "";
+          var rejected = httpError(response, data);
+          rejected.message = t("admin.key_rejected");
+          throw rejected;
+        }
+        throw httpError(response, data);
       }
-      throw error;
+      return data;
+    } finally {
+      timer.stop();
     }
-    return data;
   }
 
   async function download(path, fallbackName) {
-    const response = await fetch(path, { headers: { "X-Client-Key": clientKey() } });
-    if (!response.ok) {
-      let data = null;
-      try { data = await response.json(); } catch (_) { data = null; }
-      throw new Error(messageFrom(data, response.status));
+    var timer = startTimer(DOWNLOAD_TIMEOUT_MS);
+    try {
+      var response = await send(path, { headers: { "X-Client-Key": clientKey() } }, timer.signal);
+      if (!response.ok) throw httpError(response, await readJson(response));
+      var blob = await response.blob();
+      var match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement("a");
+      link.href = url;
+      link.download = match ? match[1] : fallbackName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () {
+        URL.revokeObjectURL(url);
+      }, 1500);
+    } catch (err) {
+      if (err && err.name === "AbortError") throw new Error(t("msg.timeout"));
+      throw err;
+    } finally {
+      timer.stop();
     }
-    const blob = await response.blob();
-    const match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = match ? match[1] : fallbackName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
-  const setView = (html) => { view.innerHTML = html; };
-  const loading = (text) => `<section class="card" aria-busy="true"><p class="muted">${esc(text || "Loading...")}</p></section>`;
-  const errorCard = (err) =>
-    `<section class="card"><div class="banner error" role="alert"><strong>Something went wrong</strong>${esc(err.message || err)}</div></section>`;
+  // ---------------------------------------------------------------- server clock
+  function renderClockBar() {
+    if (!el.clock) return;
+    if (state.clockFailed) {
+      el.clock.textContent = t("clock.unavailable");
+      return;
+    }
+    if (!state.clock) {
+      el.clock.textContent = t("clock.loading");
+      return;
+    }
+    var ms = serverNowMs();
+    el.clock.textContent = t("clock.line", {
+      date: formatter({ weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(ms)),
+      time: formatter({ hour: "2-digit", minute: "2-digit" }).format(new Date(ms)),
+      zone: zoneName(),
+    });
+  }
+
+  async function loadClock() {
+    var sent = Date.now();
+    try {
+      var data = await api("/api/clock", { timeout: CLOCK_TIMEOUT_MS });
+      var received = Date.now();
+      var serverMs = Date.parse(data.now_utc);
+      if (!isNaN(serverMs)) state.clockOffsetMs = serverMs - Math.round((sent + received) / 2);
+      state.clock = data;
+      state.clockFailed = false;
+      state.clockSyncedAt = received;
+    } catch (err) {
+      state.clockFailed = true;
+    }
+    renderClockBar();
+    return !state.clockFailed;
+  }
+
+  // Runs every 30 seconds: keeps the clock bar current, re-reads the server clock now and then,
+  // and redraws the views when the service date has moved on (so "today" is never stale).
+  function tick() {
+    renderClockBar();
+    var stale = state.clockFailed || Date.now() - state.clockSyncedAt > CLOCK_RESYNC_MS;
+    var reading = stale ? loadClock() : Promise.resolve(true);
+    reading.then(function () {
+      if (state.renderedDate && todayKey() !== state.renderedDate) {
+        toast(t("clock.date_changed"));
+        render();
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- language, menu, toast
+  function directionOf(code) {
+    var item = catalogue.languages.filter(function (language) {
+      return language.code === code;
+    })[0];
+    return item && item.dir === "rtl" ? "rtl" : "ltr";
+  }
+
+  function applyStaticText() {
+    document.querySelectorAll("[data-i18n]").forEach(function (node) {
+      node.textContent = t(node.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach(function (node) {
+      node.setAttribute("aria-label", t(node.getAttribute("data-i18n-aria")));
+    });
+  }
+
+  function populateLanguages() {
+    el.langSelect.textContent = "";
+    catalogue.languages.forEach(function (item) {
+      var option = document.createElement("option");
+      option.value = item.code;
+      option.textContent = item.name;
+      el.langSelect.appendChild(option);
+    });
+  }
+
+  function setLanguage(code) {
+    if (!isLanguage(code)) return;
+    state.lang = code;
+    storage.set(PREFIX + "lang", code);
+    document.documentElement.lang = code;
+    document.documentElement.dir = directionOf(code);
+    document.title = t("app.brand");
+    el.langSelect.value = code;
+    applyStaticText();
+    syncMenuLabel();
+    renderClockBar();
+  }
+
+  function syncMenuLabel() {
+    var open = el.sidebar.classList.contains("open");
+    el.navToggle.setAttribute("aria-label", t(open ? "menu.close" : "menu.open"));
+  }
+
+  function setMenu(open) {
+    el.sidebar.classList.toggle("open", open);
+    el.navToggle.setAttribute("aria-expanded", String(open));
+    syncMenuLabel();
+  }
+
+  var toastTimer = null;
+  function toast(message) {
+    el.toast.textContent = message;
+    el.toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.toast.hidden = true;
+    }, 4500);
+  }
+
+  // An answer kept for offline reading is marked by the service worker. The notice shows when it was saved,
+  // and hides again as soon as an answer comes straight from the server.
+  function noteSource(response) {
+    if (response.headers.get("X-Served-From-Cache") !== "1") {
+      el.saved.hidden = true;
+      return;
+    }
+    var when = new Date(response.headers.get("X-Saved-At") || "");
+    var text = isNaN(when.getTime())
+      ? t("common.na")
+      : new Intl.DateTimeFormat(localeTag(), { dateStyle: "medium", timeStyle: "short" }).format(when);
+    el.savedText.textContent = t("offline.saved", { time: text });
+    el.saved.hidden = false;
+  }
+
+  function syncOnlineState() {
+    el.offline.hidden = navigator.onLine !== false;
+  }
+
+  // ---------------------------------------------------------------- render cycle
+  // Every render gets a token. A slow answer that arrives after the user has moved on is ignored,
+  // so it can never overwrite the page the user is looking at.
+  function isCurrent(panel, token) {
+    return token === state.viewToken && !!panel && panel.isConnected;
+  }
+
+  function loadingCard(text) {
+    return '<section class="card" aria-busy="true"><p class="muted">' + esc(text || t("common.loading")) + "</p></section>";
+  }
+
+  function loadingInline(text) {
+    return '<p class="muted" aria-busy="true">' + esc(text || t("common.loading")) + "</p>";
+  }
+
+  function panelError(err, action) {
+    return '<div class="banner error" role="alert"><strong>' + esc(t("common.error")) + "</strong>" + esc(err.message || t("msg.unexpected")) +
+      '<div style="margin-top:8px"><button type="button" class="secondary" data-action="' + esc(action) + '">' + esc(t("common.retry")) + "</button></div></div>";
+  }
+
+  function setView(html) {
+    el.view.innerHTML = html;
+  }
+
+  function routeParts() {
+    return location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  }
+
+  async function render() {
+    state.viewToken += 1;
+    var token = state.viewToken;
+    state.renderedDate = todayKey();
+    destroyMap();
+    var parts = routeParts();
+    var name = parts[0] && Object.prototype.hasOwnProperty.call(ROUTES, parts[0]) ? parts[0] : "routes";
+    document.querySelectorAll("[data-nav]").forEach(function (link) {
+      if (link.getAttribute("href") === "#/" + name) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+    setMenu(false);
+    renderYearStatus();
+    try {
+      await ROUTES[name](parts.slice(1), token);
+    } catch (err) {
+      if (token === state.viewToken) setView(panelError(err, "rerender"));
+    }
+  }
+
+  // Fills one panel with the result of job(). Stale answers are dropped; errors stay inside the panel.
+  async function fillPanel(panel, token, job, searchSeq) {
+    if (!panel) return;
+    panel.innerHTML = loadingInline();
+    try {
+      var html = await job();
+      var stale = searchSeq !== undefined && searchSeq !== state.searchToken;
+      if (!stale && isCurrent(panel, token)) panel.innerHTML = html;
+    } catch (err) {
+      var stillWanted = searchSeq === undefined || searchSeq === state.searchToken;
+      if (stillWanted && isCurrent(panel, token)) panel.innerHTML = panelError(err, "rerender");
+    }
+  }
+
+  async function renderYearStatus() {
+    var seq = ++state.yearToken;
+    try {
+      var data = await api("/api/years/" + encodeURIComponent(state.year) + "/status");
+      if (seq !== state.yearToken) return;
+      el.yearStatus.innerHTML =
+        '<div class="banner official"><strong>' + badge("OFFICIAL_VERIFIED") + " " + esc(t("year.official_title", { year: state.year })) + "</strong>" + esc(data.official.message) + "</div>" +
+        '<div class="banner unverified"><strong>' + badge("UNVERIFIED_FEED") + " " + esc(t("year.unverified_title", { year: state.year })) + "</strong>" + esc(data.unverified.message) + "</div>" +
+        '<div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + "</strong>" + esc(t("scn.notice")) + "</div>";
+    } catch (err) {
+      if (seq === state.yearToken) el.yearStatus.innerHTML = '<div class="banner error" role="alert">' + esc(err.message) + "</div>";
+    }
+  }
 
   function segmentedClassification() {
-    const pressed = (cls) => (state.classification === cls ? "true" : "false");
-    return `<div class="seg" role="group" aria-label="Data classification">
-      <button type="button" data-action="cls" data-cls="OFFICIAL_VERIFIED" aria-pressed="${pressed("OFFICIAL_VERIFIED")}">Official verified</button>
-      <button type="button" data-action="cls" data-cls="UNVERIFIED_FEED" aria-pressed="${pressed("UNVERIFIED_FEED")}">Unverified feed</button>
-    </div>`;
-  }
-
-  // ------------------------------------------------------------------ year banner (always visible)
-  async function renderYearStatus() {
-    try {
-      const data = await api(`/api/years/${state.year}/status`);
-      yearStatus.innerHTML = `
-        <div class="banner official"><strong>${badge("OFFICIAL_VERIFIED")} ${esc(state.year)}</strong>${esc(data.official.message)}</div>
-        <div class="banner unverified"><strong>${badge("UNVERIFIED_FEED")} ${esc(state.year)}</strong>${esc(data.unverified.message)}</div>
-        <div class="banner scenario"><strong>${badge("ESTIMATED_SCENARIO")}</strong>${esc(SCENARIO_NOTICE)}</div>`;
-    } catch (err) {
-      yearStatus.innerHTML = `<div class="banner error">${esc(err.message)}</div>`;
+    function option(code) {
+      var pressed = state.classification === code ? "true" : "false";
+      return '<button type="button" data-action="cls" data-cls="' + code + '" aria-pressed="' + pressed + '">' + esc(classLabel(code)) + "</button>";
     }
+    return '<div class="seg" role="group" aria-label="' + esc(t("cls.label")) + '">' + option("OFFICIAL_VERIFIED") + option("UNVERIFIED_FEED") + "</div>";
   }
 
-  // ------------------------------------------------------------------ map helpers
+  // ---------------------------------------------------------------- maps (guarded: the map is optional)
+  function destroyMap() {
+    if (state.map) state.map.remove();
+    state.map = null;
+    state.markers = null;
+  }
+
   function makeMap(elementId) {
-    if (state.map) {
-      state.map.remove();
-      state.map = null;
+    destroyMap();
+    var element = document.getElementById(elementId);
+    if (!element) return null;
+    if (typeof window.L === "undefined") {
+      element.innerHTML = '<div class="map-message">' + esc(t("msg.map_unavailable")) + "</div>";
+      return null;
     }
-    const element = document.getElementById(elementId);
-    if (!element || typeof L === "undefined") return null;
-    const map = L.map(element, { scrollWheelZoom: false }).setView([20, 0], 2);
+    var L = window.L;
+    var map = L.map(element, { scrollWheelZoom: false }).setView([20, 0], 2);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
     state.map = map;
+    state.markers = L.layerGroup().addTo(map);
     return map;
   }
 
-  function drawRouteMap(detail) {
-    const map = makeMap("routeMap");
-    if (!map) return;
-    const bounds = [];
-    detail.shapes.forEach((shape) => {
-      if (shape.points.length > 1) {
-        L.polyline(shape.points, { color: "#0b5cad", weight: 4, opacity: 0.8 }).addTo(map);
-        shape.points.forEach((p) => bounds.push(p));
+  function validCoord(lat, lon) {
+    return typeof lat === "number" && typeof lon === "number" && isFinite(lat) && isFinite(lon);
+  }
+
+  function messageFor(code, fallback) {
+    var key = "msgcode." + code;
+    if (code && hasMessage(key)) return t(key);
+    return fallback || t("msg.unexpected");
+  }
+
+  function dayName(code) {
+    return hasMessage("day." + code) ? t("day." + code) : String(code || "");
+  }
+
+  // The planning date is "today" in the service zone when that year is being planned, else 1 January.
+  function defaultDate() {
+    var today = todayKey();
+    return Number(today.slice(0, 4)) === state.year ? today : state.year + "-01-01";
+  }
+
+  // ---------------------------------------------------------------- routes and timetables
+  function routeItem(r) {
+    return '<li><div><div class="title">' + esc(r.short_name || r.gtfs_route_id) + '</div><div class="muted">' + esc(r.long_name || "") + "</div></div>" +
+      '<div class="row-actions">' + badge(r.classification) +
+      '<a class="button secondary" href="#/routes/' + esc(encodeURIComponent(r.id)) + '">' + esc(t("common.open")) + "</a></div></li>";
+  }
+
+  function routeListHtml(data) {
+    if (data.results.length) return '<ul class="list">' + data.results.map(routeItem).join("") + "</ul>";
+    var noCoverage = data.coverage && data.coverage.status === "NONE";
+    var text = noCoverage
+      ? messageFor(data.classification === "OFFICIAL_VERIFIED" ? "NO_OFFICIAL_DATA" : "NO_UNVERIFIED_DATA")
+      : t("routes.no_match");
+    return '<div class="empty">' + esc(text) + "</div>";
+  }
+
+  async function loadRouteResults(query, panel, token) {
+    var seq = ++state.searchToken;
+    await fillPanel(panel, token, async function () {
+      var params = new URLSearchParams({ classification: state.classification, year: String(state.year), q: query, limit: "100" });
+      return routeListHtml(await api("/api/routes?" + params.toString()));
+    }, seq);
+  }
+
+  async function loadSaved(panel, token) {
+    await fillPanel(panel, token, async function () {
+      var data = await api("/api/saved-routes");
+      if (!data.saved.length) return '<div class="empty">' + esc(t("routes.saved_none")) + "</div>";
+      return '<ul class="list">' + data.saved.map(function (s) {
+        return '<li><div><div class="title">' + esc(s.label) + '</div><div class="muted">' + esc(s.gtfs_route_id) + "</div></div>" +
+          '<div class="row-actions">' + badge(s.classification) +
+          '<button type="button" class="secondary" data-action="open-saved" data-gtfs="' + esc(s.gtfs_route_id) + '" data-cls="' + esc(s.classification) + '">' + esc(t("common.open")) + "</button>" +
+          '<button type="button" class="danger" data-action="del-saved" data-id="' + esc(s.id) + '">' + esc(t("common.remove")) + "</button></div></li>";
+      }).join("") + "</ul>";
+    });
+  }
+
+  async function renderRoutes(args, token) {
+    if (args[0]) return renderRouteDetail(args[0], token);
+    setView(
+      '<section class="card"><h2>' + esc(t("routes.title")) + "</h2>" +
+      '<p class="muted">' + esc(t("routes.intro", { year: state.year, cls: classLabel(state.classification) })) + "</p>" +
+      segmentedClassification() +
+      '<form id="routeSearch" class="toolbar" role="search" style="margin-top:12px">' +
+      '<label class="field" style="flex:1 1 240px">' + esc(t("routes.search_label")) +
+      '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("routes.search_placeholder")) + '"></label>' +
+      '<button type="submit">' + esc(t("common.search")) + "</button></form>" +
+      '<div id="routeResults" style="margin-top:12px"></div></section>' +
+      '<section class="card"><h2>' + esc(t("routes.saved_title")) + '</h2><div id="savedRoutes"></div></section>'
+    );
+    await Promise.all([
+      loadRouteResults("", document.getElementById("routeResults"), token),
+      loadSaved(document.getElementById("savedRoutes"), token),
+    ]);
+  }
+
+  function directionHtml(direction) {
+    var heading = direction.direction_id === null || direction.direction_id === undefined
+      ? t("route.single_direction")
+      : t("route.direction", { n: direction.direction_id });
+    if (direction.headsign) heading += " " + t("route.towards", { headsign: direction.headsign });
+    var rows = (direction.stops || []).map(function (s) {
+      return '<tr><td class="num">' + esc(s.sequence) + "</td><td>" + esc(s.name) + "</td><td>" + esc(s.arrival || "") + "</td><td>" + esc(s.departure || "") + "</td></tr>";
+    }).join("");
+    return "<h3>" + esc(heading) + '</h3><div class="table-wrap"><table><thead><tr>' +
+      '<th class="num">' + esc(t("route.col_seq")) + "</th><th>" + esc(t("route.col_stop")) + "</th><th>" + esc(t("route.col_arrival")) + "</th><th>" + esc(t("route.col_departure")) + "</th>" +
+      "</tr></thead><tbody>" + rows + "</tbody></table></div>";
+  }
+
+  async function renderRouteDetail(routeId, token) {
+    setView(loadingCard(t("route.loading")));
+    var detail;
+    try {
+      detail = await api("/api/routes/" + encodeURIComponent(routeId));
+    } catch (err) {
+      if (token === state.viewToken) {
+        var text = err.status === 404 ? t("route.cannot_open") : err.message;
+        setView('<section class="card"><p><a href="#/routes">&larr; ' + esc(t("route.back")) + '</a></p><div class="banner error" role="alert">' + esc(text) + "</div></section>");
       }
-    });
-    detail.directions.forEach((direction, index) => {
-      direction.stops.forEach((stop) => {
-        if (stop.lat === null || stop.lon === null) return;
-        const point = [stop.lat, stop.lon];
-        bounds.push(point);
-        L.circleMarker(point, {
-          radius: index === 0 ? 5 : 4,
-          color: index === 0 ? "#1b7f4c" : "#9a5b00",
-          fillOpacity: 0.9,
-        }).bindTooltip(esc(stop.name)).addTo(map);
-      });
-    });
-    if (bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [18, 18] });
-  }
-
-  function plotStops(stops) {
-    if (!state.map) return;
-    const bounds = [];
-    stops.forEach((stop) => {
-      if (stop.lat === null || stop.lon === null) return;
-      const point = [stop.lat, stop.lon];
-      bounds.push(point);
-      L.circleMarker(point, { radius: 5, color: "#0b5cad", fillOpacity: 0.85 })
-        .bindTooltip(esc(stop.name))
-        .addTo(state.map);
-    });
-    if (bounds.length) state.map.fitBounds(L.latLngBounds(bounds), { padding: [24, 24], maxZoom: 16 });
-  }
-
-  // ------------------------------------------------------------------ routes and timetables
-  const routeItem = (r) => `<li>
-    <div><div class="title">${esc(r.short_name || r.gtfs_route_id)}</div><div class="muted">${esc(r.long_name || "")}</div></div>
-    <div class="row-actions">${badge(r.classification)}<a class="button secondary" href="#/routes/${esc(r.id)}">Open</a></div>
-  </li>`;
-
-  async function renderRoutes(routeId) {
-    if (routeId) return renderRouteDetail(routeId);
-    setView(`
-      <section class="card">
-        <h2>Routes and timetables</h2>
-        <p class="muted">Showing ${esc(CLS[state.classification].label)} data whose feed covers ${esc(state.year)}. The two classifications are never combined.</p>
-        ${segmentedClassification()}
-        <form id="routeSearch" class="toolbar" role="search" style="margin-top:12px">
-          <label style="flex:1 1 240px">Route number or name
-            <input name="q" type="search" maxlength="80" autocomplete="off" placeholder="Type a route number or part of its name">
-          </label>
-          <button type="submit">Search</button>
-        </form>
-        <div id="routeResults" style="margin-top:12px"></div>
-      </section>
-      <section class="card"><h2>Saved routes</h2><div id="savedRoutes">${loading()}</div></section>`);
-    await Promise.all([loadRouteResults(""), loadSaved()]);
-  }
-
-  async function loadRouteResults(q) {
-    const box = document.getElementById("routeResults");
-    if (!box) return;
-    box.innerHTML = loading("Searching...");
-    const params = new URLSearchParams({ classification: state.classification, year: String(state.year), q, limit: "100" });
-    const data = await api(`/api/routes?${params}`);
-    if (data.results.length) {
-      box.innerHTML = `<ul class="list">${data.results.map(routeItem).join("")}</ul>`;
-    } else {
-      const message = data.coverage && data.coverage.status === "NONE" ? data.coverage.message : "No routes match this search.";
-      box.innerHTML = `<div class="empty">${esc(message)}</div>`;
-    }
-  }
-
-  async function loadSaved() {
-    const box = document.getElementById("savedRoutes");
-    if (!box) return;
-    const data = await api("/api/saved-routes");
-    box.innerHTML = data.saved.length
-      ? `<ul class="list">${data.saved.map((s) => `<li>
-          <div><div class="title">${esc(s.label)}</div><div class="muted">${esc(s.gtfs_route_id)}</div></div>
-          <div class="row-actions">${badge(s.classification)}
-            <button type="button" class="secondary" data-action="open-saved" data-gtfs="${esc(s.gtfs_route_id)}" data-cls="${esc(s.classification)}">Open</button>
-            <button type="button" class="danger" data-action="del-saved" data-id="${esc(s.id)}">Remove</button>
-          </div></li>`).join("")}</ul>`
-      : `<div class="empty">No saved routes yet. Open a route and choose Save route.</div>`;
-  }
-
-  async function renderRouteDetail(routeId) {
-    setView(loading("Loading route..."));
-    const detail = await api(`/api/routes/${encodeURIComponent(routeId)}`);
-    state.currentRoute = detail;
-    const title = `${detail.short_name || detail.gtfs_route_id}${detail.long_name ? " - " + detail.long_name : ""}`;
-    const directions = detail.directions.length
-      ? detail.directions.map((d) => `
-          <h3>${d.direction_id === null ? "Single direction" : "Direction " + esc(d.direction_id)}${d.headsign ? " towards " + esc(d.headsign) : ""}</h3>
-          <div class="table-wrap"><table>
-            <thead><tr><th class="num">#</th><th>Stop</th><th>Arrival</th><th>Departure</th></tr></thead>
-            <tbody>${d.stops.map((s) => `<tr><td class="num">${esc(s.sequence)}</td><td>${esc(s.name)}</td><td>${esc(s.arrival || "")}</td><td>${esc(s.departure || "")}</td></tr>`).join("")}</tbody>
-          </table></div>`).join("")
-      : `<div class="empty">The feed has no stops for this route.</div>`;
-
-    setView(`
-      <section class="card">
-        <p><a href="#/routes">&larr; Back to routes</a></p>
-        <h2>${esc(title)}</h2>
-        <p>${badge(detail.classification)}</p>
-        <p class="muted">Operating days (calendar.txt): ${esc(detail.operating_days.join(", ") || "not stated")}</p>
-        <p class="muted">${esc(detail.geometry_note)}</p>
-        <div id="routeMap" class="map" role="img" aria-label="Map of this route's stops and planned path"></div>
-        <div class="toolbar">
-          <label class="field">Timetable date<input type="date" id="ttDate" value="${esc(defaultDate())}"></label>
-          <button type="button" data-action="tt-load" data-id="${esc(detail.id)}">Show timetable</button>
-          <button type="button" class="secondary" data-action="tt-csv" data-id="${esc(detail.id)}">Download CSV</button>
-          <button type="button" class="secondary" data-action="save-route" data-gtfs="${esc(detail.gtfs_route_id)}" data-cls="${esc(detail.classification)}" data-label="${esc(title)}">Save route</button>
-        </div>
-        <div id="timetable" style="margin-top:12px"></div>
-      </section>
-      <section class="card"><h2>Stops by direction</h2>${directions}</section>`);
-    drawRouteMap(detail);
-    await loadTimetable(detail.id);
-  }
-
-  async function loadTimetable(routeId) {
-    const date = document.getElementById("ttDate").value;
-    const box = document.getElementById("timetable");
-    box.innerHTML = loading("Loading timetable...");
-    const data = await api(`/api/routes/${encodeURIComponent(routeId)}/timetable?date=${encodeURIComponent(date)}`);
-    if (!data.covered || !data.trips.length) {
-      const tone = data.classification === "OFFICIAL_VERIFIED" ? "official" : "unverified";
-      box.innerHTML = `<div class="banner ${tone}">${esc(data.message || "No trips on this date.")}</div>`;
       return;
     }
-    const shown = data.trips.slice(0, MAX_TRIPS_SHOWN);
-    box.innerHTML = `
-      <p class="muted">${esc(data.trips.length)} trip(s) on ${esc(date)}. First departure ${esc(data.first_departure || "n/a")}; last arrival ${esc(data.last_arrival || "n/a")}.
-        ${data.trips.length > MAX_TRIPS_SHOWN ? `Showing the first ${MAX_TRIPS_SHOWN}. Download the CSV for every trip.` : ""}</p>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Trip</th><th>Towards</th><th>First departure</th><th>Last arrival</th><th class="num">Stops</th></tr></thead>
-        <tbody>${shown.map((t) => `<tr><td>${esc(t.trip_id)}</td><td>${esc(t.headsign || "")}</td><td>${esc(t.first_departure || "")}</td><td>${esc(t.last_arrival || "")}</td><td class="num">${esc(t.stops.length)}</td></tr>`).join("")}</tbody>
-      </table></div>`;
+    if (token !== state.viewToken) return;
+    state.route = detail;
+    var title = (detail.short_name || detail.gtfs_route_id) + (detail.long_name ? " - " + detail.long_name : "");
+    var directions = detail.directions && detail.directions.length
+      ? detail.directions.map(directionHtml).join("")
+      : '<div class="empty">' + esc(t("route.no_stops")) + "</div>";
+    var days = (detail.operating_days || []).map(dayName).join(", ") || t("common.not_stated");
+    setView(
+      '<section class="card"><p><a href="#/routes">&larr; ' + esc(t("route.back")) + "</a></p>" +
+      "<h2>" + esc(title) + "</h2><p>" + badge(detail.classification) + "</p>" +
+      '<p class="muted">' + esc(t("route.operating_days", { days: days })) + "</p>" +
+      '<p class="muted">' + esc(detail.geometry_note || "") + "</p>" +
+      '<div id="routeMap" class="map" role="region" aria-label="' + esc(t("route.map_label")) + '"></div>' +
+      '<div class="toolbar"><label class="field">' + esc(t("route.timetable_date")) +
+      '<input type="date" id="ttDate" value="' + esc(defaultDate()) + '"></label>' +
+      '<button type="button" data-action="tt-load" data-id="' + esc(detail.id) + '">' + esc(t("route.show_timetable")) + "</button>" +
+      '<button type="button" class="secondary" data-action="tt-csv" data-id="' + esc(detail.id) + '">' + esc(t("common.download_csv")) + "</button>" +
+      '<button type="button" class="secondary" data-action="save-route" data-gtfs="' + esc(detail.gtfs_route_id) + '" data-cls="' + esc(detail.classification) + '" data-label="' + esc(title) + '">' + esc(t("route.save")) + "</button></div>" +
+      '<div id="timetable" style="margin-top:12px"></div></section>' +
+      '<section class="card"><h2>' + esc(t("route.stops_title")) + "</h2>" + directions + "</section>"
+    );
+    drawRouteMap(detail);
+    await loadTimetable(detail.id, token);
   }
 
-  // ------------------------------------------------------------------ stops
-  async function renderStops() {
-    setView(`
-      <section class="card">
-        <h2>Stops</h2>
-        <p class="muted">Stops from official and unverified data are searched separately.</p>
-        ${segmentedClassification()}
-        <form id="stopSearch" class="toolbar" role="search" style="margin-top:12px">
-          <label style="flex:1 1 240px">Stop name
-            <input name="q" type="search" maxlength="80" autocomplete="off" placeholder="Type part of a stop name">
-          </label>
-          <button type="submit">Search</button>
-          <button type="button" class="secondary" data-action="nearby-me">Stops near me</button>
-        </form>
-        <div id="stopMap" class="map" role="img" aria-label="Map of stops"></div>
-        <div id="stopResults"></div>
-      </section>`);
-    makeMap("stopMap");
-    await loadStops("");
+  function drawRouteMap(detail) {
+    var map = makeMap("routeMap");
+    if (!map) return;
+    var L = window.L;
+    var bounds = [];
+    (detail.shapes || []).forEach(function (shape) {
+      if (shape.points && shape.points.length > 1) {
+        L.polyline(shape.points, { color: "#0b5cad", weight: 4, opacity: 0.8 }).addTo(state.markers);
+        shape.points.forEach(function (p) {
+          bounds.push(p);
+        });
+      }
+    });
+    (detail.directions || []).forEach(function (direction, index) {
+      (direction.stops || []).forEach(function (stop) {
+        if (!validCoord(stop.lat, stop.lon)) return;
+        var point = [stop.lat, stop.lon];
+        bounds.push(point);
+        L.circleMarker(point, { radius: index === 0 ? 5 : 4, color: index === 0 ? "#1b7f4c" : "#9a5b00", fillOpacity: 0.9 })
+          .bindTooltip(esc(stop.name))
+          .addTo(state.markers);
+      });
+    });
+    // No animation: an animated zoom finishes on a timer, which could run after the visitor has left this page.
+    if (bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [18, 18], animate: false });
   }
 
-  function stopList(stops, showDistance) {
-    if (!stops.length) return `<div class="empty">No stops found for this classification and search.</div>`;
-    return `<ul class="list">${stops.map((s) => `<li>
-      <div><div class="title">${esc(s.name)}</div>
-      <div class="muted">${s.lat === null ? "No coordinates in feed" : esc(s.lat.toFixed(5)) + ", " + esc(s.lon.toFixed(5))}${showDistance ? " - " + esc(s.distance_m) + " m away" : ""}</div></div>
-      <div class="row-actions">${badge(s.classification)}</div></li>`).join("")}</ul>`;
-  }
-
-  async function loadStops(q) {
-    const box = document.getElementById("stopResults");
-    if (!box) return;
-    const params = new URLSearchParams({ classification: state.classification, year: String(state.year), q, limit: "100" });
-    const data = await api(`/api/stops?${params}`);
-    box.innerHTML = stopList(data.results, false);
-    if (state.map) {
-      state.map.eachLayer((layer) => { if (layer instanceof L.CircleMarker) state.map.removeLayer(layer); });
-      plotStops(data.results);
+  async function loadTimetable(routeId, token) {
+    var box = document.getElementById("timetable");
+    var input = document.getElementById("ttDate");
+    if (!box || !input) return;
+    var date = input.value;
+    if (!isIsoDate(date)) {
+      box.innerHTML = '<div class="banner error" role="alert">' + esc(t("common.bad_date")) + "</div>";
+      return;
+    }
+    var seq = ++state.timetableToken;
+    box.innerHTML = loadingInline(t("timetable.loading"));
+    try {
+      var data = await api("/api/routes/" + encodeURIComponent(routeId) + "/timetable?date=" + encodeURIComponent(date));
+      if (token !== state.viewToken || seq !== state.timetableToken || !box.isConnected) return;
+      box.innerHTML = timetableHtml(data, date);
+    } catch (err) {
+      if (token === state.viewToken && seq === state.timetableToken && box.isConnected) box.innerHTML = panelError(err, "rerender");
     }
   }
 
-  async function nearbyStops() {
+  function timetableHtml(data, date) {
+    if (!data.covered || !data.trips || !data.trips.length) {
+      var tone = data.classification === "OFFICIAL_VERIFIED" ? "official" : "unverified";
+      var text = data.message_code ? messageFor(data.message_code, data.message) : data.message || t("timetable.none");
+      return '<div class="banner ' + tone + '">' + esc(text) + "</div>";
+    }
+    var isToday = date === todayKey();
+    var nowSecs = isToday ? nowSecondsInZone() : null;
+    var afterMidnight = data.trips.some(function (trip) {
+      var secs = gtfsSeconds(trip.first_departure);
+      return secs !== null && secs >= 86400;
+    });
+    var markedNext = false;
+    var rows = data.trips.slice(0, MAX_TRIPS_SHOWN).map(function (trip) {
+      var secs = gtfsSeconds(trip.first_departure);
+      var upcoming = nowSecs !== null && secs !== null && secs >= nowSecs;
+      var mark = "";
+      if (upcoming && !markedNext) {
+        markedNext = true;
+        mark = ' <span class="badge">' + esc(t("timetable.next")) + "</span>";
+      }
+      return "<tr" + (upcoming ? ' class="next"' : "") + "><td>" + esc(trip.trip_id) + mark + "</td><td>" + esc(trip.headsign || "") +
+        "</td><td>" + esc(trip.first_departure || "") + "</td><td>" + esc(trip.last_arrival || "") +
+        '</td><td class="num">' + esc(trip.stops ? trip.stops.length : 0) + "</td></tr>";
+    }).join("");
+    var summary = t("timetable.summary", {
+      date: formatCalendarDate(date),
+      count: fmtNum(data.trips.length),
+      first: data.first_departure || t("common.na"),
+      last: data.last_arrival || t("common.na"),
+    });
+    return '<p class="muted">' + esc(summary) + "</p>" +
+      (isToday ? '<p class="muted">' + esc(t("timetable.hint_today", { zone: zoneName() })) + "</p>" : "") +
+      (afterMidnight ? '<p class="muted">' + esc(t("timetable.after_midnight")) + "</p>" : "") +
+      (data.trips.length > MAX_TRIPS_SHOWN ? '<p class="muted">' + esc(t("timetable.truncated", { max: MAX_TRIPS_SHOWN })) + "</p>" : "") +
+      '<div class="table-wrap"><table><thead><tr><th>' + esc(t("timetable.col_trip")) + "</th><th>" + esc(t("timetable.col_towards")) +
+      "</th><th>" + esc(t("timetable.col_first")) + "</th><th>" + esc(t("timetable.col_last")) + '</th><th class="num">' + esc(t("timetable.col_stops")) +
+      "</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
+  }
+
+  // ---------------------------------------------------------------- stops
+  function stopItem(stop, distanceM) {
+    var coords = validCoord(stop.lat, stop.lon) ? stop.lat.toFixed(5) + ", " + stop.lon.toFixed(5) : t("stops.no_coords");
+    var away = typeof distanceM === "number" ? " - " + t("stops.away", { distance: t("unit.m", { n: fmtNum(Math.round(distanceM)) }) }) : "";
+    return '<li><div><div class="title">' + esc(stop.name) + '</div><div class="muted">' + esc(coords + away) + "</div></div>" +
+      '<div class="row-actions">' + badge(stop.classification) +
+      '<a class="button secondary" href="#/stops/' + esc(encodeURIComponent(stop.id)) + '">' + esc(t("stops.departures")) + "</a></div></li>";
+  }
+
+  function stopListHtml(stops, withDistance) {
+    if (!stops.length) return '<div class="empty">' + esc(t("stops.none")) + "</div>";
+    return '<ul class="list">' + stops.map(function (s) {
+      return stopItem(s, withDistance ? s.distance_m : undefined);
+    }).join("") + "</ul>";
+  }
+
+  async function loadStops(query, token) {
+    var seq = ++state.searchToken;
+    await fillPanel(document.getElementById("stopResults"), token, async function () {
+      var params = new URLSearchParams({ classification: state.classification, year: String(state.year), q: query, limit: "100" });
+      var data = await api("/api/stops?" + params.toString());
+      if (seq === state.searchToken && token === state.viewToken) plotStops(data.results, null);
+      return stopListHtml(data.results, false);
+    }, seq);
+  }
+
+  async function renderStops(args, token) {
+    if (args[0]) return renderStopDetail(args[0], token);
+    setView(
+      '<section class="card"><h2>' + esc(t("stops.title")) + "</h2>" +
+      '<p class="muted">' + esc(t("stops.intro")) + "</p>" +
+      segmentedClassification() +
+      '<form id="stopSearch" class="toolbar" role="search" style="margin-top:12px">' +
+      '<label class="field" style="flex:1 1 240px">' + esc(t("stops.search_label")) +
+      '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("stops.search_placeholder")) + '"></label>' +
+      '<button type="submit">' + esc(t("common.search")) + "</button>" +
+      '<button type="button" class="secondary" data-action="nearby-me">' + esc(t("stops.nearby")) + "</button></form>" +
+      '<div id="stopMap" class="map" role="region" aria-label="' + esc(t("stops.map_label")) + '"></div>' +
+      '<div id="stopResults"></div></section>'
+    );
+    makeMap("stopMap");
+    await loadStops("", token);
+  }
+
+  function plotStops(stops, here) {
+    if (!state.map || !state.markers) return;
+    var L = window.L;
+    state.markers.clearLayers();
+    var bounds = [];
+    stops.forEach(function (stop) {
+      if (!validCoord(stop.lat, stop.lon)) return;
+      var point = [stop.lat, stop.lon];
+      bounds.push(point);
+      L.circleMarker(point, { radius: 5, color: "#0b5cad", fillOpacity: 0.85 }).bindTooltip(esc(stop.name)).addTo(state.markers);
+    });
+    if (here && validCoord(here.lat, here.lon)) {
+      bounds.push([here.lat, here.lon]);
+      L.circleMarker([here.lat, here.lon], { radius: 7, color: "#b3261e", fillOpacity: 0.9 })
+        .bindTooltip(esc(t("stops.you_are_here")))
+        .addTo(state.markers);
+    }
+    // No animation, for the same reason as in drawRouteMap.
+    if (bounds.length) state.map.fitBounds(L.latLngBounds(bounds), { padding: [24, 24], maxZoom: 16, animate: false });
+  }
+
+  function nearbyStops() {
+    var token = state.viewToken;
+    if (!window.isSecureContext) {
+      toast(t("msg.location_secure"));
+      return;
+    }
     if (!navigator.geolocation) {
-      toast("Your browser cannot share its location. Search by stop name instead.");
+      toast(t("stops.geo_unsupported"));
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          const params = new URLSearchParams({
-            lat: String(latitude), lon: String(longitude), radius_m: "800",
-            classification: state.classification, limit: "50",
-          });
-          const data = await api(`/api/stops/nearby?${params}`);
-          document.getElementById("stopResults").innerHTML = stopList(data.results, true);
-          if (state.map) {
-            state.map.eachLayer((layer) => { if (layer instanceof L.CircleMarker) state.map.removeLayer(layer); });
-            L.circleMarker([latitude, longitude], { radius: 7, color: "#b3261e", fillOpacity: 0.9 }).addTo(state.map).bindTooltip("You are here");
-            plotStops(data.results);
-          }
-        } catch (err) {
-          toast(err.message);
-        }
+      function (position) {
+        findNearby(position.coords.latitude, position.coords.longitude, token);
       },
-      () => toast("Location permission was not given. Search by stop name instead."),
+      function (error) {
+        toast(error && error.code === 1 ? t("stops.geo_denied") : t("stops.geo_failed"));
+      },
       { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
     );
   }
 
-  // ------------------------------------------------------------------ direct journeys
-  function renderJourney() {
-    setView(`
-      <section class="card">
-        <h2>Direct journeys</h2>
-        <p class="muted">Finds direct trips only. Trips that need a change are not calculated.</p>
-        ${segmentedClassification()}
-        <form id="journeyForm" class="form-grid" style="margin-top:12px">
-          <label class="field">From (stop name)<input name="origin" required minlength="2" maxlength="80" autocomplete="off"></label>
-          <label class="field">To (stop name)<input name="destination" required minlength="2" maxlength="80" autocomplete="off"></label>
-          <label class="field">Date<input name="date" type="date" required value="${esc(defaultDate())}"></label>
-          <div style="align-self:end"><button type="submit">Find direct trips</button></div>
-        </form>
-        <div id="journeyResults" style="margin-top:12px"></div>
-      </section>`);
+  async function findNearby(lat, lon, token) {
+    var seq = ++state.searchToken;
+    await fillPanel(document.getElementById("stopResults"), token, async function () {
+      var params = new URLSearchParams({ lat: String(lat), lon: String(lon), radius_m: "800", classification: state.classification, limit: "50" });
+      var data = await api("/api/stops/nearby?" + params.toString());
+      if (seq === state.searchToken && token === state.viewToken) plotStops(data.results, { lat: lat, lon: lon });
+      return '<p class="muted">' + esc(t("stops.within", { m: 800 })) + "</p>" + stopListHtml(data.results, true);
+    }, seq);
   }
 
-  // ------------------------------------------------------------------ scenarios
-  async function renderScenarios() {
+  async function renderStopDetail(stopId, token) {
+    setView(loadingCard(t("stop.loading")));
+    var data;
+    try {
+      data = await api("/api/stops/" + encodeURIComponent(stopId) + "/departures?classification=" + encodeURIComponent(state.classification) + "&limit=40");
+    } catch (err) {
+      if (token === state.viewToken) {
+        var text = err.status === 404 ? t("stop.cannot_open") : err.message;
+        setView('<section class="card"><p><a href="#/stops">&larr; ' + esc(t("stop.back")) + '</a></p><div class="banner error" role="alert">' + esc(text) + "</div></section>");
+      }
+      return;
+    }
+    if (token !== state.viewToken) return;
+    var today = todayKey();
+    var rows = data.departures.map(function (d) {
+      var minutes = d.minutes_from_now === null || d.minutes_from_now === undefined
+        ? ""
+        : d.minutes_from_now === 0 ? t("time.now") : t("stop.in_minutes", { n: fmtNum(d.minutes_from_now) });
+      var routeCell = esc(d.route_number || "") + (d.route_name ? '<div class="muted">' + esc(d.route_name) + "</div>" : "");
+      return "<tr><td>" + esc(formatClockTime(d.departure_local)) + "</td><td>" + routeCell + "</td><td>" + esc(d.headsign || "") +
+        "</td><td>" + esc(dayLabel(d.departure_local, today)) + "</td><td>" + esc(minutes) + "</td></tr>";
+    }).join("");
+    var body = data.departures.length
+      ? '<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>' + esc(t("stop.col_time")) + "</th><th>" + esc(t("stop.col_route")) +
+        "</th><th>" + esc(t("stop.col_towards")) + "</th><th>" + esc(t("stop.col_day")) + "</th><th>" + esc(t("journey.col_wait")) +
+        "</th></tr></thead><tbody>" + rows + "</tbody></table></div>"
+      : '<div class="empty" style="margin-top:12px">' + esc(messageFor(data.message_code, data.message)) + "</div>";
+    setView(
+      '<section class="card"><p><a href="#/stops">&larr; ' + esc(t("stop.back")) + "</a></p>" +
+      "<h2>" + esc(t("stop.title", { name: data.stop.name })) + "</h2><p>" + badge(data.stop.classification) + "</p>" +
+      '<p class="muted">' + esc(t("stop.intro", { zone: data.service_timezone })) + "</p>" +
+      '<div class="toolbar"><button type="button" class="secondary" data-action="rerender">' + esc(t("common.refresh")) + "</button></div>" +
+      body +
+      '<p class="muted" style="margin-top:12px">' + esc(t("clock.scheduled_only")) + "</p></section>"
+    );
+  }
+
+  // ---------------------------------------------------------------- direct journeys
+  // Leave-now is the default: it uses the server's current time in the service zone.
+  // The planner: up to two changes, from /api/plan. Every time is scheduled; live positions are never shown.
+  var LABEL_KEYS = {
+    EARLIEST_ARRIVAL: "journey.label_earliest_arrival",
+    FEWEST_CHANGES: "journey.label_fewest_changes"
+  };
+
+  function renderJourney() {
+    setView(
+      '<section class="card"><h2>' + esc(t("journey.title")) + "</h2>" +
+      '<p class="muted">' + esc(t("journey.intro")) + "</p>" +
+      segmentedClassification() +
+      '<form id="journeyForm" style="margin-top:12px">' +
+      '<div class="form-grid">' +
+      '<label class="field">' + esc(t("journey.from")) + '<input name="origin" required minlength="2" maxlength="80" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("journey.to")) + '<input name="destination" required minlength="2" maxlength="80" autocomplete="off"></label>' +
+      "</div>" +
+      '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.when")) + "</legend>" +
+      '<div class="checks">' +
+      '<label><input type="radio" name="when" value="now" checked> ' + esc(t("journey.now")) + "</label>" +
+      '<label><input type="radio" name="when" value="date"> ' + esc(t("journey.on_date")) + "</label>" +
+      "</div>" +
+      '<label class="field" style="margin-top:8px">' + esc(t("journey.date")) +
+      '<input name="date" type="date" value="' + esc(defaultDate()) + '" disabled></label>' +
+      "</fieldset>" +
+      '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.changes_legend")) + "</legend>" +
+      '<div class="checks">' +
+      '<label><input type="radio" name="changes" value="0"> ' + esc(t("journey.changes_0")) + "</label>" +
+      '<label><input type="radio" name="changes" value="1"> ' + esc(t("journey.changes_1")) + "</label>" +
+      '<label><input type="radio" name="changes" value="2" checked> ' + esc(t("journey.changes_2")) + "</label>" +
+      "</div></fieldset>" +
+      '<div class="toolbar"><button type="submit">' + esc(t("journey.submit")) + "</button></div>" +
+      "</form>" +
+      '<div id="journeyResults" style="margin-top:12px" aria-live="polite"></div></section>'
+    );
+  }
+
+  async function submitJourney(form, token) {
+    var box = document.getElementById("journeyResults");
+    if (!box) return;
+    var origin = String(form.elements.origin.value || "").trim();
+    var destination = String(form.elements.destination.value || "").trim();
+    var when = form.elements.when.value;
+    if (origin.length < 2 || destination.length < 2) {
+      box.innerHTML = '<div class="banner error" role="alert">' + esc(messageFor("NEED_BOTH_STOPS")) + "</div>";
+      return;
+    }
+    var params = {
+      origin: origin,
+      destination: destination,
+      classification: state.classification,
+      max_changes: String(form.elements.changes.value || "2")
+    };
+    if (when === "date") {
+      if (!isIsoDate(form.elements.date.value)) {
+        box.innerHTML = '<div class="banner error" role="alert">' + esc(t("common.bad_date")) + "</div>";
+        return;
+      }
+      params.date = form.elements.date.value;
+    }
+    var seq = ++state.searchToken;
+    box.innerHTML = loadingInline(t("journey.searching"));
+    try {
+      var data = await api("/api/plan?" + new URLSearchParams(params).toString());
+      if (seq !== state.searchToken || token !== state.viewToken || !box.isConnected) return;
+      box.innerHTML = journeyHtml(data);
+    } catch (err) {
+      if (seq === state.searchToken && token === state.viewToken && box.isConnected) box.innerHTML = panelError(err, "rerender");
+    }
+  }
+
+  function journeyHtml(data) {
+    var zone = data.service_timezone || zoneName();
+    var assumptions = data.assumptions || {};
+    var note = data.mode === "date"
+      ? t("journey.date_note", { date: formatCalendarDate(data.date), zone: zone })
+      : t("journey.now_note", { zone: zone, hours: fmtNum((assumptions.now_window_minutes || 180) / 60) });
+    var html = '<p class="notice" role="note">' + esc(t("journey.realtime_note")) + "</p>" +
+      '<p class="muted">' + esc(note) + "</p>";
+    if (data.match_note) html += '<p class="muted">' + esc(t("journey.match_limited")) + "</p>";
+    if (!data.options || !data.options.length) {
+      var text = data.message_code ? messageFor(data.message_code, data.message) : (data.message || t("journey.none"));
+      return html + '<div class="empty" role="status">' + esc(text) + "</div>";
+    }
+    html += '<ol class="options" aria-label="' + esc(t("journey.options_label")) + '">' +
+      data.options.map(function (option, index) { return optionHtml(option, index + 1); }).join("") + "</ol>";
+    html += sourcesHtml(data);
+    html += '<p class="muted small">' + esc(t("journey.assumptions", {
+      speed: fmtNum(assumptions.walk_speed_kmph),
+      minutes: fmtNum(assumptions.min_change_minutes),
+      metres: fmtNum(assumptions.max_walk_m)
+    })) + "</p>";
+    return html;
+  }
+
+  function optionHtml(option, number) {
+    var labels = (option.labels || []).map(function (label) {
+      var key = LABEL_KEYS[label];
+      return key ? '<span class="badge neutral">' + esc(t(key)) + "</span> " : "";
+    }).join("");
+    var changes = option.changes === 0 ? t("journey.changes_none")
+      : option.changes === 1 ? t("journey.changes_one")
+      : t("journey.changes_many", { n: fmtNum(option.changes) });
+    var wait = option.wait_minutes > 0
+      ? "<li>" + esc(t("journey.wait", { n: fmtNum(option.wait_minutes) })) + "</li>" : "";
+    return '<li class="option">' +
+      '<h3 class="option-title">' + esc(t("journey.option", { n: fmtNum(number) })) + " " + labels + "</h3>" +
+      '<p class="option-summary">' + esc(t("journey.summary", {
+        dep: formatClockTime(option.departs_at),
+        arr: formatClockTime(option.arrives_at),
+        minutes: fmtNum(option.duration_minutes)
+      })) + " · " + esc(changes) + "</p>" +
+      '<ul class="option-meta">' + wait + "<li>" + esc(fareText(option.fare, option.legs)) + "</li></ul>" +
+      '<ol class="legs" aria-label="' + esc(t("journey.legs_label")) + '">' +
+      (option.legs || []).map(legHtml).join("") + "</ol></li>";
+  }
+
+  // Fares come only from unrestricted fare rules in the feed. A journey with changes is never given one total.
+  function fareText(fare, legs) {
+    var rides = (legs || []).filter(function (leg) { return leg.type === "ride"; });
+    if (!fare) return t("journey.fare_not_in_feed");
+    if (fare.code === "IN_FEED" && fare.total) {
+      var paid = rides.length && rides[0].fares.length ? payText(rides[0].fares[0].payment) : "";
+      return t("journey.fare_in_feed", { price: fare.total.price, currency: fare.total.currency }) + (paid ? " " + paid : "");
+    }
+    if (fare.code === "SEVERAL_IN_FEED") {
+      var list = rides.length ? rides[0].fares.map(function (item) { return item.price + " " + item.currency; }).join(", ") : "";
+      return t("journey.fare_several", { list: list });
+    }
+    if (fare.code === "CHANGES_NOT_PRICED") return t("journey.fare_changes");
+    return t("journey.fare_not_in_feed");
+  }
+
+  function payText(payment) {
+    return payment === "ON_BOARD" ? t("journey.pay_on_board") : t("journey.pay_before_boarding");
+  }
+
+  function legHtml(leg) {
+    if (leg.type === "walk") {
+      return '<li class="leg walk"><span class="leg-title">' +
+        esc(t("journey.leg_walk", { to: leg.to.name, metres: fmtNum(leg.distance_m) })) + "</span> " +
+        '<span class="muted">' + esc(t("journey.leg_walk_time", { minutes: fmtNum(leg.duration_minutes) })) + "</span></li>";
+    }
+    var towards = leg.headsign ? ' <span class="muted">' + esc(t("journey.leg_towards", { headsign: leg.headsign })) + "</span>" : "";
+    return '<li class="leg ride"><span class="leg-title">' +
+      esc(t("journey.leg_ride", { route: leg.route_number || "", from: leg.from.name, to: leg.to.name })) + "</span>" + towards + "<br>" +
+      '<span class="muted">' + esc(t("journey.leg_times", {
+        dep: formatClockTime(leg.departs_at),
+        arr: formatClockTime(leg.arrives_at),
+        minutes: fmtNum(leg.duration_minutes)
+      })) + "</span> " + badge(leg.source.classification) +
+      ' <span class="muted">' + esc(leg.source.name) + "</span></li>";
+  }
+
+  function sourcesHtml(data) {
+    if (!data.sources || !data.sources.length) return "";
+    return '<h3 class="sources-title">' + esc(t("journey.sources_title")) + "</h3>" +
+      '<ul class="plain">' + data.sources.map(function (source) {
+        return "<li>" + badge(data.classification) + " " + esc(source.name) +
+          (source.publisher ? ' <span class="muted">' + esc(source.publisher) + "</span>" : "") + "</li>";
+      }).join("") + "</ul>";
+  }
+
+  // ---------------------------------------------------------------- future scenarios (estimates only)
+  async function renderScenarios(args, token) {
     state.scenarioEditId = null;
     state.scenarioStops = [];
-    setView(`
-      <section class="card">
-        <div class="banner scenario"><strong>${badge("ESTIMATED_SCENARIO")} Permanent label</strong>${esc(SCENARIO_NOTICE)}</div>
-        <p class="muted" style="margin-top:10px">Scenarios belong to this browser's device key. Clearing site data, or using another browser, will hide them.</p>
-        <div class="toolbar">
-          <label class="field">Year filter
-            <select id="scnYearFilter">
-              <option value="">All planning years</option>
-              ${PLANNING_YEARS.map((y) => `<option value="${y}">${y}</option>`).join("")}
-            </select>
-          </label>
-          <button type="button" data-action="scn-new">New scenario</button>
-          <button type="button" class="secondary" data-action="scn-csv">Export CSV</button>
-        </div>
-      </section>
-      <section id="scnForm" class="card" hidden></section>
-      <section class="card"><h2>Your scenarios</h2><div id="scnList">${loading()}</div></section>`);
-    await loadScenarioList();
+    var yearOptions = PLANNING_YEARS.map(function (y) {
+      return '<option value="' + y + '">' + y + "</option>";
+    }).join("");
+    setView(
+      '<section class="card"><div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + " " + esc(t("scn.permanent")) + "</strong>" +
+      esc(t("scn.notice")) + "</div>" +
+      '<p class="muted" style="margin-top:10px">' + esc(t("scn.device_note")) + "</p>" +
+      '<div class="toolbar"><label class="field">' + esc(t("scn.year_filter")) +
+      '<select id="scnYearFilter"><option value="">' + esc(t("scn.all_years")) + "</option>" + yearOptions + "</select></label>" +
+      '<button type="button" data-action="scn-new">' + esc(t("scn.new")) + "</button>" +
+      '<button type="button" class="secondary" data-action="scn-csv">' + esc(t("scn.export_csv")) + "</button></div></section>" +
+      '<section id="scnForm" class="card" hidden></section>' +
+      '<section class="card"><h2>' + esc(t("scn.list_title")) + '</h2><div id="scnList"></div></section>'
+    );
+    await loadScenarioList(document.getElementById("scnList"), token);
   }
 
   function scenarioItem(s) {
-    const e = s.estimate;
-    return `<li>
-      <div>
-        <div class="title">${esc(s.name)} <span class="muted">- ${esc(s.year)} - proposed route ${esc(s.route_code)}</span></div>
-        <div class="muted">${esc(s.origin.name)} to ${esc(s.destination.name)} - ${esc(s.first_departure)} to ${esc(s.last_departure)}, every ${esc(s.frequency_minutes)} min - ${esc(s.operating_days.join(" "))}</div>
-        <div class="muted">Estimate: ${esc(e.departures_per_day)} departures a day - distance ${esc(orDash(e.estimated_distance_km, " km"))} - journey ${esc(orDash(e.estimated_journey_minutes, " min"))}</div>
-      </div>
-      <div class="row-actions">${badge("ESTIMATED_SCENARIO")}
-        <button type="button" class="secondary" data-action="scn-edit" data-id="${esc(s.id)}">Edit</button>
-        <button type="button" class="secondary" data-action="scn-pdf" data-id="${esc(s.id)}">PDF</button>
-        <button type="button" class="danger" data-action="scn-del" data-id="${esc(s.id)}">Delete</button>
-      </div></li>`;
+    var e = s.estimate || {};
+    var days = (s.operating_days || []).map(dayName).join(" ");
+    var departures = e.departures_per_day === null || e.departures_per_day === undefined ? t("common.na") : fmtNum(e.departures_per_day);
+    var distance = e.estimated_distance_km === null || e.estimated_distance_km === undefined ? t("common.na") : t("unit.km", { n: fmtNum(e.estimated_distance_km) });
+    var minutes = e.estimated_journey_minutes === null || e.estimated_journey_minutes === undefined ? t("common.na") : t("unit.min", { n: fmtNum(e.estimated_journey_minutes) });
+    return '<li><div><div class="title">' + esc(s.name) + "</div>" +
+      '<div class="muted">' + esc(t("scn.meta", { year: s.year, code: s.route_code })) + "</div>" +
+      '<div class="muted">' + esc(t("scn.trip", {
+        origin: s.origin.name, destination: s.destination.name, first: s.first_departure,
+        last: s.last_departure, frequency: s.frequency_minutes, days: days,
+      })) + "</div>" +
+      '<div class="muted">' + esc(t("scn.estimate", { departures: departures, distance: distance, minutes: minutes })) + "</div></div>" +
+      '<div class="row-actions">' + badge("ESTIMATED_SCENARIO") +
+      '<button type="button" class="secondary" data-action="scn-edit" data-id="' + esc(s.id) + '">' + esc(t("common.edit")) + "</button>" +
+      '<button type="button" class="secondary" data-action="scn-pdf" data-id="' + esc(s.id) + '">' + esc(t("common.pdf")) + "</button>" +
+      '<button type="button" class="danger" data-action="scn-del" data-id="' + esc(s.id) + '">' + esc(t("common.delete")) + "</button></div></li>";
   }
 
-  async function loadScenarioList() {
-    const filter = document.getElementById("scnYearFilter");
-    const year = filter ? filter.value : "";
-    const data = await api(`/api/scenarios${year ? "?year=" + encodeURIComponent(year) : ""}`);
-    const box = document.getElementById("scnList");
-    box.innerHTML = data.scenarios.length
-      ? `<ul class="list">${data.scenarios.map(scenarioItem).join("")}</ul>`
-      : `<div class="empty">${esc(data.message || "No scenarios yet. Choose New scenario to create one.")}</div>`;
+  async function loadScenarioList(panel, token) {
+    var filter = document.getElementById("scnYearFilter");
+    var year = filter ? filter.value : "";
+    await fillPanel(panel, token, async function () {
+      var data = await api("/api/scenarios" + (year ? "?year=" + encodeURIComponent(year) : ""));
+      if (!data.scenarios.length) return '<div class="empty">' + esc(t("scn.none")) + "</div>";
+      return '<ul class="list">' + data.scenarios.map(scenarioItem).join("") + "</ul>";
+    });
   }
 
   function scenarioFormHtml(s) {
-    const v = s || {};
-    const days = v.operating_days || ["MON", "TUE", "WED", "THU", "FRI"];
-    const yearOptions = PLANNING_YEARS.map((y) => `<option value="${y}" ${Number(v.year || state.year) === y ? "selected" : ""}>${y}</option>`).join("");
-    const coord = (value) => (value === null || value === undefined ? "" : String(value));
-    return `
-      <h2>${s ? "Edit scenario" : "New scenario"}</h2>
-      <p class="muted">Use illustrative numbers. Coordinates are optional, but they are needed for a distance and journey-time estimate.</p>
-      <form id="scenarioForm" novalidate>
-        <div class="form-grid">
-          <label class="field">Name<input name="name" maxlength="120" required value="${esc(v.name || "")}"></label>
-          <label class="field">Planning year<select name="year">${yearOptions}</select></label>
-          <label class="field">Proposed route code<input name="route_code" maxlength="20" required value="${esc(v.route_code || "")}" placeholder="for example PROP-001"></label>
-          <label class="field">Frequency (minutes)<input name="frequency_minutes" type="number" min="1" max="240" required value="${esc(v.frequency_minutes || 15)}"></label>
-          <label class="field">First departure<input name="first_departure" type="time" required value="${esc(v.first_departure || "06:00")}"></label>
-          <label class="field">Last departure<input name="last_departure" type="time" required value="${esc(v.last_departure || "22:00")}"></label>
-        </div>
-        <fieldset class="card" style="margin-top:12px">
-          <legend>Origin and destination</legend>
-          <div class="form-grid">
-            <label class="field">Origin name<input name="origin_name" maxlength="200" required value="${esc(v.origin ? v.origin.name : "")}"></label>
-            <label class="field">Origin latitude<input name="origin_lat" type="number" step="any" min="-90" max="90" value="${esc(coord(v.origin ? v.origin.lat : null))}"></label>
-            <label class="field">Origin longitude<input name="origin_lon" type="number" step="any" min="-180" max="180" value="${esc(coord(v.origin ? v.origin.lon : null))}"></label>
-            <label class="field">Destination name<input name="destination_name" maxlength="200" required value="${esc(v.destination ? v.destination.name : "")}"></label>
-            <label class="field">Destination latitude<input name="destination_lat" type="number" step="any" min="-90" max="90" value="${esc(coord(v.destination ? v.destination.lat : null))}"></label>
-            <label class="field">Destination longitude<input name="destination_lon" type="number" step="any" min="-180" max="180" value="${esc(coord(v.destination ? v.destination.lon : null))}"></label>
-          </div>
-        </fieldset>
-        <fieldset style="margin-top:12px; border:0; padding:0">
-          <legend class="field">Operating days</legend>
-          <div class="checks">${DAYS.map((d) => `<label><input type="checkbox" name="days" value="${d}" ${days.includes(d) ? "checked" : ""}> ${DAY_LABELS[d]}</label>`).join("")}</div>
-        </fieldset>
-        <h3>Intermediate stops (optional, up to ${MAX_SCENARIO_STOPS})</h3>
-        <div id="scnStops"></div>
-        <div class="toolbar" style="margin-top:8px"><button type="button" class="secondary" data-action="scn-add-stop">Add stop</button></div>
-        <label class="field" style="margin-top:12px">Notes<textarea name="description" maxlength="1000">${esc(v.description || "")}</textarea></label>
-        <div class="toolbar" style="margin-top:14px">
-          <button type="submit">${s ? "Save changes" : "Create scenario"}</button>
-          <button type="button" class="secondary" data-action="scn-cancel">Cancel</button>
-        </div>
-        <div id="scnError" class="banner error" role="alert" hidden></div>
-      </form>`;
+    var v = s || {};
+    var origin = v.origin || {};
+    var destination = v.destination || {};
+    var days = v.operating_days || ["MON", "TUE", "WED", "THU", "FRI"];
+    var yearOptions = PLANNING_YEARS.map(function (y) {
+      var selected = Number(v.year || state.year) === y ? " selected" : "";
+      return '<option value="' + y + '"' + selected + ">" + y + "</option>";
+    }).join("");
+    var dayBoxes = DAYS.map(function (d) {
+      var checked = days.indexOf(d) !== -1 ? " checked" : "";
+      return '<label><input type="checkbox" name="days" value="' + d + '"' + checked + "> " + esc(dayName(d)) + "</label>";
+    }).join("");
+    function coord(value) {
+      return value === null || value === undefined ? "" : String(value);
+    }
+    return "<h2>" + esc(t(s ? "scn.form_edit" : "scn.form_new")) + "</h2>" +
+      '<p class="muted">' + esc(t("scn.form_help")) + "</p>" +
+      '<form id="scenarioForm">' +
+      '<div class="form-grid">' +
+      '<label class="field">' + esc(t("scn.name")) + '<input name="name" maxlength="120" required value="' + esc(v.name || "") + '"></label>' +
+      '<label class="field">' + esc(t("scn.year")) + '<select name="year">' + yearOptions + "</select></label>" +
+      '<label class="field">' + esc(t("scn.route_code")) + '<input name="route_code" maxlength="20" required pattern="[A-Za-z0-9][A-Za-z0-9\\-_ ]*" value="' + esc(v.route_code || "") +
+      '" placeholder="' + esc(t("scn.route_code_hint")) + '"></label>' +
+      '<label class="field">' + esc(t("scn.frequency")) + '<input name="frequency_minutes" type="number" min="1" max="240" required value="' + esc(v.frequency_minutes || 15) + '"></label>' +
+      '<label class="field">' + esc(t("scn.first")) + '<input name="first_departure" type="time" required value="' + esc(v.first_departure || "06:00") + '"></label>' +
+      '<label class="field">' + esc(t("scn.last")) + '<input name="last_departure" type="time" required value="' + esc(v.last_departure || "22:00") + '"></label>' +
+      "</div>" +
+      "<fieldset><legend>" + esc(t("scn.od")) + "</legend>" +
+      '<div class="form-grid">' +
+      '<label class="field">' + esc(t("scn.origin_name")) + '<input name="origin_name" maxlength="200" required value="' + esc(origin.name || "") + '"></label>' +
+      '<label class="field">' + esc(t("scn.origin_lat")) + '<input name="origin_lat" type="number" step="any" min="-90" max="90" value="' + esc(coord(origin.lat)) + '"></label>' +
+      '<label class="field">' + esc(t("scn.origin_lon")) + '<input name="origin_lon" type="number" step="any" min="-180" max="180" value="' + esc(coord(origin.lon)) + '"></label>' +
+      '<label class="field">' + esc(t("scn.dest_name")) + '<input name="destination_name" maxlength="200" required value="' + esc(destination.name || "") + '"></label>' +
+      '<label class="field">' + esc(t("scn.dest_lat")) + '<input name="destination_lat" type="number" step="any" min="-90" max="90" value="' + esc(coord(destination.lat)) + '"></label>' +
+      '<label class="field">' + esc(t("scn.dest_lon")) + '<input name="destination_lon" type="number" step="any" min="-180" max="180" value="' + esc(coord(destination.lon)) + '"></label>' +
+      "</div></fieldset>" +
+      "<fieldset><legend>" + esc(t("scn.days")) + '</legend><div class="checks">' + dayBoxes + "</div></fieldset>" +
+      "<h3>" + esc(t("scn.stops_title", { max: MAX_SCENARIO_STOPS })) + "</h3>" +
+      '<div id="scnStops"></div>' +
+      '<div class="toolbar"><button type="button" class="secondary" data-action="scn-add-stop">' + esc(t("scn.add_stop")) + "</button></div>" +
+      '<label class="field" style="margin-top:12px">' + esc(t("scn.notes")) + '<textarea name="description" maxlength="1000">' + esc(v.description || "") + "</textarea></label>" +
+      '<div class="toolbar" style="margin-top:14px"><button type="submit">' + esc(t(s ? "scn.save_changes" : "scn.create")) + "</button>" +
+      '<button type="button" class="secondary" data-action="scn-cancel">' + esc(t("common.cancel")) + "</button></div>" +
+      '<div id="scnError" class="banner error" role="alert" hidden></div>' +
+      "</form>";
   }
 
+  function renderScenarioStops() {
+    var box = document.getElementById("scnStops");
+    if (!box) return;
+    if (!state.scenarioStops.length) {
+      box.innerHTML = '<p class="muted">' + esc(t("scn.stops_none")) + "</p>";
+      return;
+    }
+    box.innerHTML = '<div class="form-grid">' + state.scenarioStops.map(function (stop, i) {
+      var lat = stop.lat === null || stop.lat === undefined ? "" : String(stop.lat);
+      var lon = stop.lon === null || stop.lon === undefined ? "" : String(stop.lon);
+      return '<div class="card" style="margin:0">' +
+        '<label class="field">' + esc(t("scn.stop_name", { n: i + 1 })) + '<input data-stop="' + i + '" data-field="name" maxlength="200" value="' + esc(stop.name || "") + '"></label>' +
+        '<div class="form-grid" style="margin-top:8px">' +
+        '<label class="field">' + esc(t("scn.lat")) + '<input data-stop="' + i + '" data-field="lat" type="number" step="any" min="-90" max="90" value="' + esc(lat) + '"></label>' +
+        '<label class="field">' + esc(t("scn.lon")) + '<input data-stop="' + i + '" data-field="lon" type="number" step="any" min="-180" max="180" value="' + esc(lon) + '"></label>' +
+        "</div>" +
+        '<button type="button" class="danger" data-action="scn-remove-stop" data-index="' + i + '" style="margin-top:8px">' + esc(t("scn.remove_stop")) + "</button></div>";
+    }).join("") + "</div>";
+  }
+
+  // Copies what the user has typed in the stop inputs back into state before the list changes.
   function syncStopsFromDom() {
-    const inputs = document.querySelectorAll("#scnStops [data-stop]");
+    var inputs = document.querySelectorAll("#scnStops [data-stop]");
     if (!inputs.length) return;
-    const stops = state.scenarioStops.map((stop) => ({ ...stop }));
-    inputs.forEach((input) => {
-      const index = Number(input.dataset.stop);
+    var stops = state.scenarioStops.map(function (stop) {
+      return Object.assign({}, stop);
+    });
+    inputs.forEach(function (input) {
+      var index = Number(input.getAttribute("data-stop"));
+      var field = input.getAttribute("data-field");
       if (!stops[index]) return;
-      const raw = input.value.trim();
-      if (input.dataset.field === "name") stops[index].name = raw;
-      else stops[index][input.dataset.field] = raw === "" ? null : Number(raw);
+      var raw = input.value.trim();
+      if (field === "name") stops[index].name = raw;
+      else stops[index][field] = raw === "" ? null : Number(raw);
     });
     state.scenarioStops = stops;
   }
 
-  function renderScenarioStops() {
-    const box = document.getElementById("scnStops");
-    if (!state.scenarioStops.length) {
-      box.innerHTML = `<p class="muted">No intermediate stops.</p>`;
-      return;
+  async function openScenarioForm(id, token) {
+    var box = document.getElementById("scnForm");
+    if (!box) return;
+    var scenario = null;
+    if (id) {
+      try {
+        scenario = await api("/api/scenarios/" + encodeURIComponent(id));
+      } catch (err) {
+        toast(err.message);
+        return;
+      }
+      if (token !== state.viewToken) return;
     }
-    box.innerHTML = `<div class="form-grid">${state.scenarioStops.map((stop, i) => `
-      <div class="card" style="margin:0">
-        <label class="field">Stop ${i + 1} name<input data-stop="${i}" data-field="name" maxlength="200" value="${esc(stop.name || "")}"></label>
-        <div class="form-grid" style="margin-top:8px">
-          <label class="field">Latitude<input data-stop="${i}" data-field="lat" type="number" step="any" min="-90" max="90" value="${esc(stop.lat === null || stop.lat === undefined ? "" : stop.lat)}"></label>
-          <label class="field">Longitude<input data-stop="${i}" data-field="lon" type="number" step="any" min="-180" max="180" value="${esc(stop.lon === null || stop.lon === undefined ? "" : stop.lon)}"></label>
-        </div>
-        <button type="button" class="danger" data-action="scn-remove-stop" data-index="${i}" style="margin-top:8px">Remove stop</button>
-      </div>`).join("")}</div>`;
-  }
-
-  async function openScenarioForm(id) {
-    const box = document.getElementById("scnForm");
-    let scenario = null;
     state.scenarioEditId = id || null;
-    if (id) scenario = await api(`/api/scenarios/${encodeURIComponent(id)}`);
-    state.scenarioStops = scenario ? scenario.stops.map((s) => ({ name: s.name, lat: s.lat, lon: s.lon })) : [];
+    state.scenarioStops = scenario
+      ? scenario.stops.map(function (s) {
+        return { name: s.name, lat: s.lat, lon: s.lon };
+      })
+      : [];
     box.innerHTML = scenarioFormHtml(scenario);
     box.hidden = false;
     renderScenarioStops();
-    box.scrollIntoView({ behavior: "smooth", block: "start" });
+    var calmer = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    box.scrollIntoView({ behavior: calmer ? "auto" : "smooth", block: "start" });
   }
 
   function readScenarioForm(form) {
     syncStopsFromDom();
-    const f = new FormData(form);
-    const number = (key) => {
-      const raw = String(f.get(key) || "").trim();
+    var f = new FormData(form);
+    var number = function (key) {
+      var raw = String(f.get(key) || "").trim();
       return raw === "" ? null : Number(raw);
     };
     return {
@@ -575,483 +1340,992 @@
       frequency_minutes: Number(f.get("frequency_minutes")),
       operating_days: f.getAll("days"),
       stops: state.scenarioStops
-        .filter((stop) => stop.name && stop.name.trim())
-        .map((stop) => ({ name: stop.name.trim(), lat: stop.lat ?? null, lon: stop.lon ?? null })),
+        .filter(function (stop) {
+          return stop.name && String(stop.name).trim();
+        })
+        .map(function (stop) {
+          return {
+            name: String(stop.name).trim(),
+            lat: stop.lat === undefined ? null : stop.lat,
+            lon: stop.lon === undefined ? null : stop.lon,
+          };
+        }),
     };
   }
 
-  async function submitScenario(form) {
-    const errorBox = document.getElementById("scnError");
+  function isBlankValue(value) {
+    return value === null || value === undefined || value === "";
+  }
+
+  // The rules the server also enforces are checked here first, so the message is in the person's language.
+  function scenarioProblem(body) {
+    if (body.first_departure && body.last_departure && body.last_departure < body.first_departure) return "scn.err_times";
+    if (!body.operating_days.length) return "scn.err_days";
+    if (isBlankValue(body.origin_lat) !== isBlankValue(body.origin_lon)) return "scn.err_pair";
+    if (isBlankValue(body.destination_lat) !== isBlankValue(body.destination_lon)) return "scn.err_pair";
+    for (var i = 0; i < state.scenarioStops.length; i += 1) {
+      var stop = state.scenarioStops[i];
+      var named = !!(stop.name && String(stop.name).trim());
+      var latGiven = !isBlankValue(stop.lat);
+      var lonGiven = !isBlankValue(stop.lon);
+      if (!named && !latGiven && !lonGiven) continue;
+      if (!named) return "scn.err_stop_name";
+      if (latGiven !== lonGiven) return "scn.err_pair";
+    }
+    return null;
+  }
+
+  async function submitScenario(form, token) {
+    var errorBox = document.getElementById("scnError");
+    if (!errorBox) return;
     errorBox.hidden = true;
-    const body = readScenarioForm(form);
+    var body = readScenarioForm(form);
+    var problem = scenarioProblem(body);
+    if (problem) {
+      errorBox.textContent = t(problem);
+      errorBox.hidden = false;
+      return;
+    }
+    busy(form, true);
     try {
-      const result = state.scenarioEditId
-        ? await api(`/api/scenarios/${encodeURIComponent(state.scenarioEditId)}`, { method: "PUT", json: body })
+      var result = state.scenarioEditId
+        ? await api("/api/scenarios/" + encodeURIComponent(state.scenarioEditId), { method: "PUT", json: body })
         : await api("/api/scenarios", { method: "POST", json: body });
-      document.getElementById("scnForm").hidden = true;
-      toast(result.warnings ? `Saved. ${result.warnings.join(" ")}` : "Scenario saved. It is labelled ESTIMATED_SCENARIO.");
-      await loadScenarioList();
+      if (token !== state.viewToken) return;
+      closeScenarioForm();
+      toast(result.warnings && result.warnings.length ? t("scn.saved") + " " + result.warnings.join(" ") : t("scn.saved"));
+      await loadScenarioList(document.getElementById("scnList"), token);
     } catch (err) {
       errorBox.textContent = err.message;
       errorBox.hidden = false;
+    } finally {
+      busy(form, false);
     }
   }
 
-  // ------------------------------------------------------------------ compare
-  async function renderCompare() {
-    setView(`
-      <section class="card">
-        <div class="banner scenario"><strong>${badge("ESTIMATED_SCENARIO")}</strong>${esc(SCENARIO_NOTICE)}</div>
-        <h2 style="margin-top:12px">Compare two scenarios</h2>
-        <div class="toolbar">
-          <label class="field">Scenario A<select id="cmpA"></select></label>
-          <label class="field">Scenario B<select id="cmpB"></select></label>
-          <button type="button" data-action="cmp-run">Compare</button>
-          <button type="button" class="secondary" data-action="cmp-pdf">Export PDF</button>
-        </div>
-        <div id="cmpResult" style="margin-top:12px"></div>
-      </section>
-      <section class="card"><h2>Compare planning years</h2><div id="yearsCompare">${loading()}</div></section>`);
-    const data = await api("/api/scenarios");
-    const options = data.scenarios.map((s) => `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.year)})</option>`).join("");
-    document.getElementById("cmpA").innerHTML = options;
-    document.getElementById("cmpB").innerHTML = options;
-    if (data.scenarios.length < 2) {
-      document.getElementById("cmpResult").innerHTML = `<div class="empty">Create at least two scenarios to compare them.</div>`;
+  // ---------------------------------------------------------------- compare
+  // Values from the estimate: text is formatted with the locale; a missing value is shown as n/a.
+  function estimateText(value, unitKey) {
+    if (value === null || value === undefined) return esc(t("common.na"));
+    return esc(unitKey ? t(unitKey, { n: fmtNum(value) }) : fmtNum(value));
+  }
+
+  async function renderCompare(args, token) {
+    setView(
+      '<section class="card"><div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + "</strong>" + esc(t("scn.notice")) + "</div>" +
+      '<h2 style="margin-top:12px">' + esc(t("cmp.title")) + "</h2>" +
+      '<div class="toolbar">' +
+      '<label class="field">' + esc(t("cmp.a")) + '<select id="cmpA"></select></label>' +
+      '<label class="field">' + esc(t("cmp.b")) + '<select id="cmpB"></select></label>' +
+      '<button type="button" data-action="cmp-run">' + esc(t("cmp.run")) + "</button>" +
+      '<button type="button" class="secondary" data-action="cmp-pdf">' + esc(t("cmp.pdf")) + "</button></div>" +
+      '<div id="cmpResult" style="margin-top:12px"></div></section>' +
+      '<section class="card"><h2>' + esc(t("cmp.years_title")) + '</h2><div id="yearsCompare"></div></section>'
+    );
+    await Promise.all([
+      loadScenarioOptions(token),
+      loadYearsCompare(document.getElementById("yearsCompare"), token),
+    ]);
+  }
+
+  async function loadScenarioOptions(token) {
+    var result = document.getElementById("cmpResult");
+    try {
+      var data = await api("/api/scenarios");
+      var a = document.getElementById("cmpA");
+      var b = document.getElementById("cmpB");
+      if (token !== state.viewToken || !a || !b) return;
+      var options = data.scenarios.map(function (s) {
+        return '<option value="' + esc(s.id) + '">' + esc(s.name) + " (" + esc(s.year) + ")</option>";
+      }).join("");
+      a.innerHTML = options;
+      b.innerHTML = options;
+      if (data.scenarios.length < 2) result.innerHTML = '<div class="empty">' + esc(t("cmp.need_two")) + "</div>";
+    } catch (err) {
+      if (token === state.viewToken && result) result.innerHTML = panelError(err, "rerender");
     }
-    await loadYearsCompare();
   }
 
-  async function loadYearsCompare() {
-    const data = await api("/api/years/compare");
-    const cell = (cov) => `${badge(cov.classification)}<div class="muted">${esc(cov.message)}</div>`;
-    document.getElementById("yearsCompare").innerHTML = `
-      <div class="table-wrap"><table>
-        <thead><tr><th>Year</th><th>Official verified</th><th>Unverified feed</th><th class="num">Your scenarios</th></tr></thead>
-        <tbody>${data.years.map((y) => `<tr>
-          <td><strong>${esc(y.year)}</strong></td>
-          <td>${cell(y.official)}</td>
-          <td>${cell(y.unverified)}</td>
-          <td class="num">${esc(y.your_scenarios)}</td></tr>`).join("")}</tbody>
-      </table></div>`;
+  async function loadYearsCompare(panel, token) {
+    await fillPanel(panel, token, async function () {
+      var data = await api("/api/years/compare");
+      function cell(cov) {
+        return badge(cov.classification) + '<div class="muted">' + esc(cov.message) + "</div>";
+      }
+      var rows = data.years.map(function (y) {
+        return "<tr><td><strong>" + esc(y.year) + "</strong></td><td>" + cell(y.official) + "</td><td>" + cell(y.unverified) +
+          '</td><td class="num">' + esc(fmtNum(y.your_scenarios)) + "</td></tr>";
+      }).join("");
+      return '<div class="table-wrap"><table><thead><tr><th>' + esc(t("cmp.col_year")) + "</th><th>" + esc(t("cmp.col_official")) +
+        "</th><th>" + esc(t("cmp.col_unverified")) + '</th><th class="num">' + esc(t("cmp.col_yours")) + "</th></tr></thead><tbody>" +
+        rows + "</tbody></table></div>";
+    });
   }
 
-  async function runComparison() {
-    const a = document.getElementById("cmpA").value;
-    const b = document.getElementById("cmpB").value;
-    if (!a || !b) return toast("Choose two scenarios first.");
-    const data = await api(`/api/scenarios/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
-    const row = (label, key, unit) => `<tr><td>${esc(label)}</td>
-      <td class="num">${esc(orDash(data.a.estimate[key], unit))}</td>
-      <td class="num">${esc(orDash(data.b.estimate[key], unit))}</td>
-      <td class="num">${esc(orDash(data.difference_b_minus_a[key], unit))}</td></tr>`;
-    document.getElementById("cmpResult").innerHTML = `
-      <div class="table-wrap"><table>
-        <thead><tr><th>Estimate</th><th class="num">${esc(data.a.scenario.name)}</th><th class="num">${esc(data.b.scenario.name)}</th><th class="num">Difference (B minus A)</th></tr></thead>
-        <tbody>
-          ${row("Distance", "estimated_distance_km", " km")}
-          ${row("Journey time", "estimated_journey_minutes", " min")}
-          ${row("Departures per day", "departures_per_day", "")}
-          ${row("Departures per week", "departures_per_week", "")}
-        </tbody>
-      </table></div>
-      <p class="muted">${esc(data.notice)}</p>`;
-  }
-
-  // ------------------------------------------------------------------ data sources (public)
-  async function renderSources() {
-    setView(loading("Loading data sources..."));
-    const data = await api("/api/data-sources");
-    const list = data.sources.length
-      ? data.sources.map((s) => `<li>
-          <div>
-            <div class="title">${esc(s.name)}</div>
-            <div class="muted">Publisher: ${esc(s.publisher)} - licence: ${esc(s.license)} - kind: ${esc(s.kind)}</div>
-            <div class="muted">${s.source_url ? `<a href="${esc(s.source_url)}" rel="noopener noreferrer">${esc(s.source_url)}</a>` : "No source link recorded"}</div>
-            <div class="muted">${s.verified ? `Verified${s.verified_at ? " on " + esc(s.verified_at.slice(0, 10)) : ""}.` : "Not verified by an administrator."} Completed imports: ${esc(s.completed_imports)}.</div>
-          </div>
-          <div class="row-actions">${badge(s.classification)}</div></li>`).join("")
-      : `<div class="empty">No data sources have been registered yet.</div>`;
-    setView(`
-      <section class="card">
-        <h2>Data-source information</h2>
-        <dl class="kv">
-          <dt>${badge("OFFICIAL_VERIFIED")}</dt><dd>Confirmed through an authoritative source and verified by an administrator.</dd>
-          <dt>${badge("UNVERIFIED_FEED")}</dt><dd>From a third-party, community or unverified feed. Shown separately and labelled.</dd>
-          <dt>${badge("ESTIMATED_SCENARIO")}</dt><dd>Proposed or simulated future services. Never an official announcement.</dd>
-        </dl>
-        <h3>Sources in use</h3>
-        <ul class="list">${list}</ul>
-      </section>
-      <section class="card">
-        <h2>What this app does not use</h2>
-        <p class="muted">Unofficial reverse-engineered app APIs, scraped app data and community datasets built from them are not used as official sources. The planner never invents routes, timings, bus positions or announcements. Live bus positions are not shown because no authorised live feed is connected.</p>
-      </section>`);
-  }
-
-  // ------------------------------------------------------------------ administration
-  async function renderAdmin() {
-    const meta = await api("/api/meta");
-    if (!meta.admin_enabled) {
-      setView(`<section class="card"><h2>Administration</h2><div class="banner error">Administration is disabled. Set ADMIN_API_KEY in the server's .env file and restart the server.</div></section>`);
+  async function runComparison(token) {
+    var a = document.getElementById("cmpA");
+    var b = document.getElementById("cmpB");
+    var result = document.getElementById("cmpResult");
+    if (!a || !b || !result) return;
+    if (!a.value || !b.value) {
+      toast(t("cmp.choose_two"));
       return;
     }
-    setView(`
-      <section class="card">
-        <h2>Administrator sign-in</h2>
-        <p class="muted">The key is kept only for this browser session.</p>
-        <div class="toolbar">
-          <label class="field" style="flex:1 1 260px">Admin key<input id="adminKeyInput" type="password" autocomplete="off"></label>
-          <button type="button" data-action="admin-key-save">Save key</button>
-          <button type="button" class="secondary" data-action="admin-key-clear">Forget key</button>
-        </div>
-      </section>
-      <div id="adminBody"></div>`);
-    if (state.adminKey) {
-      await loadAdmin();
-    } else {
-      document.getElementById("adminBody").innerHTML = `<div class="empty">Enter the admin key to manage data sources and imports.</div>`;
+    result.innerHTML = loadingInline();
+    try {
+      var data = await api("/api/scenarios/compare?a=" + encodeURIComponent(a.value) + "&b=" + encodeURIComponent(b.value));
+      if (token !== state.viewToken) return;
+      var row = function (label, key, unitKey) {
+        return "<tr><td>" + esc(label) + '</td><td class="num">' + estimateText(data.a.estimate[key], unitKey) +
+          '</td><td class="num">' + estimateText(data.b.estimate[key], unitKey) +
+          '</td><td class="num">' + estimateText(data.difference_b_minus_a[key], unitKey) + "</td></tr>";
+      };
+      result.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("cmp.col_estimate")) + '</th><th class="num">' +
+        esc(data.a.scenario.name) + '</th><th class="num">' + esc(data.b.scenario.name) + '</th><th class="num">' + esc(t("cmp.col_diff")) +
+        "</th></tr></thead><tbody>" +
+        row(t("cmp.row_distance"), "estimated_distance_km", "unit.km") +
+        row(t("cmp.row_time"), "estimated_journey_minutes", "unit.min") +
+        row(t("cmp.row_day"), "departures_per_day", null) +
+        row(t("cmp.row_week"), "departures_per_week", null) +
+        "</tbody></table></div>" +
+        '<p class="muted">' + esc(t("scn.notice")) + "</p>";
+    } catch (err) {
+      if (token === state.viewToken) result.innerHTML = panelError(err, "rerender");
     }
   }
 
-  async function loadAdmin() {
-    const body = document.getElementById("adminBody");
-    body.innerHTML = `
-      <section class="card"><h2>Data sources</h2><div id="adminSources">${loading()}</div>
-        <h3>Add a data source</h3>
-        <form id="sourceForm" class="form-grid">
-          <label class="field">Name<input name="name" required maxlength="200"></label>
-          <label class="field">Publisher<input name="publisher" required maxlength="200"></label>
-          <label class="field">Source link (https)<input name="source_url" type="url" maxlength="500" placeholder="https://"></label>
-          <label class="field">Licence<input name="license" maxlength="200" value="Not specified"></label>
-          <label class="field">Kind<select name="kind">
-            <option value="OFFICIAL">OFFICIAL</option><option value="COMMUNITY">COMMUNITY</option>
-            <option value="SYNTHETIC_DEMO">SYNTHETIC_DEMO</option><option value="UNKNOWN">UNKNOWN</option>
-          </select></label>
-          <div style="align-self:end"><button type="submit">Add source</button></div>
-        </form>
-      </section>
-      <section class="card"><h2>Upload a GTFS ZIP</h2>
-        <p class="muted">Only import a feed after you have confirmed its publisher and licence. Every feed is validated before anything is stored. A feed becomes OFFICIAL_VERIFIED only when its source is an OFFICIAL source that has been verified.</p>
-        <form id="uploadForm" class="form-grid">
-          <label class="field">Data source<select name="data_source_id" id="uploadSource" required></select></label>
-          <label class="field">GTFS ZIP file<input name="file" type="file" accept=".zip,application/zip" required></label>
-          <div style="align-self:end"><button type="submit">Validate and import</button></div>
-        </form>
-        <div id="uploadResult" style="margin-top:12px"></div>
-      </section>
-      <section class="card"><h2>Imports</h2><div id="adminImports">${loading()}</div></section>
-      <section class="card"><h2>Database and backups</h2><div id="adminStats">${loading()}</div>
-        <div class="toolbar" style="margin-top:8px"><button type="button" class="secondary" data-action="backup">Create backup (SQLite)</button></div>
-      </section>
-      <section class="card"><h2>Audit log</h2><div id="adminAudit">${loading()}</div></section>`;
+  async function comparisonPdf() {
+    var a = document.getElementById("cmpA");
+    var b = document.getElementById("cmpB");
+    if (!a || !b || !a.value || !b.value) {
+      toast(t("cmp.choose_two"));
+      return;
+    }
+    await download("/api/scenarios/compare.pdf?a=" + encodeURIComponent(a.value) + "&b=" + encodeURIComponent(b.value), "estimated_scenario_comparison.pdf");
+  }
+
+  // ---------------------------------------------------------------- data sources (public)
+  function sourceItem(s) {
+    var href = safeHref(s.source_url);
+    var link = href
+      ? '<a href="' + esc(href) + '" rel="noopener noreferrer" target="_blank">' + esc(s.source_url) + "</a>"
+      : esc(t("src.no_link"));
+    var status = s.verified
+      ? (s.verified_at ? t("src.verified_on", { date: String(s.verified_at).slice(0, 10) }) : t("admin.verified") + ".")
+      : t("src.not_verified");
+    return '<li><div><div class="title">' + esc(s.name) + "</div>" +
+      '<div class="muted">' + esc(t("src.publisher")) + ": " + esc(s.publisher) + " - " + esc(t("src.licence")) + ": " + esc(s.license) +
+      " - " + esc(t("src.kind")) + ": " + esc(s.kind) + "</div>" +
+      '<div class="muted">' + link + "</div>" +
+      '<div class="muted">' + esc(status) + " " + esc(t("src.imports", { count: fmtNum(s.completed_imports) })) + "</div></div>" +
+      '<div class="row-actions">' + badge(s.classification) + "</div></li>";
+  }
+
+  async function renderSources(args, token) {
+    setView(
+      '<section class="card"><h2>' + esc(t("src.title")) + "</h2>" +
+      '<dl class="kv">' +
+      "<dt>" + badge("OFFICIAL_VERIFIED") + "</dt><dd>" + esc(t("cls.explain.OFFICIAL_VERIFIED")) + "</dd>" +
+      "<dt>" + badge("UNVERIFIED_FEED") + "</dt><dd>" + esc(t("cls.explain.UNVERIFIED_FEED")) + "</dd>" +
+      "<dt>" + badge("ESTIMATED_SCENARIO") + "</dt><dd>" + esc(t("cls.explain.ESTIMATED_SCENARIO")) + "</dd>" +
+      "</dl>" +
+      "<h3>" + esc(t("src.in_use")) + "</h3>" +
+      '<div id="sourceList"></div></section>' +
+      '<section class="card"><h2>' + esc(t("src.not_used_title")) + "</h2>" +
+      '<p class="muted">' + esc(t("src.not_used")) + "</p></section>"
+    );
+    await fillPanel(document.getElementById("sourceList"), token, async function () {
+      var data = await api("/api/data-sources");
+      if (!data.sources.length) return '<div class="empty">' + esc(t("src.none")) + "</div>";
+      return '<ul class="list">' + data.sources.map(sourceItem).join("") + "</ul>";
+    });
+  }
+
+  // ---------------------------------------------------------------- administration
+  // The admin key lives only in this page's memory: it is never written to browser storage.
+  async function renderAdmin(args, token) {
+    var meta;
+    try {
+      meta = await api("/api/meta");
+    } catch (err) {
+      if (token === state.viewToken) setView(panelError(err, "rerender"));
+      return;
+    }
+    if (token !== state.viewToken) return;
+    if (!meta.admin_enabled) {
+      setView('<section class="card"><h2>' + esc(t("admin.title")) + '</h2><div class="banner error" role="alert">' + esc(t("admin.disabled")) + "</div></section>");
+      return;
+    }
+    setView(
+      '<section class="card"><h2>' + esc(t("admin.sign_in")) + "</h2>" +
+      '<p class="muted">' + esc(t("admin.key_note")) + "</p>" +
+      '<form id="adminKeyForm" class="toolbar" autocomplete="off">' +
+      '<label class="field" style="flex:1 1 260px">' + esc(t("admin.key_label")) +
+      '<input name="key" type="password" autocomplete="new-password" spellcheck="false"></label>' +
+      '<button type="submit">' + esc(t("admin.key_save")) + "</button>" +
+      '<button type="button" class="secondary" data-action="admin-key-clear">' + esc(t("admin.key_forget")) + "</button></form></section>" +
+      '<div id="adminBody"></div>'
+    );
+    if (state.adminKey) {
+      await loadAdmin(token);
+    } else {
+      document.getElementById("adminBody").innerHTML = '<div class="empty">' + esc(t("admin.key_needed")) + "</div>";
+    }
+  }
+
+  async function loadAdmin(token) {
+    var body = document.getElementById("adminBody");
+    if (!body) return;
+    body.innerHTML =
+      '<div id="adminNotice" role="alert"></div>' +
+      '<section class="card"><h2>' + esc(t("admin.sources")) + '</h2><div id="adminSources">' + loadingInline() + "</div>" +
+      '<form id="sourceDecisionForm" class="form-grid" hidden aria-labelledby="decisionQuestion">' +
+      '<label class="field"><span id="decisionQuestion"></span><input name="note" required maxlength="500" autocomplete="off"></label>' +
+      '<input type="hidden" name="source_id"><input type="hidden" name="verified">' +
+      '<div class="row-actions" style="align-self:end"><button type="submit" id="decisionSubmit"></button>' +
+      '<button type="button" class="secondary" data-action="decision-cancel">' + esc(t("common.cancel")) + "</button></div></form>" +
+      "<h3>" + esc(t("admin.add_source")) + "</h3>" +
+      '<form id="sourceForm" class="form-grid">' +
+      '<label class="field">' + esc(t("admin.src_name")) + '<input name="name" required maxlength="200"></label>' +
+      '<label class="field">' + esc(t("admin.src_publisher")) + '<input name="publisher" required maxlength="200"></label>' +
+      '<label class="field">' + esc(t("admin.src_url")) + '<input name="source_url" type="url" maxlength="500" pattern="https?://\\S+" placeholder="https://"></label>' +
+      '<label class="field">' + esc(t("admin.src_license")) + '<input name="license" maxlength="200" placeholder="' + esc(t("common.not_specified")) + '"></label>' +
+      '<label class="field">' + esc(t("admin.src_kind")) + '<select name="kind">' +
+      '<option value="OFFICIAL">OFFICIAL</option><option value="COMMUNITY">COMMUNITY</option>' +
+      '<option value="SYNTHETIC_DEMO">SYNTHETIC_DEMO</option><option value="UNKNOWN" selected>UNKNOWN</option></select></label>' +
+      '<div style="align-self:end"><button type="submit">' + esc(t("admin.src_add")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("admin.upload_title")) + "</h2>" +
+      '<p class="muted">' + esc(t("admin.upload_help")) + "</p>" +
+      '<form id="uploadForm" class="form-grid">' +
+      '<label class="field">' + esc(t("admin.upload_source")) + '<select name="data_source_id" id="uploadSource" required></select></label>' +
+      '<label class="field">' + esc(t("admin.upload_file")) + '<input name="file" type="file" accept=".zip,application/zip" required></label>' +
+      '<div style="align-self:end"><button type="submit">' + esc(t("admin.upload_submit")) + "</button></div></form>" +
+      '<div id="uploadResult" style="margin-top:12px"></div></section>' +
+      '<section class="card"><h2>' + esc(t("admin.imports")) + '</h2><div id="adminImports">' + loadingInline() + "</div></section>" +
+      '<section class="card"><h2>' + esc(t("admin.db_title")) + '</h2><div id="adminStats">' + loadingInline() + "</div>" +
+      '<div class="toolbar" style="margin-top:8px"><button type="button" class="secondary" data-action="backup">' + esc(t("admin.backup")) + "</button></div></section>" +
+      '<section class="card"><h2>' + esc(t("admin.audit")) + '</h2><div id="adminAudit">' + loadingInline() + "</div></section>";
 
     try {
-      const [sources, imports, stats, audit] = await Promise.all([
-        api("/api/admin/data-sources", { admin: true }),
-        api("/api/admin/imports", { admin: true }),
-        api("/api/admin/stats", { admin: true }),
-        api("/api/admin/audit-logs?limit=50", { admin: true }),
-      ]);
-      renderAdminSources(sources.sources);
-      document.getElementById("uploadSource").innerHTML = sources.sources
-        .map((s) => `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.kind)})</option>`).join("");
-      renderAdminImports(imports.imports);
-      renderAdminStats(stats);
-      renderAdminAudit(audit.entries);
+      await refreshAdminData(token);
     } catch (err) {
-      toast(err.message);
-      document.getElementById("adminBody").insertAdjacentHTML("afterbegin", `<div class="banner error">${esc(err.message)}</div>`);
+      adminFailure(err, token);
     }
+  }
+
+  // ---------------------------------------------------------------- administration: rendering
+  var STATUS_KEYS = { COMPLETED: "admin.status_completed", REJECTED: "admin.status_rejected" };
+  var STAT_KEYS = [
+    ["data_sources", "admin.stat_sources"],
+    ["imports_completed", "admin.stat_imports_ok"],
+    ["imports_rejected", "admin.stat_imports_rejected"],
+    ["routes", "admin.stat_routes"],
+    ["stops", "admin.stat_stops"],
+    ["trips", "admin.stat_trips"],
+    ["stop_times", "admin.stat_stop_times"],
+    ["shape_points", "admin.stat_shapes"],
+    ["scenarios", "admin.stat_scenarios"],
+    ["audit_entries", "admin.stat_audit"],
+  ];
+
+  // The database keeps times without a time zone. Those are UTC, so they are read as UTC here.
+  function parseUtc(value) {
+    var text = String(value || "").replace(/(\.\d{3})\d+/, "$1");
+    if (!text) return NaN;
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(text)) text += "Z";
+    return Date.parse(text);
+  }
+
+  function utcText(value) {
+    var ms = parseUtc(value);
+    if (isNaN(ms)) return t("common.na");
+    return new Intl.DateTimeFormat(localeTag(), {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZoneName: "short",
+    }).format(new Date(ms));
+  }
+
+  function statusText(status) {
+    return Object.prototype.hasOwnProperty.call(STATUS_KEYS, status) ? t(STATUS_KEYS[status]) : String(status || "");
+  }
+
+  function listHtml(items) {
+    if (!items || !items.length) return "";
+    return "<ul>" + items.map(function (item) {
+      return "<li>" + esc(item) + "</li>";
+    }).join("") + "</ul>";
+  }
+
+  function adminSourceRow(s) {
+    var canVerify = s.kind === "OFFICIAL";
+    var status = s.verified
+      ? esc(t("admin.verified")) +
+        (s.verified_at ? '<div class="muted">' + esc(t("src.verified_on", { date: String(s.verified_at).slice(0, 10) })) + "</div>" : "") +
+        (s.admin_note ? '<div class="muted">' + esc(s.admin_note) + "</div>" : "")
+      : esc(t("admin.not_verified"));
+    var action = s.verified
+      ? '<button type="button" class="secondary" data-action="src-revoke" data-id="' + esc(s.id) + '">' + esc(t("admin.revoke")) + "</button>"
+      : '<button type="button" data-action="src-verify" data-id="' + esc(s.id) + '"' + (canVerify ? "" : " disabled") + ">" +
+        esc(t("admin.verify")) + "</button>";
+    var hint = !s.verified && !canVerify ? '<div class="muted">' + esc(t("admin.verify_official_only")) + "</div>" : "";
+    return "<tr><td>" + esc(s.id) + "</td><td><strong>" + esc(s.name) + '</strong><div class="muted">' + esc(s.publisher) +
+      "</div></td><td>" + esc(s.kind) + "</td><td>" + badge(s.classification) + "</td><td>" + status +
+      '<div class="row-actions">' + action + "</div>" + hint + "</td></tr>";
   }
 
   function renderAdminSources(sources) {
-    const rows = sources.map((s) => `<tr>
-      <td>${esc(s.id)}</td><td>${esc(s.name)}<div class="muted">${esc(s.publisher)}</div></td>
-      <td>${esc(s.kind)}</td><td>${badge(s.classification)}</td>
-      <td>${s.verified ? "Verified" : "Not verified"}${s.admin_note ? `<div class="muted">${esc(s.admin_note)}</div>` : ""}</td>
-      <td class="row-actions">${s.verified
-        ? `<button type="button" class="danger" data-action="src-revoke" data-id="${esc(s.id)}">Revoke</button>`
-        : `<button type="button" class="secondary" data-action="src-verify" data-id="${esc(s.id)}" ${s.kind === "OFFICIAL" ? "" : "disabled title=\"Only OFFICIAL sources can be verified\""}>Verify</button>`}</td>
-    </tr>`).join("");
-    document.getElementById("adminSources").innerHTML = sources.length
-      ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Classification</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
-      : `<div class="empty">No data sources yet. Add one below.</div>`;
-  }
-
-  function importSummaryHtml(s) {
-    const problems = `${s.errors.length} error(s), ${s.warnings.length} warning(s)`;
-    return `<div class="card" style="margin:0">
-      <div class="title">${esc(s.filename)} ${badge(s.classification)} <span class="badge ${s.status === "COMPLETED" ? "official" : "unverified"}">${esc(s.status)}</span></div>
-      <div class="muted">Routes ${esc(s.routes)} - stops ${esc(s.stops)} - trips ${esc(s.trips)} - stop times ${esc(s.stop_times)} - feed dates ${esc(s.feed_start_date || "n/a")} to ${esc(s.feed_end_date || "n/a")}</div>
-      <details style="margin-top:6px"><summary>${esc(problems)}</summary>
-        <ul>${s.errors.map((e) => `<li>${esc(e)}</li>`).join("")}${s.warnings.map((w) => `<li class="muted">${esc(w)}</li>`).join("")}</ul>
-      </details></div>`;
+    var box = document.getElementById("adminSources");
+    if (box) {
+      box.innerHTML = sources.length
+        ? '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.col_name")) +
+          "</th><th>" + esc(t("admin.col_kind")) + "</th><th>" + esc(t("admin.col_class")) + "</th><th>" + esc(t("admin.col_status")) +
+          "</th></tr></thead><tbody>" + sources.map(adminSourceRow).join("") + "</tbody></table></div>"
+        : '<div class="empty">' + esc(t("admin.sources_none")) + "</div>";
+    }
+    var select = document.getElementById("uploadSource");
+    if (select) {
+      select.innerHTML = sources.map(function (s) {
+        return '<option value="' + esc(s.id) + '">' + esc(s.name + " (" + s.kind + ")") + "</option>";
+      }).join("");
+      select.disabled = !sources.length;
+    }
+    var submit = document.querySelector('#uploadForm button[type="submit"]');
+    if (submit) submit.disabled = !sources.length;
   }
 
   function renderAdminImports(imports) {
-    const box = document.getElementById("adminImports");
-    box.innerHTML = imports.length
-      ? `<div class="grid-2">${imports.map((s) => `${importSummaryHtml(s)}
-          <div class="row-actions" style="margin-bottom:12px"><button type="button" class="danger" data-action="import-delete" data-id="${esc(s.id)}">Delete import ${esc(s.id)}</button></div>`).join("")}</div>`
-      : `<div class="empty">No imports yet.</div>`;
+    var box = document.getElementById("adminImports");
+    if (!box) return;
+    if (!imports.length) {
+      box.innerHTML = '<div class="empty">' + esc(t("admin.imports_none")) + "</div>";
+      return;
+    }
+    var rows = imports.map(function (imp) {
+      var counts = t("admin.import_counts", {
+        routes: fmtNum(imp.routes),
+        stops: fmtNum(imp.stops),
+        trips: fmtNum(imp.trips),
+        stop_times: fmtNum(imp.stop_times),
+        start: formatCalendarDate(imp.feed_start_date),
+        end: formatCalendarDate(imp.feed_end_date),
+      });
+      var problems = t("admin.import_problems", { errors: fmtNum(imp.errors.length), warnings: fmtNum(imp.warnings.length) });
+      var details = imp.errors.length || imp.warnings.length
+        ? "<details><summary>" + esc(problems) + "</summary>" + listHtml(imp.errors.concat(imp.warnings)) + "</details>"
+        : esc(problems);
+      return "<tr><td>" + esc(imp.id) + "</td><td><strong>" + esc(imp.filename) + '</strong><div class="muted">' + esc(counts) +
+        "</div></td><td>" + badge(imp.classification) + "</td><td>" + esc(statusText(imp.status)) + "<div>" + details + "</div></td><td>" +
+        '<button type="button" class="danger" data-action="import-delete" data-id="' + esc(imp.id) + '" aria-label="' +
+        esc(t("admin.import_delete", { id: imp.id })) + '">' + esc(t("common.delete")) + "</button></td></tr>";
+    }).join("");
+    box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.upload_file")) +
+      "</th><th>" + esc(t("admin.col_class")) + "</th><th>" + esc(t("admin.col_status")) + '</th><th><span class="sr-only">' +
+      esc(t("common.delete")) + "</span></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
 
   function renderAdminStats(stats) {
-    const c = stats.counts;
-    const pairs = [
-      ["Data sources", c.data_sources], ["Completed imports", c.imports_completed], ["Rejected imports", c.imports_rejected],
-      ["Routes", c.routes], ["Stops", c.stops], ["Trips", c.trips], ["Stop times", c.stop_times],
-      ["Shape points", c.shape_points], ["Scenarios (all devices)", c.scenarios], ["Audit entries", c.audit_entries],
-    ];
-    document.getElementById("adminStats").innerHTML = `<dl class="kv">${pairs.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
-      <p class="muted">Database: ${esc(stats.database)}. Active imports: official ${esc(stats.active_imports_by_classification.OFFICIAL_VERIFIED)}, unverified ${esc(stats.active_imports_by_classification.UNVERIFIED_FEED)}.</p>`;
+    var box = document.getElementById("adminStats");
+    if (!box) return;
+    var counts = stats.counts || {};
+    var perClass = stats.active_imports_by_classification || {};
+    box.innerHTML = '<dl class="kv">' +
+      STAT_KEYS.map(function (pair) {
+        return "<dt>" + esc(t(pair[1])) + "</dt><dd>" + esc(fmtNum(counts[pair[0]] || 0)) + "</dd>";
+      }).join("") +
+      "</dl>" +
+      '<p class="muted">' + esc(t("admin.active_imports", {
+        official: fmtNum(perClass.OFFICIAL_VERIFIED || 0),
+        unverified: fmtNum(perClass.UNVERIFIED_FEED || 0),
+      })) + "</p>" +
+      '<p class="muted">' + esc(t("admin.database", { name: stats.database || t("common.na") })) + "</p>";
   }
 
   function renderAdminAudit(entries) {
-    document.getElementById("adminAudit").innerHTML = entries.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Entity</th><th>Detail</th></tr></thead><tbody>${entries.map((e) => `<tr>
-          <td>${esc(e.time.replace("T", " ").slice(0, 19))}</td><td>${esc(e.actor)}</td><td>${esc(e.action)}</td>
-          <td>${esc(e.entity)} ${esc(e.entity_id || "")}</td><td class="muted">${esc(e.detail || "")}</td></tr>`).join("")}</tbody></table></div>`
-      : `<div class="empty">No audit entries yet.</div>`;
+    var box = document.getElementById("adminAudit");
+    if (!box) return;
+    if (!entries.length) {
+      box.innerHTML = '<div class="empty">' + esc(t("admin.audit_none")) + "</div>";
+      return;
+    }
+    var rows = entries.map(function (entry) {
+      var detail = entry.detail === null || entry.detail === undefined ? "" : JSON.stringify(entry.detail);
+      if (detail.length > 240) detail = detail.slice(0, 237) + "...";
+      var entity = entry.entity + (entry.entity_id === null || entry.entity_id === undefined ? "" : " " + entry.entity_id);
+      return "<tr><td>" + esc(utcText(entry.time)) + "</td><td>" + esc(entry.actor) + "</td><td>" + esc(entry.action) +
+        "</td><td>" + esc(entity) + '</td><td class="muted">' + esc(detail) + "</td></tr>";
+    }).join("");
+    box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.audit_time")) + "</th><th>" + esc(t("admin.audit_actor")) +
+      "</th><th>" + esc(t("admin.audit_action")) + "</th><th>" + esc(t("admin.audit_entity")) + "</th><th>" + esc(t("admin.audit_detail")) +
+      "</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
 
-  // ------------------------------------------------------------------ routing and events
-  const ROUTE_HANDLERS = {
-    routes: (rest) => renderRoutes(rest[0]),
-    stops: () => renderStops(),
-    journey: () => renderJourney(),
-    scenarios: () => renderScenarios(),
-    compare: () => renderCompare(),
-    sources: () => renderSources(),
-    admin: () => renderAdmin(),
-  };
-
-  async function render() {
-    const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-    const name = parts[0] && ROUTE_HANDLERS[parts[0]] ? parts[0] : "routes";
-    document.querySelectorAll("[data-nav]").forEach((link) => {
-      if (link.getAttribute("href") === `#/${name}`) link.setAttribute("aria-current", "page");
-      else link.removeAttribute("aria-current");
+  function importSummaryHtml(summary) {
+    var counts = t("admin.import_counts", {
+      routes: fmtNum(summary.routes),
+      stops: fmtNum(summary.stops),
+      trips: fmtNum(summary.trips),
+      stop_times: fmtNum(summary.stop_times),
+      start: formatCalendarDate(summary.feed_start_date),
+      end: formatCalendarDate(summary.feed_end_date),
     });
-    sidebar.classList.remove("open");
-    navToggle.setAttribute("aria-expanded", "false");
-    renderYearStatus();
-    try {
-      await ROUTE_HANDLERS[name](parts.slice(1));
-    } catch (err) {
-      setView(errorCard(err));
+    var problems = t("admin.import_problems", { errors: fmtNum(summary.errors.length), warnings: fmtNum(summary.warnings.length) });
+    var fares = t("admin.import_fares", { fares: fmtNum(summary.fares) });
+    var outcome = summary.status === "COMPLETED" ? "" : t("admin.import_nothing_stored");
+    var warningNote = summary.warnings.length ? t("admin.import_warnings_note") : "";
+    return "<p>" + badge(summary.classification) + " " + esc(statusText(summary.status)) + "</p>" +
+      (outcome ? "<p><strong>" + esc(outcome) + "</strong></p>" : "") +
+      '<p class="muted">' + esc(counts) + "</p>" +
+      '<p class="muted">' + esc(fares) + "</p>" +
+      '<p class="muted">' + esc(problems) + "</p>" +
+      (warningNote ? '<p class="muted">' + esc(warningNote) + "</p>" : "") +
+      listHtml(summary.errors) + listHtml(summary.warnings);
+  }
+
+  function setAdminNotice(html) {
+    var notice = document.getElementById("adminNotice");
+    if (notice) notice.innerHTML = html || "";
+  }
+
+  // A refused admin key signs the page out. Any other failure is shown on the admin page.
+  function adminFailure(err, token) {
+    if (err && err.status === 401) {
+      state.adminKey = "";
+      if (token === state.viewToken) {
+        toast(t("admin.key_rejected"));
+        render();
+      }
+      return;
+    }
+    if (token === state.viewToken) {
+      setAdminNotice('<div class="banner error" role="alert">' + esc(err && err.message ? err.message : t("msg.unexpected")) + "</div>");
     }
   }
 
-  const ACTIONS = {
-    cls(el) {
-      state.classification = el.dataset.cls === "UNVERIFIED_FEED" ? "UNVERIFIED_FEED" : "OFFICIAL_VERIFIED";
-      localStorage.setItem("bmtc.classification", state.classification);
-      render();
-    },
-    async "tt-load"(el) { await loadTimetable(el.dataset.id); },
-    async "tt-csv"(el) {
-      const date = document.getElementById("ttDate").value;
-      await download(`/api/routes/${encodeURIComponent(el.dataset.id)}/timetable.csv?date=${encodeURIComponent(date)}`, "timetable.csv");
-    },
-    async "save-route"(el) {
-      await api("/api/saved-routes", { method: "POST", json: { gtfs_route_id: el.dataset.gtfs, classification: el.dataset.cls, label: el.dataset.label } });
-      toast("Route saved to this device.");
-    },
-    async "open-saved"(el) {
-      const params = new URLSearchParams({ classification: el.dataset.cls, q: el.dataset.gtfs, limit: "5" });
-      const data = await api(`/api/routes?${params}`);
-      const exact = data.results.find((r) => r.gtfs_route_id === el.dataset.gtfs) || data.results[0];
-      if (exact) location.hash = `#/routes/${exact.id}`;
-      else toast("That route is no longer in the data.");
-    },
-    async "del-saved"(el) {
-      await api(`/api/saved-routes/${encodeURIComponent(el.dataset.id)}`, { method: "DELETE" });
-      await loadSaved();
-    },
-    "nearby-me"() { nearbyStops(); },
-    async "scn-new"() { await openScenarioForm(null); },
-    async "scn-edit"(el) { await openScenarioForm(el.dataset.id); },
-    async "scn-del"(el) {
-      if (!window.confirm("Delete this estimated scenario? This cannot be undone.")) return;
-      await api(`/api/scenarios/${encodeURIComponent(el.dataset.id)}`, { method: "DELETE" });
-      toast("Scenario deleted.");
-      await loadScenarioList();
-    },
-    async "scn-pdf"(el) {
-      await download(`/api/scenarios/${encodeURIComponent(el.dataset.id)}/export.pdf`, "estimated_scenario.pdf");
-    },
-    async "scn-csv"() {
-      const filter = document.getElementById("scnYearFilter");
-      const year = filter ? filter.value : "";
-      await download(`/api/scenarios/export.csv${year ? "?year=" + encodeURIComponent(year) : ""}`, "estimated_scenarios.csv");
-    },
-    "scn-add-stop"() {
-      syncStopsFromDom();
-      if (state.scenarioStops.length >= MAX_SCENARIO_STOPS) return toast(`A scenario can have at most ${MAX_SCENARIO_STOPS} stops.`);
-      state.scenarioStops.push({ name: "", lat: null, lon: null });
-      renderScenarioStops();
-    },
-    "scn-remove-stop"(el) {
-      syncStopsFromDom();
-      state.scenarioStops.splice(Number(el.dataset.index), 1);
-      renderScenarioStops();
-    },
-    "scn-cancel"() {
-      document.getElementById("scnForm").hidden = true;
-      state.scenarioEditId = null;
-    },
-    async "cmp-run"() { await runComparison(); },
-    async "cmp-pdf"() {
-      const a = document.getElementById("cmpA").value;
-      const b = document.getElementById("cmpB").value;
-      if (!a || !b) return toast("Choose two scenarios first.");
-      await download(`/api/scenarios/compare.pdf?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`, "estimated_scenario_comparison.pdf");
-    },
-    "admin-key-save"() {
-      const input = document.getElementById("adminKeyInput");
-      state.adminKey = input.value.trim();
-      if (!state.adminKey) return toast("Enter the admin key.");
-      sessionStorage.setItem("bmtc.adminKey", state.adminKey);
-      loadAdmin().catch((err) => toast(err.message));
-    },
-    "admin-key-clear"() {
-      state.adminKey = "";
-      sessionStorage.removeItem("bmtc.adminKey");
-      toast("Admin key forgotten for this session.");
-      renderAdmin().catch((err) => setView(errorCard(err)));
-    },
-    async "src-verify"(el) {
-      const note = window.prompt("Record the evidence for this verification (publisher page, date checked, licence):", "");
-      if (note === null) return;
-      await api(`/api/admin/data-sources/${encodeURIComponent(el.dataset.id)}/verify`, { method: "POST", admin: true, json: { verified: true, note } });
-      toast("Source verified. Its imports were reclassified.");
-      await loadAdmin();
-    },
-    async "src-revoke"(el) {
-      const note = window.prompt("Reason for revoking verification:", "");
-      if (note === null) return;
-      await api(`/api/admin/data-sources/${encodeURIComponent(el.dataset.id)}/verify`, { method: "POST", admin: true, json: { verified: false, note } });
-      toast("Verification revoked. Its imports were reclassified.");
-      await loadAdmin();
-    },
-    async "import-delete"(el) {
-      if (!window.confirm("Delete this import and all of its timetable rows?")) return;
-      await api(`/api/admin/imports/${encodeURIComponent(el.dataset.id)}`, { method: "DELETE", admin: true });
-      toast("Import deleted.");
-      await loadAdmin();
-    },
-    async backup() {
-      const result = await api("/api/admin/backup", { method: "POST", admin: true });
-      toast(`Backup written: ${result.file}`);
-      await loadAdmin();
-    },
-  };
+  async function refreshAdminData(token) {
+    var results = await Promise.all([
+      api("/api/admin/data-sources", { admin: true }),
+      api("/api/admin/imports", { admin: true }),
+      api("/api/admin/stats", { admin: true }),
+      api("/api/admin/audit-logs?limit=50", { admin: true }),
+    ]);
+    if (token !== state.viewToken || !document.getElementById("adminBody")) return;
+    setAdminNotice("");
+    renderAdminSources(results[0].sources);
+    renderAdminImports(results[1].imports);
+    renderAdminStats(results[2]);
+    renderAdminAudit(results[3].entries);
+  }
 
-  const FORMS = {
-    async routeSearch(form) {
-      await loadRouteResults(new FormData(form).get("q") || "");
-    },
-    async stopSearch(form) {
-      await loadStops(new FormData(form).get("q") || "");
-    },
-    async journeyForm(form) {
-      const f = new FormData(form);
-      const box = document.getElementById("journeyResults");
-      box.innerHTML = loading("Searching timetables...");
-      const params = new URLSearchParams({
-        origin: String(f.get("origin") || "").trim(),
-        destination: String(f.get("destination") || "").trim(),
-        date: String(f.get("date") || ""),
-        classification: state.classification,
-      });
-      const data = await api(`/api/journey?${params}`);
-      box.innerHTML = data.journeys.length
-        ? `<p class="muted">${esc(data.note)}</p><div class="table-wrap"><table>
-            <thead><tr><th>Route</th><th>Departs</th><th>Arrives</th><th class="num">Minutes</th><th>From</th><th>To</th></tr></thead>
-            <tbody>${data.journeys.map((j) => `<tr><td>${esc(j.route_number)}<div class="muted">${esc(j.headsign || "")}</div></td>
-              <td>${esc(j.departure)}</td><td>${esc(j.arrival)}</td><td class="num">${esc(j.duration_minutes)}</td>
-              <td>${esc(j.origin_stop)}</td><td>${esc(j.destination_stop)}</td></tr>`).join("")}</tbody></table></div>`
-        : `<div class="empty">${esc(data.message || "No direct service found.")}</div>`;
-    },
-    async scenarioForm(form) {
-      await submitScenario(form);
-    },
-    async sourceForm(form) {
-      const f = new FormData(form);
-      await api("/api/admin/data-sources", {
-        method: "POST", admin: true,
-        json: {
-          name: f.get("name"), publisher: f.get("publisher"),
-          source_url: String(f.get("source_url") || "").trim() || null,
-          license: String(f.get("license") || "Not specified"), kind: f.get("kind"),
-        },
-      });
-      toast("Data source added. It is unverified until an administrator verifies it.");
-      await loadAdmin();
-    },
-    async uploadForm(form) {
-      const box = document.getElementById("uploadResult");
-      box.innerHTML = loading("Validating and importing the feed...");
-      try {
-        const data = await api("/api/admin/imports", { method: "POST", admin: true, form: new FormData(form) });
-        box.innerHTML = importSummaryHtml(data.import);
-        toast("Feed imported.");
-      } catch (err) {
-        if (err.data && err.data.import) {
-          box.innerHTML = importSummaryHtml(err.data.import);
-          toast("The feed was rejected. Review the errors below.");
-        } else {
-          box.innerHTML = `<div class="banner error">${esc(err.message)}</div>`;
-        }
+  // ---------------------------------------------------------------- administration: actions
+  // Disables a form's submit button while its request runs, so one click cannot send the request twice.
+  function busy(form, on) {
+    var button = form ? form.querySelector('button[type="submit"]') : null;
+    if (button) button.disabled = on;
+  }
+
+  function adminHeaders() {
+    if (!state.adminKey) throw new Error(t("admin.key_needed"));
+    return { Accept: "application/json", "X-Client-Key": clientKey(), "X-Admin-Key": state.adminKey };
+  }
+
+  function saveAdminKey(input) {
+    var key = input && input.value ? String(input.value).trim() : "";
+    if (!key) {
+      toast(t("admin.key_empty"));
+      return;
+    }
+    state.adminKey = key;
+    render();
+  }
+
+  function forgetAdminKey() {
+    state.adminKey = "";
+    toast(t("admin.key_forgotten"));
+    render();
+  }
+
+  async function submitSource(form, token) {
+    var data = new FormData(form);
+    var url = String(data.get("source_url") || "").trim();
+    var license = String(data.get("license") || "").trim();
+    var body = {
+      name: String(data.get("name") || "").trim(),
+      publisher: String(data.get("publisher") || "").trim(),
+      source_url: url || null,
+      kind: String(data.get("kind") || "UNKNOWN"),
+    };
+    if (license) body.license = license;
+    busy(form, true);
+    try {
+      await api("/api/admin/data-sources", { admin: true, method: "POST", json: body });
+      form.reset();
+      toast(t("admin.source_added"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  async function submitUpload(form, token) {
+    var box = document.getElementById("uploadResult");
+    if (!box) return;
+    busy(form, true);
+    box.innerHTML = loadingInline(t("admin.uploading"));
+    var timer = startTimer(IMPORT_TIMEOUT_MS);
+    try {
+      var response = await send("/api/admin/imports", { method: "POST", headers: adminHeaders(), body: new FormData(form) }, timer.signal);
+      var result = await readJson(response);
+      if (response.status === 401) {
+        var refused = new Error(t("admin.key_rejected"));
+        refused.status = 401;
+        throw refused;
       }
-      await loadAdmin();
-    },
+      // 201 means stored, 422 means the feed was checked and rejected. Both carry the import summary.
+      if (!result || !result.import) throw httpError(response, result);
+      if (token !== state.viewToken || !box.isConnected) return;
+      box.innerHTML = "<h3>" + esc(t(response.status === 201 ? "admin.uploaded" : "admin.rejected")) + "</h3>" +
+        importSummaryHtml(result.import);
+      form.elements.file.value = "";
+      refreshAdminData(token).catch(function (err) {
+        adminFailure(err, token);
+      });
+    } catch (err) {
+      if (err && err.status === 401) {
+        adminFailure(err, token);
+      } else if (token === state.viewToken && box.isConnected) {
+        box.innerHTML = '<div class="banner error" role="alert">' + esc(err && err.message ? err.message : t("msg.unexpected")) + "</div>";
+      }
+    } finally {
+      timer.stop();
+      busy(form, false);
+    }
+  }
+
+  async function createBackup(token) {
+    try {
+      var data = await api("/api/admin/backup", { admin: true, method: "POST", timeout: BACKUP_TIMEOUT_MS });
+      toast(t("admin.backup_done", { file: data.file }));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    }
+  }
+
+  async function deleteImport(id, token) {
+    if (!window.confirm(t("admin.import_delete_confirm"))) return;
+    try {
+      await api("/api/admin/imports/" + encodeURIComponent(id), { admin: true, method: "DELETE" });
+      toast(t("admin.import_deleted"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    }
+  }
+
+  // The evidence or reason is asked in a prompt, so it is recorded with the decision in the audit log.
+  // Verifying or revoking a source asks for its evidence on this page, not in a browser dialog. The question stays
+  // on screen, the answer is typed with the keyboard, and Cancel or Escape leaves the status unchanged.
+  var decisionOpener = null;
+
+  function openSourceDecision(id, verified, opener) {
+    var form = document.getElementById("sourceDecisionForm");
+    if (!form) return;
+    decisionOpener = opener && opener.isConnected ? opener : null;
+    form.elements.namedItem("source_id").value = String(id);
+    form.elements.namedItem("verified").value = verified ? "true" : "false";
+    form.elements.namedItem("note").value = "";
+    document.getElementById("decisionQuestion").textContent = t(verified ? "admin.verify_prompt" : "admin.revoke_prompt");
+    document.getElementById("decisionSubmit").textContent = t(verified ? "admin.verify" : "admin.revoke");
+    form.hidden = false;
+    form.elements.namedItem("note").focus();
+  }
+
+  function closeSourceDecision() {
+    var form = document.getElementById("sourceDecisionForm");
+    if (!form) return;
+    form.hidden = true;
+    form.reset();
+    if (decisionOpener && decisionOpener.isConnected) decisionOpener.focus();
+    decisionOpener = null;
+  }
+
+  async function submitDecision(form, token) {
+    var verified = form.elements.namedItem("verified").value === "true";
+    var id = form.elements.namedItem("source_id").value;
+    var note = String(form.elements.namedItem("note").value || "").trim();
+    if (!id || !note) {
+      form.elements.namedItem("note").focus();
+      return;
+    }
+    busy(form, true);
+    try {
+      await api("/api/admin/data-sources/" + encodeURIComponent(id) + "/verify", {
+        admin: true,
+        method: "POST",
+        json: { verified: verified, note: note.slice(0, 500) },
+      });
+      if (token !== state.viewToken) return;
+      closeSourceDecision();
+      toast(t(verified ? "admin.verify_done" : "admin.revoke_done"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  // ---------------------------------------------------------------- routing table
+  var ROUTES = {
+    routes: renderRoutes,
+    stops: renderStops,
+    journey: renderJourney,
+    scenarios: renderScenarios,
+    compare: renderCompare,
+    sources: renderSources,
+    admin: renderAdmin,
   };
 
-  document.addEventListener("click", (event) => {
-    const el = event.target.closest("[data-action]");
-    if (!el || el.disabled) return;
-    const handler = ACTIONS[el.dataset.action];
-    if (!handler) return;
-    event.preventDefault();
-    Promise.resolve(handler(el)).catch((err) => toast(err.message));
+  function fail(err) {
+    toast(err && err.message ? err.message : t("msg.unexpected"));
+  }
+
+  // ---------------------------------------------------------------- saved routes, timetables, scenario helpers
+  function setClassification(code) {
+    if (code !== "OFFICIAL_VERIFIED" && code !== "UNVERIFIED_FEED") return;
+    state.classification = code;
+    storage.set(PREFIX + "classification", code);
+    render();
+  }
+
+  // A saved route is found again by its GTFS id, because internal ids change when a feed is re-imported.
+  async function openSavedRoute(gtfsId, classification) {
+    if (classification !== "OFFICIAL_VERIFIED" && classification !== "UNVERIFIED_FEED") return;
+    var data;
+    try {
+      data = await api("/api/routes?" + new URLSearchParams({ classification: classification, q: gtfsId, limit: "500" }).toString());
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    var match = data.results.filter(function (route) {
+      return route.gtfs_route_id === gtfsId;
+    })[0];
+    if (!match) {
+      toast(t("routes.saved_gone"));
+      return;
+    }
+    state.classification = classification;
+    storage.set(PREFIX + "classification", classification);
+    location.hash = "#/routes/" + encodeURIComponent(match.id);
+  }
+
+  async function saveRoute(node) {
+    var gtfsId = node.getAttribute("data-gtfs");
+    var label = String(node.getAttribute("data-label") || gtfsId || "").slice(0, 200);
+    try {
+      await api("/api/saved-routes", {
+        method: "POST",
+        json: { gtfs_route_id: gtfsId, classification: node.getAttribute("data-cls"), label: label },
+      });
+      toast(t("routes.saved_done"));
+    } catch (err) {
+      toast(err.status === 404 ? t("routes.saved_gone") : err.message);
+    }
+  }
+
+  async function deleteSaved(id, token) {
+    try {
+      await api("/api/saved-routes/" + encodeURIComponent(id), { method: "DELETE" });
+      await loadSaved(document.getElementById("savedRoutes"), token);
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  async function downloadTimetable(routeId) {
+    var input = document.getElementById("ttDate");
+    if (!input || !isIsoDate(input.value)) {
+      toast(t("common.bad_date"));
+      return;
+    }
+    try {
+      await download(
+        "/api/routes/" + encodeURIComponent(routeId) + "/timetable.csv?date=" + encodeURIComponent(input.value),
+        "timetable_" + routeId + "_" + input.value + ".csv"
+      );
+    } catch (err) {
+      toast(err.status === 404 ? messageFor("NOT_COVERED") : err.message);
+    }
+  }
+
+  function closeScenarioForm() {
+    var box = document.getElementById("scnForm");
+    if (box) {
+      box.hidden = true;
+      box.innerHTML = "";
+    }
+    state.scenarioEditId = null;
+    state.scenarioStops = [];
+  }
+
+  function addScenarioStop() {
+    syncStopsFromDom();
+    if (state.scenarioStops.length >= MAX_SCENARIO_STOPS) {
+      toast(t("scn.max_stops", { max: MAX_SCENARIO_STOPS }));
+      return;
+    }
+    state.scenarioStops.push({ name: "", lat: null, lon: null });
+    renderScenarioStops();
+  }
+
+  function removeScenarioStop(index) {
+    syncStopsFromDom();
+    if (index >= 0 && index < state.scenarioStops.length) state.scenarioStops.splice(index, 1);
+    renderScenarioStops();
+  }
+
+  async function deleteScenario(id, token) {
+    if (!window.confirm(t("scn.delete_confirm"))) return;
+    try {
+      await api("/api/scenarios/" + encodeURIComponent(id), { method: "DELETE" });
+      if (String(state.scenarioEditId) === String(id)) closeScenarioForm();
+      toast(t("scn.deleted"));
+      await loadScenarioList(document.getElementById("scnList"), token);
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  function exportScenariosCsv() {
+    var filter = document.getElementById("scnYearFilter");
+    var query = filter && filter.value ? "?year=" + encodeURIComponent(filter.value) : "";
+    return download("/api/scenarios/export.csv" + query, "estimated_scenarios.csv");
+  }
+
+  // ---------------------------------------------------------------- one delegated handler per event type
+  function handleAction(action, node) {
+    var token = state.viewToken;
+    var id = node.getAttribute("data-id");
+    switch (action) {
+      case "rerender":
+        render();
+        break;
+      case "cls":
+        setClassification(node.getAttribute("data-cls"));
+        break;
+      case "tt-load":
+        loadTimetable(id, token);
+        break;
+      case "tt-csv":
+        downloadTimetable(id);
+        break;
+      case "save-route":
+        saveRoute(node);
+        break;
+      case "open-saved":
+        openSavedRoute(node.getAttribute("data-gtfs"), node.getAttribute("data-cls"));
+        break;
+      case "del-saved":
+        deleteSaved(id, token);
+        break;
+      case "nearby-me":
+        nearbyStops();
+        break;
+      case "scn-new":
+        openScenarioForm(null, token);
+        break;
+      case "scn-edit":
+        openScenarioForm(id, token);
+        break;
+      case "scn-del":
+        deleteScenario(id, token);
+        break;
+      case "scn-pdf":
+        download("/api/scenarios/" + encodeURIComponent(id) + "/export.pdf", "estimated_scenario_" + id + ".pdf").catch(fail);
+        break;
+      case "scn-csv":
+        exportScenariosCsv().catch(fail);
+        break;
+      case "scn-add-stop":
+        addScenarioStop();
+        break;
+      case "scn-remove-stop":
+        removeScenarioStop(Number(node.getAttribute("data-index")));
+        break;
+      case "scn-cancel":
+        closeScenarioForm();
+        break;
+      case "cmp-run":
+        runComparison(token);
+        break;
+      case "cmp-pdf":
+        comparisonPdf().catch(fail);
+        break;
+      case "src-verify":
+        openSourceDecision(id, true, node);
+        break;
+      case "src-revoke":
+        openSourceDecision(id, false, node);
+        break;
+      case "decision-cancel":
+        closeSourceDecision();
+        break;
+      case "import-delete":
+        deleteImport(id, token);
+        break;
+      case "backup":
+        createBackup(token);
+        break;
+      case "admin-key-clear":
+        forgetAdminKey();
+        break;
+      default:
+        break;
+    }
+  }
+
+  el.view.addEventListener("click", function (event) {
+    var target = event.target && event.target.closest ? event.target.closest("[data-action]") : null;
+    if (!target || target.disabled) return;
+    handleAction(target.getAttribute("data-action"), target);
   });
 
-  view.addEventListener("submit", (event) => {
-    const form = event.target;
-    const handler = FORMS[form.id === "scenarioForm" ? "scenarioForm" : form.id];
-    if (!handler) return;
-    event.preventDefault();
-    Promise.resolve(handler(form)).catch((err) => toast(err.message));
+  el.view.addEventListener("submit", function (event) {
+    var form = event.target;
+    if (!form || !form.id) return;
+    var token = state.viewToken;
+    var handled = true;
+    switch (form.id) {
+      case "routeSearch":
+        loadRouteResults(String(form.elements.q.value || "").trim(), document.getElementById("routeResults"), token);
+        break;
+      case "stopSearch":
+        loadStops(String(form.elements.q.value || "").trim(), token);
+        break;
+      case "journeyForm":
+        submitJourney(form, token);
+        break;
+      case "scenarioForm":
+        submitScenario(form, token);
+        break;
+      case "sourceDecisionForm":
+        submitDecision(form, token);
+        break;
+      case "sourceForm":
+        submitSource(form, token);
+        break;
+      case "uploadForm":
+        submitUpload(form, token);
+        break;
+      case "adminKeyForm":
+        saveAdminKey(form.elements.key);
+        break;
+      default:
+        handled = false;
+    }
+    if (handled) event.preventDefault();
   });
 
-  view.addEventListener("change", (event) => {
-    if (event.target.id === "scnYearFilter") loadScenarioList().catch((err) => toast(err.message));
+  el.view.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || !event.target || !event.target.closest) return;
+    if (event.target.closest("#sourceDecisionForm")) closeSourceDecision();
   });
 
-  yearSelect.value = String(state.year);
-  yearSelect.addEventListener("change", () => {
-    state.year = Number(yearSelect.value);
-    localStorage.setItem("bmtc.year", String(state.year));
+  el.view.addEventListener("change", function (event) {
+    var target = event.target;
+    if (!target) return;
+    if (target.id === "scnYearFilter") {
+      loadScenarioList(document.getElementById("scnList"), state.viewToken);
+    } else if (target.name === "when" && target.form && target.form.elements.date) {
+      // Leave now is the default; the date is used only when "On a date" is chosen.
+      target.form.elements.date.disabled = target.value !== "date";
+    }
+  });
+
+  // ---------------------------------------------------------------- page controls
+  el.yearSelect.addEventListener("change", function () {
+    var year = Number(el.yearSelect.value);
+    if (PLANNING_YEARS.indexOf(year) === -1) {
+      el.yearSelect.value = String(state.year);
+      return;
+    }
+    state.year = year;
+    storage.set(PREFIX + "year", String(year));
     render();
   });
 
-  navToggle.addEventListener("click", () => {
-    const open = sidebar.classList.toggle("open");
-    navToggle.setAttribute("aria-expanded", String(open));
+  el.langSelect.addEventListener("change", function () {
+    setLanguage(el.langSelect.value);
+    render();
   });
 
-  window.addEventListener("hashchange", render);
-  window.addEventListener("unhandledrejection", (event) => {
-    if (event.reason && event.reason.message) toast(event.reason.message);
+  el.navToggle.addEventListener("click", function () {
+    setMenu(!el.sidebar.classList.contains("open"));
   });
 
-  if (!location.hash) location.hash = "#/routes";
-  render();
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && el.sidebar.classList.contains("open")) {
+      setMenu(false);
+      el.navToggle.focus();
+    }
+  });
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js").catch(() => { /* offline shell is optional */ });
+  window.addEventListener("hashchange", function () {
+    render();
+  });
+  window.addEventListener("online", syncOnlineState);
+  window.addEventListener("offline", syncOnlineState);
+  window.addEventListener("unhandledrejection", function () {
+    toast(t("msg.unexpected"));
+  });
+
+  // ---------------------------------------------------------------- startup
+  function init() {
+    state.lang = pickInitialLanguage();
+    populateLanguages();
+    var savedYear = Number(storage.get(PREFIX + "year"));
+    if (PLANNING_YEARS.indexOf(savedYear) !== -1) state.year = savedYear;
+    el.yearSelect.value = String(state.year);
+    var savedClass = storage.get(PREFIX + "classification");
+    if (savedClass === "OFFICIAL_VERIFIED" || savedClass === "UNVERIFIED_FEED") state.classification = savedClass;
+    setLanguage(state.lang);
+    syncOnlineState();
+    // The skip link moves focus to the page content without changing the address. Following it as a plain link
+    // would change the route, and the visitor would lose the page they were on.
+    var skip = document.querySelector(".skip-link");
+    if (skip) {
+      skip.addEventListener("click", function (event) {
+        var main = document.getElementById("main");
+        if (!main) return;
+        event.preventDefault();
+        main.focus();
+      });
+    }
+    if (!location.hash) history.replaceState(null, "", "#/routes");
+    setView(loadingCard());
+    // Dates come from the server clock, so the first render waits for it (or for its failure).
+    loadClock().then(function () {
+      render();
+    });
+    setInterval(tick, CLOCK_TICK_MS);
+    if ("serviceWorker" in navigator) {
+      // A new worker takes over while this page is open, so say that a reload will show the new version.
+      var hadWorker = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        if (hadWorker) toast(t("offline.update_ready"));
+      });
+      navigator.serviceWorker.register("/sw.js").catch(function () {});
+    }
   }
+
+  init();
 })();

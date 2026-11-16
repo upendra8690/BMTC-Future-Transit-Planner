@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Explore timetables from official feeds and plan clearly labelled future bus scenarios for 2027 to 2030.">
+  <meta name="description" content="Bus timetables from the loaded feeds, each labelled by its source, and clearly labelled future scenarios for 2027 to 2030. English, Kannada, Telugu and Hindi.">
   <meta name="theme-color" content="#0b5cad">
   <meta name="color-scheme" content="light dark">
   <title>BMTC Future Transit Planner</title>
@@ -14,31 +14,57 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
+  <noscript>
+    <p class="noscript">This planner needs JavaScript to show timetables. Please turn JavaScript on in your browser.<br>
+    ಈ ಯೋಜಕಕ್ಕೆ ಜಾವಾಸ್ಕ್ರಿಪ್ಟ್ ಬೇಕು. ನಿಮ್ಮ ಬ್ರೌಸರ್ನಲ್ಲಿ ಅದನ್ನು ಚಾಲೂ ಮಾಡಿ.<br>
+    इस प्लानर को समय-सारणी दिखाने के लिए JavaScript चाहिए। कृपया अपने ब्राउज़र में JavaScript चालू करें।<br>
+    ఈ ప్లానర్ సమయ పట్టికలు చూపించడానికి జావాస్క్రిప్ట్ అవసరం. దయచేసి మీ బ్రౌజర్‌లో జావాస్క్రిప్ట్‌ను ఆన్ చేయండి.</p>
+  </noscript>
+
+  <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+
+  <div id="offlineBanner" class="offline-banner" role="status" hidden>
+    <span data-i18n="offline.banner">You are offline. Timetable data comes from the server, so it cannot load until you are back online.</span>
+  </div>
+
+  <div id="savedBanner" class="saved-banner" role="status" hidden>
+    <span id="savedText"></span>
+  </div>
 
   <header class="topbar">
-    <button id="navToggle" class="icon-btn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
-    <div class="brand">BMTC Future Transit Planner</div>
-    <label class="year-picker">
-      <span class="sr-only">Planning year</span>
-      <select id="yearSelect" aria-label="Planning year">
-        <option value="2027">2027</option>
-        <option value="2028">2028</option>
-        <option value="2029">2029</option>
-        <option value="2030">2030</option>
-      </select>
-    </label>
+    <button id="navToggle" class="icon-btn" type="button" aria-label="Open menu" data-i18n-aria="menu.open" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+    <h1 class="brand" data-i18n="app.brand">BMTC Future Transit Planner</h1>
+    <div class="top-controls">
+      <label class="picker year-picker">
+        <span class="sr-only" data-i18n="year.label">Planning year</span>
+        <select id="yearSelect" aria-label="Planning year" data-i18n-aria="year.label">
+          <option value="2027">2027</option>
+          <option value="2028">2028</option>
+          <option value="2029">2029</option>
+          <option value="2030">2030</option>
+        </select>
+      </label>
+      <label class="picker lang-picker">
+        <span class="sr-only" data-i18n="lang.label">Language</span>
+        <select id="langSelect" aria-label="Language" data-i18n-aria="lang.label"></select>
+      </label>
+    </div>
   </header>
 
+  <section class="clock-bar" aria-label="Service time" data-i18n-aria="clock.label">
+    <span class="clock-label" data-i18n="clock.label">Service time</span>
+    <span id="serviceClock" class="clock-value" role="status" aria-live="off" data-i18n="clock.loading">Reading the service clock...</span>
+  </section>
+
   <div class="layout">
-    <nav id="sidebar" class="sidebar" aria-label="Main navigation">
-      <a href="#/routes" data-nav>Routes and timetables</a>
-      <a href="#/stops" data-nav>Stops</a>
-      <a href="#/journey" data-nav>Direct journeys</a>
-      <a href="#/scenarios" data-nav>Future scenarios</a>
-      <a href="#/compare" data-nav>Compare</a>
-      <a href="#/sources" data-nav>Data sources</a>
-      <a href="#/admin" data-nav>Administration</a>
+    <nav id="sidebar" class="sidebar" aria-label="Main navigation" data-i18n-aria="nav.label">
+      <a href="#/routes" data-nav data-i18n="nav.routes">Routes and timetables</a>
+      <a href="#/stops" data-nav data-i18n="nav.stops">Stops</a>
+      <a href="#/journey" data-nav data-i18n="nav.journey">Direct journeys</a>
+      <a href="#/scenarios" data-nav data-i18n="nav.scenarios">Future scenarios</a>
+      <a href="#/compare" data-nav data-i18n="nav.compare">Compare</a>
+      <a href="#/sources" data-nav data-i18n="nav.sources">Data sources</a>
+      <a href="#/admin" data-nav data-i18n="nav.admin">Administration</a>
     </nav>
 
     <main id="main" class="content" tabindex="-1">
@@ -47,9 +73,12 @@
     </main>
   </div>
 
+  <footer class="site-note"><p data-i18n="app.disclaimer">Unofficial. This planner is not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro or any transport operator. Times are scheduled, not live.</p></footer>
+
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script src="/vendor/leaflet/leaflet.js" defer></script>
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

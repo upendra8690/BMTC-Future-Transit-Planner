@@ -13,11 +13,13 @@ from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from app import models  # noqa: F401  (registers every table on Base.metadata)
 from app.database import Base, Database
-from app.schema_migrations import BASELINE_REVISION, current_revision, head_revision
+from app.schema_migrations import current_revision, head_revision
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
+# Tables that migration 0002 added. Earlier builds never had them, so a simulated old database leaves them out.
+FARE_TABLES = {"fare_attributes", "fare_rules"}
 
 
 def _url(path: Path) -> str:
@@ -49,8 +51,8 @@ def test_new_database_reaches_head_and_matches_the_models(tmp_path):
     path = tmp_path / "new.db"
     db = Database(_url(path))
     try:
-        assert db.create_schema() == BASELINE_REVISION
-        assert current_revision(db.engine) == head_revision() == BASELINE_REVISION
+        assert db.create_schema() == head_revision()
+        assert current_revision(db.engine) == head_revision() == "0002"
         with db.engine.connect() as connection:
             differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
     finally:
@@ -65,8 +67,8 @@ def test_running_the_upgrade_again_changes_nothing(tmp_path):
     try:
         db.create_schema()
         tables_before = _table_names(path)
-        assert db.create_schema() == BASELINE_REVISION
-        assert current_revision(db.engine) == BASELINE_REVISION
+        assert db.create_schema() == head_revision()
+        assert current_revision(db.engine) == head_revision()
     finally:
         db.dispose()
     assert _table_names(path) == tables_before
@@ -76,7 +78,9 @@ def test_database_built_before_migrations_is_stamped_and_keeps_its_rows(tmp_path
     path = tmp_path / "legacy.db"
     engine = create_engine(_url(path), poolclass=NullPool)
     try:
-        Base.metadata.create_all(engine)  # what earlier builds did at start-up
+        # What earlier builds did at start-up: the baseline tables only, with no version table.
+        baseline_tables = [t for t in Base.metadata.sorted_tables if t.name not in FARE_TABLES]
+        Base.metadata.create_all(engine, tables=baseline_tables)
         with engine.begin() as connection:
             connection.exec_driver_sql(
                 "INSERT INTO data_sources (name, publisher, license, kind, verified, created_at) "
@@ -88,13 +92,48 @@ def test_database_built_before_migrations_is_stamped_and_keeps_its_rows(tmp_path
 
     db = Database(_url(path))
     try:
-        assert db.create_schema() == BASELINE_REVISION
-        assert current_revision(db.engine) == BASELINE_REVISION
+        assert db.create_schema() == head_revision()
+        assert current_revision(db.engine) == head_revision()
         with db.engine.connect() as connection:
             rows = connection.exec_driver_sql("SELECT COUNT(*) FROM data_sources").scalar()
     finally:
         db.dispose()
     assert rows == 1
+    assert _table_names(path) >= FARE_TABLES
+
+
+def test_a_version_two_database_gains_the_fare_tables_and_keeps_every_row(tmp_path):
+    """The real upgrade path: a database at revision 0001 with records in it, then the server starts on 0002."""
+    path = tmp_path / "v2.db"
+    url = _url(path)
+    assert _alembic(url, "upgrade", "0001").returncode == 0
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "INSERT INTO data_sources (name, publisher, license, kind, verified, created_at) "
+            "VALUES ('Kept source', 'Test publisher', 'test', 'UNKNOWN', 0, '2026-01-01 00:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO audit_logs (created_at, actor, action, entity, entity_id, detail, ip) "
+            "VALUES ('2026-01-01 00:00:00', 'admin', 'test.kept', 'x', NULL, '{}', NULL)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert FARE_TABLES.isdisjoint(_table_names(path))
+
+    db = Database(url)
+    try:
+        assert db.create_schema() == "0002"
+    finally:
+        db.dispose()
+    assert _table_names(path) >= FARE_TABLES
+    conn = sqlite3.connect(path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM data_sources WHERE name = 'Kept source'").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM audit_logs WHERE action = 'test.kept'").fetchone()[0] == 1
+    finally:
+        conn.close()
 
 
 def test_alembic_command_upgrades_downgrades_and_upgrades_again(tmp_path):

@@ -1,14 +1,17 @@
 {
   "name": "BMTC Future Transit Planner",
   "short_name": "Transit Planner",
-  "description": "Verified timetables and clearly labelled future bus scenarios for 2027 to 2030.",
+  "description": "Bus timetables from the loaded feeds, each labelled by its source, and labelled future scenarios for 2027 to 2030.",
   "id": "/",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#f4f6f9",
   "theme_color": "#0b5cad",
+  "categories": ["travel", "navigation"],
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }

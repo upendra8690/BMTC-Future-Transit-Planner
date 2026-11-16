@@ -26,7 +26,7 @@
   <rect width="1200" height="360" rx="18" fill="url(#bg)"/>
 
   <text x="70" y="104" class="h">BMTC Future Transit Planner</text>
-  <text x="72" y="148" class="s">Plan Bengaluru bus services for 2027 – 2030, honestly.</text>
+  <text x="72" y="148" class="s">Unofficial Bengaluru bus timetables and 2027 – 2030 scenarios.</text>
 
   <!-- classification pills -->
   <g transform="translate(72,178)">
@@ -68,9 +68,9 @@
   <!-- side stats -->
   <g transform="translate(870,70)" font-family="'Segoe UI', Helvetica, Arial, sans-serif">
     <rect width="260" height="150" rx="14" fill="#ffffff" fill-opacity="0.04" stroke="#30363d"/>
-    <text x="24" y="44" font-size="30" font-weight="700" fill="#f0f6fc">159 tests</text>
+    <text x="24" y="44" font-size="30" font-weight="700" fill="#f0f6fc">366 tests</text>
     <text x="24" y="70" font-size="15" fill="#9fb0c3">all passing on Linux</text>
-    <text x="24" y="110" font-size="30" font-weight="700" fill="#f0f6fc">35 API ops</text>
+    <text x="24" y="110" font-size="30" font-weight="700" fill="#f0f6fc">38 API ops</text>
     <text x="24" y="134" font-size="15" fill="#9fb0c3">FastAPI · OpenAPI docs</text>
   </g>
 </svg>

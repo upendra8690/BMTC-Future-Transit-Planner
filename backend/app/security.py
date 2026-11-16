@@ -7,7 +7,7 @@ import hmac
 import re
 import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
 
 from fastapi import HTTPException, Request
 
@@ -56,18 +56,31 @@ def safe_filename(name: str | None) -> str:
 class RateLimiter:
     """Sliding-window limiter per client IP. Suitable for one process; use a shared store behind several workers."""
 
-    def __init__(self, per_minute: int, window_seconds: float = 60.0) -> None:
+    def __init__(self, per_minute: int, window_seconds: float = 60.0, max_clients: int = 10_000) -> None:
         self.per_minute = per_minute
         self.window = window_seconds
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self.max_clients = max_clients
+        self._hits: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
+
+    def _forget_idle(self, now: float) -> None:
+        """Drop clients with no hit inside the window, so the table only holds clients that are active."""
+        idle = [key for key, hits in self._hits.items() if not hits or now - hits[-1] > self.window]
+        for key in idle:
+            del self._hits[key]
 
     def allow(self, key: str, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now
         with self._lock:
-            if len(self._hits) > 10_000:
-                self._hits.clear()
-            hits = self._hits[key]
+            hits = self._hits.get(key)
+            if hits is None:
+                if len(self._hits) >= self.max_clients:
+                    self._forget_idle(now)
+                if len(self._hits) >= self.max_clients:
+                    # Too many distinct clients are active at once. New clients are refused. Existing counts are kept,
+                    # because clearing them would let a flood of addresses reset everyone's budget.
+                    return False
+                hits = self._hits[key] = deque()
             while hits and now - hits[0] > self.window:
                 hits.popleft()
             if len(hits) >= self.per_minute:

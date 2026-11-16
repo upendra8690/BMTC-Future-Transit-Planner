@@ -226,6 +226,38 @@ class ShapePoint(Base):
     __table_args__ = (Index("ix_shape_import_shape_seq", "import_id", "gtfs_shape_id", "sequence"),)
 
 
+class FareAttribute(Base):
+    """A row of a GTFS fare_attributes.txt file. The price is kept exactly as the feed wrote it."""
+
+    __tablename__ = "fare_attributes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    import_id: Mapped[int] = mapped_column(ForeignKey("gtfs_imports.id", ondelete="CASCADE"), index=True)
+    fare_id: Mapped[str] = mapped_column(String(100))
+    price: Mapped[str] = mapped_column(String(20))
+    currency: Mapped[str] = mapped_column(String(3))
+    payment_method: Mapped[int] = mapped_column(Integer)  # 0 = on board, 1 = before boarding
+    transfers: Mapped[int | None] = mapped_column(Integer, nullable=True)  # None = not stated in the feed
+
+    __table_args__ = (Index("ix_fare_attributes_import_fare", "import_id", "fare_id"),)
+
+
+class FareRule(Base):
+    """A row of a GTFS fare_rules.txt file. Only rules without origin, destination or zone limits give route fares."""
+
+    __tablename__ = "fare_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    import_id: Mapped[int] = mapped_column(ForeignKey("gtfs_imports.id", ondelete="CASCADE"), index=True)
+    fare_id: Mapped[str] = mapped_column(String(100))
+    route_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    origin_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    destination_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    contains_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    __table_args__ = (Index("ix_fare_rules_import_route", "import_id", "route_id"),)
+
+
 class Scenario(Base):
     """A proposed, illustrative service. Always ESTIMATED_SCENARIO; never an official announcement."""
 

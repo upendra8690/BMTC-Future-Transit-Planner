@@ -181,6 +181,14 @@ def test_backup_of_a_missing_database_is_refused(tmp_path):
         backup_sqlite(tmp_path / "none.db", tmp_path / "backups", when=WHEN)
 
 
+def test_a_backup_folder_that_is_a_file_is_reported_and_the_file_is_kept(planner_db, tmp_path):
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("a file is in the way", encoding="utf-8")
+    with pytest.raises(MaintenanceError, match="could not be written"):
+        backup_sqlite(planner_db, blocker, when=WHEN)
+    assert blocker.read_text(encoding="utf-8") == "a file is in the way"
+
+
 # ---------------------------------------------------------------- scripts and their exit codes
 
 def test_check_script_exits_0_when_ok_and_1_when_not(planner_db, tmp_path):

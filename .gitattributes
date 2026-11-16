@@ -1,0 +1,5 @@
+# Keep source files LF everywhere; the Windows launchers must stay CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.zip binary

@@ -6,7 +6,8 @@
 
 The runner does this:
 
-1. builds the synthetic demo feed and imports it as SYNTHETIC_DEMO data
+1. builds the synthetic demo feed and imports it as SYNTHETIC_DEMO data, and builds a second feed for dates that do
+   not overlap the demo (the administration check uploads it through the browser, then removes it)
 2. starts the planner on a free local port, with its own temporary database, backup folder and random admin key
 3. runs tests/browser/ui_check.py against it
 4. stops the server
@@ -102,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
          "--new-source", "Demo publisher (synthetic)", "--kind", "SYNTHETIC_DEMO"],
         env, "import the demo feed as SYNTHETIC_DEMO",
     )
+    upload_feed = work / "upload_feed_2028.zip"
+    run_step(
+        [python, "scripts/make_synthetic_gtfs.py", "--out", str(upload_feed),
+         "--start", "2028-01-01", "--end", "2028-03-31"],
+        env, "build a second feed for dates that do not overlap the demo",
+    )
 
     server_log = (work / "server.log").open("w", encoding="utf-8")
     server = subprocess.Popen(  # nosec B603
@@ -118,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
             "BMTC_BASE_URL": base,
             "BMTC_ADMIN_KEY": admin_key,
             "BMTC_BACKUP_DIR": str(backups),
+            "BMTC_UPLOAD_ZIP": str(upload_feed),
             "BMTC_OUT_DIR": str(shots),
         }
         if args.chrome:

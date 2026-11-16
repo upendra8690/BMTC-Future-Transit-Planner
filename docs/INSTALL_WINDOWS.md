@@ -10,7 +10,8 @@ exact message when you report it.
 
 ## 1. Install Python
 
-1. Install Python 3.11 or newer from python.org. Python 3.13 was used for the Linux checks.
+1. Install Python 3.13 from python.org. The Linux checks used this version. The setup script accepts 3.11 or newer, but
+   3.11 and 3.12 have not been tested.
 2. On the first installer screen, tick **Add python.exe to PATH**.
 3. If the setup script reports that Python was not found, Windows may be using its App execution alias for
    `python.exe`. Open **Settings > Apps > Advanced app settings > App execution aliases**, turn off the `python.exe`
@@ -66,9 +67,9 @@ environment first (`.venv\Scripts\activate`).
 
 - **Browser checks:** `python -m pip install -r requirements-browser.txt`, then
   `python tests\browser\run_browser_checks.py --chrome "C:\Program Files\Google\Chrome\Application\chrome.exe"`.
-  The runner starts its own server on a free port, with a temporary database and a random admin key. It runs 36 checks,
+  The runner starts its own server on a free port, with a temporary database and a random admin key. It runs 121 checks,
   stops the server, and does not touch `data\`.
-- **Mutation check:** `python tests\mutation\mutation_check.py`. It breaks five safety rules one at a time, in temporary
+- **Mutation check:** `python tests\mutation\mutation_check.py`. It breaks ten safety rules one at a time, in temporary
   copies of the project, and confirms that the tests fail each time. It takes a few minutes and does not change your files.
 
 ## 6. Start the planner
@@ -124,7 +125,7 @@ scripts\backup_windows.bat
 ```
 
 This writes a copy of `data\planner.db` to `data\backups`, or to the folder set by `BACKUP_DIR` in `.env`. It works while
-the server is running. The copy is checked for integrity and migration revision, and the script reports success only
+the server is running. The copy is checked for integrity and its expected tables, and the script reports success only
 if that check passes. To choose another folder:
 
 ```
@@ -146,11 +147,14 @@ It prints a JSON report and exits with `0` when the database is healthy.
 2. Copy the backup file over `data\planner.db`, so that the copy is named `planner.db`.
 3. Run `python scripts\check_database.py`, then `scripts\run_windows.bat`.
 
+These steps follow the same order as the Linux restore drill, `scripts/restore_drill.sh`, which runs them on a copy of
+the project. The drill is a shell script and does not run on Windows, so these steps have not been run on Windows.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
-| "Python 3.11 or newer was not found." | Install Python 3.11 or newer, tick **Add python.exe to PATH**, then see step 1 if the message continues. |
+| "Python 3.11 or newer was not found." | Install Python 3.13, tick **Add python.exe to PATH**, then see step 1 if the message continues. |
 | "Python was not found" in Command Prompt | The App execution alias is intercepting `python`. See step 1. |
 | "Setup stopped with an error." | Read the lines above that message, fix the cause, then run `scripts\setup_windows.bat` again. |
 | The server stops with "address already in use" | Another program uses port 8000. Close it, or change `--port 8000` in `scripts\run_windows.bat` and use the new address. |

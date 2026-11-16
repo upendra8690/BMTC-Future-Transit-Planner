@@ -6,10 +6,10 @@ planner works for every phone in every place.
 ## Summary
 
 - As delivered, the planner runs on one Windows PC. Only that PC can open `http://127.0.0.1:8000/` by default.
-- **Same Wi-Fi only:** `scripts\run_lan_windows.bat` lets phones on the same network open the planner. It uses plain HTTP,
-  so use it only on a network you trust.
-- **Every phone, anywhere:** the planner has to be hosted on a server behind HTTPS, with a domain name. **That hosting has
-  not been built or tested.** No server, domain or certificate was set up.
+- **Same Wi-Fi only:** `scripts\run_lan_windows.bat` lets phones on the same network open the planner over plain HTTP.
+  Use it only on a network you trust.
+- **Every phone, anywhere:** the planner must be served over HTTPS at a domain name. The Docker and Caddy kit in
+  `docs/DEPLOY.md` is written for this. Its image has not been built, and nothing has been run.
 - **Android app:** `android/flutter_app` is a starter. It has not been built, and it needs an HTTPS address.
 - **Real phones:** nothing has been tested on a real phone. The dashboard was checked in headless Chrome with a Pixel 7
   device profile, which is emulation only.
@@ -24,15 +24,15 @@ planner works for every phone in every place.
 5. If Windows asks whether to allow Python through the firewall, allow it on **private** networks only.
 6. When you finish, press Ctrl+C in the command window.
 
-**What works:** timetables, route and stop search, direct journeys, scenarios and comparisons, the sources page and the
-administration page.
+**Expected to work:** timetables, route and stop search, direct journeys, scenarios and comparisons, the sources page and
+the administration page. The browser checks ran on `localhost` only, so this option has not been tested over a network.
 
 **What does not work over plain HTTP, and why:**
 
 - **"Near me" stops.** Browsers do not provide the device's location on an insecure address. In that case the dashboard
   tells the user to search by stop name.
-- **Offline use and home-screen installation.** Browsers register service workers, and allow installation, only over
-  HTTPS or on `localhost`. The planner simply does not register its offline cache there.
+- **Installing the planner as an app, and offline use.** Browsers allow service workers and installation only over HTTPS
+  or on `localhost`. Over plain HTTP the planner does not register its offline cache, and it cannot be installed.
 
 **Security on this option:**
 
@@ -42,23 +42,29 @@ administration page.
   on the network.
 - Do not use this option on public Wi-Fi, in a hotel, at a café or on a shared office network you do not control.
 
-## Option 2: HTTPS hosting, needed for every phone (not built)
+## Option 2: HTTPS hosting for every phone (kit written, not run)
 
-Reaching every phone needs the planner to be reachable over HTTPS from the internet or from a private network the
-phone is on. To build that, you would need:
+Reaching every phone needs the planner to be reachable over HTTPS, from the internet or from a private network the phone
+is on. The steps are:
 
-1. **A server** that runs the planner with Python 3.11 or newer, using the same command as `scripts\run_windows.bat`:
-   `python -m uvicorn app.main:create_app --factory --app-dir backend --host 127.0.0.1 --port 8000`.
-2. **A domain name and an HTTPS certificate**, usually from a reverse proxy that handles HTTPS in front of the planner
-   (Caddy and nginx both do this), or from a hosting platform that provides HTTPS itself.
+1. **A server that runs the planner.** The Docker kit in `docs/DEPLOY.md` runs it in a container with Caddy in front.
+   Python 3.13 is the only version tested. Without Docker, run the planner behind a reverse proxy on the same machine,
+   with the command in `scripts\run_windows.bat`. If the proxy runs on another machine, the planner must listen on an
+   address that machine can reach, and `FORWARDED_ALLOW_IPS` must name the proxy's address. Neither case has been tested.
+2. **A domain name and an HTTPS certificate.** `deploy/Caddyfile` asks Caddy to obtain a certificate for your domain.
+   That needs a public DNS record that points at the server, with ports 80 and 443 reachable from the internet. A hosting
+   platform that provides HTTPS itself is an alternative.
 3. **A strong `ADMIN_API_KEY`**, and, if you can, a rule at the proxy that allows `/api/admin/` only from your own
    addresses.
-4. **A change to the rate limiter before a busy public deployment.** The planner does not read the `X-Forwarded-For`
-   header. Behind a proxy, every visitor appears to come from the proxy's address, so they would share one rate limit,
-   and the audit log would record the proxy's address rather than the visitor's.
-5. **Backups on a schedule**, and a copy kept off the server. See `database/README.md`.
+4. **Client addresses behind a proxy.** The planner's own code does not read `X-Forwarded-For`. The uvicorn server does,
+   and it trusts that header only from the addresses in `FORWARDED_ALLOW_IPS`. The Docker kit sets this to Caddy's fixed
+   address. Any other proxy needs the same setting, or every visitor appears to come from the proxy's address and shares
+   one rate limit.
+5. **Backups on a schedule**, and a copy kept off the server. The Docker kit has no built-in schedule. See
+   `database/README.md`.
 
-None of these steps was carried out in this build. Treat the HTTPS option as a plan, not as a tested deployment.
+The Docker and Caddy files were written and the Compose file was checked, but the image was not built and nothing was run.
+Treat this option as untested until you have run it yourself.
 
 ## Option 3: the Android app (starter only)
 
@@ -76,8 +82,8 @@ served over HTTPS. Browsers other than headless Chrome were **not tested**.
 
 | Requirement | Status |
 |---|---|
-| HTTPS hosting with a domain name | Not built |
-| Rate limiting that works behind a proxy | Not built |
+| HTTPS hosting with a domain name | Docker and Caddy kit written (`docs/DEPLOY.md`). Not built or run. |
+| Client addresses behind a proxy | The Docker kit sets `FORWARDED_ALLOW_IPS` to Caddy's address. Not run. |
 | Testing on real phones (Android and iPhone), with at least two browsers each | Not done |
 | An Android app built, signed and tested on a device | Not built |
 | Official timetable data for 2027 to 2030 | Not available. The planner shows none until an administrator verifies an official source. See `SOURCES.md`. |

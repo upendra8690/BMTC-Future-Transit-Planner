@@ -29,6 +29,18 @@ MUTANTS = [
      "if not expected:", "if False:"),
     ("05_device_keys_stored_raw", "backend/app/security.py",
      'return hashlib.sha256(client_key.encode("utf-8")).hexdigest()', "return client_key"),
+    ("06_inline_script_added_to_page", "dashboard/index.html",
+     '<script src="/app.js" defer></script>',
+     '<script src="/app.js" defer></script>\n  <script>window.leak = 1;</script>'),
+    ("07_english_message_removed", "dashboard/i18n.js",
+     '    "scn.err_pair": "Give both latitude and longitude, or leave both empty.",\n', ""),
+    ("08_worker_caches_api_answers", "dashboard/sw.js",
+     "if (SAVED_API.test(url.pathname)) event.respondWith(savedAnswer(event));",
+     "event.respondWith(savedAnswer(event));"),
+    ("09_admin_key_written_to_storage", "dashboard/app.js",
+     'storage.set(PREFIX + "lang", code);', 'storage.set(PREFIX + "adminKey", state.adminKey || "");'),
+    ("10_eval_added_to_dashboard", "dashboard/app.js",
+     'var PREFIX = "bmtc.";', 'var PREFIX = "bmtc.";\n  eval("0");'),
 ]
 
 IGNORED = shutil.ignore_patterns(

@@ -34,6 +34,10 @@ def set_verification(
     if verified and source.kind != KIND_OFFICIAL:
         raise VerificationError("Only sources of kind OFFICIAL can be verified.")
     cleaned = note.strip() or None
+    if verified and cleaned is None:
+        raise VerificationError(
+            "Verifying a source needs its evidence: the publisher page, the date checked and the licence."
+        )
     source.verified = verified
     source.verification_note = cleaned
     source.verified_by = actor

@@ -23,10 +23,12 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.orm import Session
 
+from .. import clock
 from ..config import Settings
 from ..models import (
     CLASS_OFFICIAL,
@@ -37,6 +39,8 @@ from ..models import (
     WEEKDAYS,
     Agency,
     DataSource,
+    FareAttribute,
+    FareRule,
     GtfsImport,
     Route,
     ServiceCalendar,
@@ -48,6 +52,7 @@ from ..models import (
     utcnow,
 )
 from ..services.audit import record_audit
+from ..services.text import normalise
 
 LOG = logging.getLogger(__name__)
 
@@ -64,6 +69,8 @@ OPTIONAL_FILES: dict[str, tuple[str, ...]] = {
     "calendar.txt": ("service_id", "start_date", "end_date", *GTFS_WEEKDAY_COLUMNS),
     "calendar_dates.txt": ("service_id", "date", "exception_type"),
     "shapes.txt": ("shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"),
+    "fare_attributes.txt": ("fare_id", "price", "currency_type", "payment_method"),
+    "fare_rules.txt": ("fare_id",),
 }
 KNOWN_FILES = frozenset(REQUIRED_FILES) | frozenset(OPTIONAL_FILES)
 
@@ -71,7 +78,13 @@ MAX_MESSAGES = 200
 CHUNK_SIZE = 5000
 MIN_YEAR, MAX_YEAR = 2000, 2100
 MAX_FEED_SPAN_DAYS = 3 * 366
-TIME_RE = re.compile(r"^(\d{1,3}):([0-5]\d):([0-5]\d)$")
+# The database keeps identifiers in 100-character columns. A longer identifier would be cut short and then no longer
+# match its own references, so such a feed is refused with a clear reason.
+MAX_ID_LENGTH = 100
+# ASCII only. Python's \d and str.isdigit() also accept other scripts' digits and characters such as superscript two,
+# which int() cannot read, so every number in a feed is checked against these instead.
+TIME_RE = re.compile(r"^([0-9]{1,3}):([0-5][0-9]):([0-5][0-9])$")
+ASCII_INT_RE = re.compile(r"[0-9]+")
 
 
 class Report:
@@ -104,8 +117,13 @@ class Report:
             self.warnings.append(f"... and {self._warning_total - len(self.warnings)} more warning(s).")
 
 
+def is_ascii_int(value: str) -> bool:
+    """True only for plain 0 to 9 digits."""
+    return bool(ASCII_INT_RE.fullmatch(value or ""))
+
+
 def parse_gtfs_date(value: str) -> dt.date | None:
-    if not re.fullmatch(r"\d{8}", value or ""):
+    if not re.fullmatch(r"[0-9]{8}", value or ""):
         return None
     try:
         parsed = dt.datetime.strptime(value, "%Y%m%d").date()
@@ -131,10 +149,47 @@ def _coord(value: str, low: float, high: float) -> float | None:
     return number if low <= number <= high else None
 
 
+class FeedTooLargeError(ValueError):
+    """The decompressed feed is over the limit. Checked while reading, because ZIP headers can understate the size."""
+
+
+class _ReadBudget:
+    """Counts the bytes actually decompressed from the archive, shared by every table in one pass."""
+
+    def __init__(self, limit: int) -> None:
+        self.remaining = limit
+
+    def spend(self, count: int) -> None:
+        self.remaining -= count
+        if self.remaining < 0:
+            raise FeedTooLargeError("The uncompressed feed is larger than the configured limit.")
+
+
+class _BudgetedReader(io.RawIOBase):
+    def __init__(self, raw: Any, budget: _ReadBudget) -> None:
+        super().__init__()
+        self._raw = raw
+        self._budget = budget
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        chunk = self._raw.read(len(buffer))
+        self._budget.spend(len(chunk))
+        buffer[: len(chunk)] = chunk
+        return len(chunk)
+
+    def close(self) -> None:
+        self._raw.close()
+        super().close()
+
+
 @dataclass
 class Archive:
     zf: zipfile.ZipFile
     members: dict[str, zipfile.ZipInfo]
+    budget: _ReadBudget
 
     def close(self) -> None:
         self.zf.close()
@@ -183,13 +238,14 @@ def open_archive(data: bytes, settings: Settings, report: Report) -> Archive | N
                 reject(f"{path.name} appears more than once in the archive.")
                 return None
             members[path.name] = info
-    return Archive(zf=zf, members=members)
+    return Archive(zf=zf, members=members, budget=_ReadBudget(settings.max_uncompressed_bytes))
 
 
 def _stream_rows(archive: Archive, name: str, report: Report, required: tuple[str, ...]) -> Iterator[dict[str, str]]:
     info = archive.members[name]
     with archive.zf.open(info) as raw:
-        text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
+        buffered = io.BufferedReader(_BudgetedReader(raw, archive.budget))
+        text = io.TextIOWrapper(buffered, encoding="utf-8-sig", newline="")
         reader = csv.DictReader(text)
         headers = [header.strip().lower() for header in (reader.fieldnames or [])]
         reader.fieldnames = headers
@@ -213,6 +269,8 @@ class Tables:
     calendars: list[dict[str, str]]
     calendar_dates: list[dict[str, str]]
     shapes: list[dict[str, str]]
+    fare_attributes: list[dict[str, str]] = field(default_factory=list)
+    fare_rules: list[dict[str, str]] = field(default_factory=list)
     start: dt.date | None = None
     end: dt.date | None = None
     service_ids: set[str] = field(default_factory=set)
@@ -239,15 +297,43 @@ def read_tables(archive: Archive, report: Report) -> Tables | None:
         calendars=load("calendar.txt"),
         calendar_dates=load("calendar_dates.txt"),
         shapes=load("shapes.txt"),
+        fare_attributes=load("fare_attributes.txt"),
+        fare_rules=load("fare_rules.txt"),
     )
 
 
-def _check_agency(rows: list[dict[str, str]], report: Report) -> None:
+def _check_agency(rows: list[dict[str, str]], report: Report) -> str | None:
+    """Every agency needs a name and a known IANA time zone. GTFS requires one zone for the whole feed."""
     if not rows:
         report.error("agency.txt has no rows.")
+    zones: set[str] = set()
     for line, row in enumerate(rows, start=2):
         if not row.get("agency_name"):
             report.error(f"agency.txt line {line}: agency_name is empty.")
+        timezone_name = row.get("agency_timezone", "")
+        if clock.zone_or_none(timezone_name) is None:
+            report.error(
+                f"agency.txt line {line}: agency_timezone '{timezone_name}' is not a known IANA time zone, "
+                "such as Asia/Kolkata."
+            )
+        else:
+            zones.add(timezone_name)
+    if len(zones) > 1:
+        report.error("agency.txt gives more than one agency_timezone. All agencies in one feed must share one zone.")
+    return next(iter(zones)) if len(zones) == 1 else None
+
+
+def _feed_zone(tables: Tables, settings: Settings) -> ZoneInfo:
+    """The feed's own time zone, which decides what 'today' means for its dates. Falls back to the configured zone."""
+    name = tables.agency[0].get("agency_timezone", "") if tables.agency else ""
+    return clock.zone_or_none(name) or clock.zone(settings.service_timezone)
+
+
+def _too_long(value: str, label: str, file_name: str, line: int, report: Report) -> bool:
+    if len(value) <= MAX_ID_LENGTH:
+        return False
+    report.error(f"{file_name} line {line}: {label} is longer than {MAX_ID_LENGTH} characters.")
+    return True
 
 
 def _check_routes(rows: list[dict[str, str]], report: Report) -> set[str]:
@@ -257,12 +343,14 @@ def _check_routes(rows: list[dict[str, str]], report: Report) -> set[str]:
         if not route_id:
             report.error(f"routes.txt line {line}: route_id is empty.")
             continue
+        if _too_long(route_id, "route_id", "routes.txt", line, report):
+            continue
         if route_id in seen:
             report.error(f"routes.txt line {line}: duplicate route_id '{route_id}'.")
         seen.add(route_id)
         if not (row.get("route_short_name") or row.get("route_long_name")):
             report.error(f"routes.txt line {line}: route '{route_id}' needs a short or long name.")
-        if not row.get("route_type", "").isdigit():
+        if not is_ascii_int(row.get("route_type", "")):
             report.error(f"routes.txt line {line}: route_type must be a whole number.")
     return seen
 
@@ -273,6 +361,8 @@ def _check_stops(rows: list[dict[str, str]], report: Report) -> None:
         stop_id = row.get("stop_id", "")
         if not stop_id:
             report.error(f"stops.txt line {line}: stop_id is empty.")
+            continue
+        if _too_long(stop_id, "stop_id", "stops.txt", line, report):
             continue
         if stop_id in seen:
             report.error(f"stops.txt line {line}: duplicate stop_id '{stop_id}'.")
@@ -295,6 +385,8 @@ def _check_calendars(tables: Tables, report: Report) -> tuple[set[str], list[tup
         if not service:
             report.error(f"calendar.txt line {line}: service_id is empty.")
             continue
+        if _too_long(service, "service_id", "calendar.txt", line, report):
+            continue
         start = parse_gtfs_date(row.get("start_date", ""))
         end = parse_gtfs_date(row.get("end_date", ""))
         if start is None or end is None:
@@ -314,6 +406,8 @@ def _check_calendars(tables: Tables, report: Report) -> tuple[set[str], list[tup
         if not service or day is None:
             report.error(f"calendar_dates.txt line {line}: service_id and a valid YYYYMMDD date are required.")
             continue
+        if _too_long(service, "service_id", "calendar_dates.txt", line, report):
+            continue
         if row.get("exception_type") not in {"1", "2"}:
             report.error(f"calendar_dates.txt line {line}: exception_type must be 1 or 2.")
             continue
@@ -331,6 +425,8 @@ def _check_trips(rows: list[dict[str, str]], route_ids: set[str], service_ids: s
         if not trip_id:
             report.error(f"trips.txt line {line}: trip_id is empty.")
             continue
+        if _too_long(trip_id, "trip_id", "trips.txt", line, report):
+            continue
         if trip_id in seen:
             report.error(f"trips.txt line {line}: duplicate trip_id '{trip_id}'.")
         seen.add(trip_id)
@@ -347,12 +443,14 @@ def _check_shapes(rows: list[dict[str, str]], report: Report) -> None:
     for line, row in enumerate(rows, start=2):
         if not row.get("shape_id"):
             report.error(f"shapes.txt line {line}: shape_id is empty.")
+        else:
+            _too_long(row["shape_id"], "shape_id", "shapes.txt", line, report)
         if (
             _coord(row.get("shape_pt_lat", ""), -90, 90) is None
             or _coord(row.get("shape_pt_lon", ""), -180, 180) is None
         ):
             report.error(f"shapes.txt line {line}: shape point has invalid coordinates.")
-        if not row.get("shape_pt_sequence", "").isdigit():
+        if not is_ascii_int(row.get("shape_pt_sequence", "")):
             report.error(f"shapes.txt line {line}: shape_pt_sequence must be a whole number.")
 
 
@@ -370,6 +468,54 @@ def _check_feed_dates(spans: list[tuple[dt.date, dt.date]], today: dt.date, repo
         report.warn("The feed covers more than three years. Check that the publisher intended this range.")
 
 
+FARE_PRICE_RE = re.compile(r"^[0-9]{1,9}(\.[0-9]{1,2})?$")
+FARE_CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+
+
+def _check_fares(tables: Tables, route_ids: set[str], report: Report) -> None:
+    """Fares are optional, but a wrong fare is worse than none, so a malformed fare stops the import.
+
+    A fare rule that names an unknown fare or route is skipped with a warning, because the rest of the feed is still
+    usable. Rules that name a zone or stop are kept by the importer but never used for route fares.
+    """
+    fare_ids: set[str] = set()
+    for line, row in enumerate(tables.fare_attributes, start=2):
+        fare_id = row.get("fare_id", "")
+        if not fare_id:
+            report.error(f"fare_attributes.txt line {line}: fare_id is empty.")
+            continue
+        if _too_long(fare_id, "fare_id", "fare_attributes.txt", line, report):
+            continue
+        if fare_id in fare_ids:
+            report.error(f"fare_attributes.txt line {line}: duplicate fare_id '{fare_id}'.")
+            continue
+        fare_ids.add(fare_id)
+        if not FARE_PRICE_RE.fullmatch(row.get("price", "")):
+            report.error(f"fare_attributes.txt line {line}: price must be a plain amount such as 10 or 10.50.")
+        if not FARE_CURRENCY_RE.fullmatch(row.get("currency_type", "")):
+            report.error(f"fare_attributes.txt line {line}: currency_type must be a three-letter code such as INR.")
+        if row.get("payment_method", "") not in ("0", "1"):
+            report.error(
+                f"fare_attributes.txt line {line}: payment_method must be 0 (on board) or 1 (before boarding)."
+            )
+        if row.get("transfers", "") not in ("", "0", "1", "2"):
+            report.error(f"fare_attributes.txt line {line}: transfers must be empty, 0, 1 or 2.")
+    for line, row in enumerate(tables.fare_rules, start=2):
+        fare_id = row.get("fare_id", "")
+        if fare_id not in fare_ids:
+            report.warn(
+                f"fare_rules.txt line {line}: fare '{fare_id}' is not in fare_attributes.txt, so the rule is skipped."
+            )
+            continue
+        for column in ("route_id", "origin_id", "destination_id", "contains_id"):
+            _too_long(row.get(column, ""), column, "fare_rules.txt", line, report)
+        route = row.get("route_id", "")
+        if route and route not in route_ids:
+            report.warn(
+                f"fare_rules.txt line {line}: route '{route}' is not in routes.txt, so the rule is skipped."
+            )
+
+
 def validate_tables(tables: Tables, today: dt.date, report: Report) -> None:
     _check_agency(tables.agency, report)
     route_ids = _check_routes(tables.routes, report)
@@ -377,6 +523,7 @@ def validate_tables(tables: Tables, today: dt.date, report: Report) -> None:
     service_ids, spans = _check_calendars(tables, report)
     _check_trips(tables.trips, route_ids, service_ids, report)
     _check_shapes(tables.shapes, report)
+    _check_fares(tables, route_ids, report)
     _check_feed_dates(spans, today, report)
     tables.service_ids = service_ids
     if spans:
@@ -397,7 +544,9 @@ def validate_stop_times(archive: Archive, tables: Tables, report: Report) -> Non
     trip_ids = {row["trip_id"] for row in tables.trips if row.get("trip_id")}
     stop_ids = {row["stop_id"] for row in tables.stops if row.get("stop_id")}
     last_sequence: dict[str, int] = {}
+    last_time: dict[str, int] = {}
     seen_trips: set[str] = set()
+    backwards = 0
     rows = 0
     stop_rows = _stream_rows(archive, "stop_times.txt", report, REQUIRED_FILES["stop_times.txt"])
     for line, row in enumerate(stop_rows, start=2):
@@ -408,7 +557,7 @@ def validate_stop_times(archive: Archive, tables: Tables, report: Report) -> Non
         if stop not in stop_ids:
             report.error(f"stop_times.txt line {line}: unknown stop_id '{stop}'.")
         raw_sequence = row.get("stop_sequence", "")
-        if raw_sequence.isdigit():
+        if is_ascii_int(raw_sequence):
             sequence = int(raw_sequence)
             previous = last_sequence.get(trip)
             if previous is not None and sequence <= previous:
@@ -420,6 +569,11 @@ def validate_stop_times(archive: Archive, tables: Tables, report: Report) -> Non
         departure = _optional_time(row.get("departure_time", ""), "departure_time", line, report)
         if arrival is not None and departure is not None and departure < arrival:
             report.error(f"stop_times.txt line {line}: departure is earlier than arrival.")
+        if arrival is not None and last_time.get(trip) is not None and arrival < last_time[trip]:
+            backwards += 1
+        latest = departure if departure is not None else arrival
+        if latest is not None:
+            last_time[trip] = latest
         seen_trips.add(trip)
         rows += 1
     if rows == 0:
@@ -427,6 +581,11 @@ def validate_stop_times(archive: Archive, tables: Tables, report: Report) -> Non
     without_stops = trip_ids - seen_trips
     if without_stops:
         report.warn(f"{len(without_stops)} trip(s) have no stop times and are stored without stops.")
+    if backwards:
+        report.warn(
+            f"{backwards} stop time(s) are earlier than the stop before them in the same trip. "
+            "Journeys that would arrive before they leave are not shown."
+        )
 
 
 def classification_for_source(source: DataSource) -> str:
@@ -493,7 +652,7 @@ def _insert_feed(session: Session, imp: GtfsImport, archive: Archive, tables: Ta
             {
                 "import_id": imp.id,
                 "gtfs_id": row.get("agency_id") or None,
-                "name": row["agency_name"][:200],
+                "name": normalise(row["agency_name"])[:200],
                 "url": row["agency_url"][:500],
                 "timezone": row["agency_timezone"][:100],
             }
@@ -507,8 +666,8 @@ def _insert_feed(session: Session, imp: GtfsImport, archive: Archive, tables: Ta
             {
                 "import_id": imp.id,
                 "gtfs_route_id": row["route_id"][:100],
-                "short_name": (row.get("route_short_name") or None) and row["route_short_name"][:50],
-                "long_name": (row.get("route_long_name") or None) and row["route_long_name"][:200],
+                "short_name": (row.get("route_short_name") or None) and normalise(row["route_short_name"])[:50],
+                "long_name": (row.get("route_long_name") or None) and normalise(row["route_long_name"])[:200],
                 "route_type": int(row["route_type"]),
                 "color": (row.get("route_color") or None) and row["route_color"][:10],
                 "text_color": (row.get("route_text_color") or None) and row["route_text_color"][:10],
@@ -525,7 +684,7 @@ def _insert_feed(session: Session, imp: GtfsImport, archive: Archive, tables: Ta
             {
                 "import_id": imp.id,
                 "gtfs_stop_id": row["stop_id"][:100],
-                "name": row["stop_name"][:200],
+                "name": normalise(row["stop_name"])[:200],
                 "lat": _coord(row.get("stop_lat", ""), -90, 90),
                 "lon": _coord(row.get("stop_lon", ""), -180, 180),
                 "location_type": int(row.get("location_type") or 0),
@@ -588,7 +747,7 @@ def _insert_feed(session: Session, imp: GtfsImport, archive: Archive, tables: Ta
                 "gtfs_trip_id": row["trip_id"][:100],
                 "gtfs_route_id": row["route_id"][:100],
                 "service_id": row["service_id"][:100],
-                "headsign": (row.get("trip_headsign") or None) and row["trip_headsign"][:200],
+                "headsign": (row.get("trip_headsign") or None) and normalise(row["trip_headsign"])[:200],
                 "direction_id": int(row["direction_id"]) if row.get("direction_id") else None,
                 "shape_id": (row.get("shape_id") or None) and row["shape_id"][:100],
             }
@@ -596,6 +755,39 @@ def _insert_feed(session: Session, imp: GtfsImport, archive: Archive, tables: Ta
         ],
     )
     trip_map = dict(session.execute(select(Trip.gtfs_trip_id, Trip.id).where(Trip.import_id == imp.id)).all())
+
+    _bulk(
+        session,
+        FareAttribute,
+        [
+            {
+                "import_id": imp.id,
+                "fare_id": row["fare_id"][:100],
+                "price": row["price"],
+                "currency": row["currency_type"],
+                "payment_method": int(row["payment_method"]),
+                "transfers": int(row["transfers"]) if row.get("transfers") else None,
+            }
+            for row in tables.fare_attributes
+        ],
+    )
+    fare_ids = {row["fare_id"] for row in tables.fare_attributes}
+    _bulk(
+        session,
+        FareRule,
+        [
+            {
+                "import_id": imp.id,
+                "fare_id": row["fare_id"][:100],
+                "route_id": (row.get("route_id") or None) and row["route_id"][:100],
+                "origin_id": (row.get("origin_id") or None) and row["origin_id"][:100],
+                "destination_id": (row.get("destination_id") or None) and row["destination_id"][:100],
+                "contains_id": (row.get("contains_id") or None) and row["contains_id"][:100],
+            }
+            for row in tables.fare_rules
+            if row["fare_id"] in fare_ids and (not row.get("route_id") or row["route_id"] in route_map)
+        ],
+    )
 
     buffer: list[dict[str, Any]] = []
     stop_time_count = 0
@@ -609,7 +801,7 @@ def _insert_feed(session: Session, imp: GtfsImport, archive: Archive, tables: Ta
                 "sequence": int(row["stop_sequence"]),
                 "arrival_sec": parse_gtfs_time(row.get("arrival_time", "")),
                 "departure_sec": parse_gtfs_time(row.get("departure_time", "")),
-                "stop_headsign": (row.get("stop_headsign") or None) and row["stop_headsign"][:200],
+                "stop_headsign": (row.get("stop_headsign") or None) and normalise(row["stop_headsign"])[:200],
             }
         )
         if len(buffer) >= CHUNK_SIZE:
@@ -641,7 +833,6 @@ def import_feed(
     today: dt.date | None = None,
 ) -> GtfsImport:
     """Validate and import one GTFS ZIP. Returns the stored import record (COMPLETED or REJECTED)."""
-    today = today or dt.date.today()
     report = Report()
     digest = hashlib.sha256(data).hexdigest()
     classification = classification_for_source(source)
@@ -658,9 +849,13 @@ def import_feed(
         try:
             tables = read_tables(archive, report)
             if tables is not None:
-                validate_tables(tables, today, report)
+                # "Today" is the date in the feed's own time zone, never the date on the server.
+                feed_today = today or clock.service_date(_feed_zone(tables, settings), clock.utc_now())
+                validate_tables(tables, feed_today, report)
                 if report.ok:
                     validate_stop_times(archive, tables, report)
+        except FeedTooLargeError as exc:
+            report.error(str(exc))
         except (UnicodeDecodeError, csv.Error) as exc:
             report.error(f"The feed text could not be read as UTF-8 CSV: {exc}")
         finally:
@@ -685,7 +880,7 @@ def import_feed(
     if overlaps:
         report.warn(
             f"Dates overlap with existing import(s) {overlaps} of the same classification. "
-            "Each is kept and searched separately."
+            "Each is kept and searched together. If two feeds list the same trips, a journey can repeat them."
         )
     report.finalize()
 
@@ -695,7 +890,7 @@ def import_feed(
     )
     imp.feed_start_date = tables.start
     imp.feed_end_date = tables.end
-    imp.agency_name = tables.agency[0]["agency_name"][:200] if tables.agency else None
+    imp.agency_name = normalise(tables.agency[0]["agency_name"])[:200] if tables.agency else None
     session.add(imp)
 
     try:
@@ -734,7 +929,20 @@ def import_feed(
         return failed
 
 
-def import_summary(imp: GtfsImport) -> dict[str, Any]:
+def fare_counts(session: Session, import_ids: list[int]) -> dict[int, int]:
+    """How many fare prices each import stored. Imports that stored none are missing from the result."""
+    if not import_ids:
+        return {}
+    rows = session.execute(
+        select(FareAttribute.import_id, func.count())
+        .where(FareAttribute.import_id.in_(import_ids))
+        .group_by(FareAttribute.import_id)
+    ).all()
+    return {int(import_id): int(count) for import_id, count in rows}
+
+
+def import_summary(imp: GtfsImport, fares: int) -> dict[str, Any]:
+    """The admin view of one import. fares is the number of fare prices stored from this feed."""
     return {
         "id": imp.id,
         "filename": imp.filename,
@@ -748,6 +956,7 @@ def import_summary(imp: GtfsImport) -> dict[str, Any]:
         "trips": imp.trip_count,
         "stop_times": imp.stop_time_count,
         "shape_points": imp.shape_point_count,
+        "fares": fares,
         "is_active": imp.is_active,
         "warnings": json.loads(imp.warnings or "[]"),
         "errors": json.loads(imp.errors or "[]"),
