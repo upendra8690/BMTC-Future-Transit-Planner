@@ -4,8 +4,9 @@ Audit date: 16 November 2026. Baseline: `main` at commit `1fda4de` (release 3.0.
 Version 3.0 is preserved: it stays on `main` and is tagged `v3.0.0`. All 4.0 work happens on the `v4` branch.
 
 **Git state:** 9 commits on `main`, clean working tree, branches `main` and `v4`, tags `v3.0.0` and `app-latest`.
-**Documents read:** README, SOURCES, CHANGELOG, `docs/SECURITY_ASVS.md`, `docs/PRIVACY.md`, `docs/DEPLOY.md`,
-`docs/API.md`, `docs/architecture.md`, `android/README.md`.
+**Documents reviewed:** README, SOURCES, CHANGELOG and `android/README.md` in full; `docs/SECURITY_ASVS.md`,
+`docs/PRIVACY.md`, `docs/DEPLOY.md` and `docs/API.md` for structure and the sections relevant here.
+`docs/architecture.md` has not yet been reviewed in detail; it will be before Phase 1 changes the frontend.
 
 **Phase 0 document set** (all in `docs/4.0/`): this audit, `ARCHITECTURE_4_0.md`, `IMPLEMENTATION_ROADMAP_4_0.md`,
 `API_INTEGRATION_REGISTER.md`, `DATA_SOURCE_REGISTER.md`, `SECURITY_PLAN_4_0.md`, `TEST_PLAN_4_0.md`, plus
