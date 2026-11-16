@@ -45,7 +45,14 @@ MIN_ADMIN_KEY_LENGTH = 32
 GZIP_MIN_BYTES = 1024
 
 
-def _apply_security_headers(response: Response, path: str) -> None:
+# One year. Sent only over HTTPS (browsers ignore it on plain HTTP). No includeSubDomains: the host may be a shared
+# platform domain whose other subdomains are not ours.
+HSTS = "max-age=31536000"
+
+
+def _apply_security_headers(response: Response, path: str, https: bool = False) -> None:
+    if https:
+        response.headers.setdefault("Strict-Transport-Security", HSTS)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -79,7 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Bengaluru Transit Planner API",
-        version="4.0.0-alpha.2",
+        version="4.0.0-alpha.3",
         description=(
             "Verified timetables are shown separately from unverified feeds. "
             "Future scenarios are always labelled ESTIMATED_SCENARIO and are not official announcements."
@@ -119,7 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         else:
             response = await call_next(request)
-        _apply_security_headers(response, path)
+        _apply_security_headers(response, path, https=request.url.scheme == "https")
         elapsed_ms = (time.perf_counter() - started) * 1000
         if path.startswith("/api/") and request.method != "GET":
             LOG.info("%s %s -> %s (%.1f ms)", request.method, path, response.status_code, elapsed_ms)

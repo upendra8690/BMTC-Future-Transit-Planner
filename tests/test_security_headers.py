@@ -64,3 +64,15 @@ def test_a_long_admin_key_is_not_warned_about(tmp_path, caplog):
         app = create_app(settings)
     app.state.db.dispose()
     assert not any("shorter than 32" in record.getMessage() for record in caplog.records)
+
+
+def test_hsts_is_sent_over_https_and_not_over_plain_http(settings):
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    app = create_app(settings)
+    with TestClient(app, base_url="https://testserver") as secure:
+        assert secure.get("/api/health").headers["strict-transport-security"] == "max-age=31536000"
+        assert secure.get("/").headers["strict-transport-security"] == "max-age=31536000"
+    with TestClient(app, base_url="http://testserver") as plain:
+        assert "strict-transport-security" not in plain.get("/api/health").headers

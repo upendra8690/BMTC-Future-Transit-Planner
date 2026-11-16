@@ -31,6 +31,8 @@ ignore = []
 "tests/browser/**" = ["T201", "S603", "S607"]
 # The mutation check prints one line per broken rule and its result.
 "tests/mutation/**" = ["T201"]
+# The audit scripts are operator tools run by hand against a server; they print evidence and use long assertion lines.
+"tests/audit/**" = ["T201", "E501", "SIM115", "S311", "RUF005"]
 # Alembic's generated environment and migrations use module-level code and fixed names.
 "migrations/**" = ["N999", "E402", "ARG001"]
 

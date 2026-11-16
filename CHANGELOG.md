@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.0.0-alpha.3 — 2026-11-16 (branch `v4`, not released)
+
+Government-readiness audit: fixes found by testing, and the evaluation documents.
+
+### Fixed
+- **Accessibility:** scrollable tables could not be reached by keyboard (axe `scrollable-region-focusable`, serious). All 8 tables are now focusable regions with their own labels.
+- **Privacy:** the container no longer writes uvicorn's access log, which recorded search text and "stops near me" coordinates with the visitor's IP address.
+- **Privacy:** new `DELETE /api/my-data` and a "Delete my data" control (My account, with an on-page confirmation). It erases everything the server holds for the device and clears the device's own lists; its audit entry stores only counts.
+- **Security:** HSTS (`max-age=31536000`) on HTTPS responses; the live site sent none.
+
+### Added
+- `docs/government/`: readiness audit, security audit, production-readiness report, accessibility audit, privacy policy, terms, retention policy, data and services registers, contact strategy, pilot proposal, submission status, and draft letters to BMTC, BMRCL and DULT (not sent).
+- `tests/audit/`: the accessibility, security-probe and load-test scripts behind the audit.
+
+### Tests
+ruff clean; pytest 382 passed, 5 skipped; browser checks 121/121; axe 10 screens × 2 themes clean; security probes 32/33 (1 probe expectation corrected); pip-audit and bandit clean; load test 0 errors.
+
 ## 4.0.0-alpha.2 — 2026-11-16 (branch `v4`, not released)
 
 Phase 2: bus and stop features, Metro stations, and bus + Metro journeys.

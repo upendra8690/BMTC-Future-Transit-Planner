@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi import Path as ApiPath
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
@@ -50,7 +50,7 @@ from .services.verification import VerificationError, set_verification
 
 router = APIRouter()
 
-APP_VERSION = "4.0.0-alpha.2"
+APP_VERSION = "4.0.0-alpha.3"
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
@@ -563,6 +563,25 @@ def export_scenario_pdf(scenario_id: int, request: Request, db: DbSession) -> Re
 
 
 # ---------------------------------------------------------------- saved routes and preferences (device-scoped)
+
+@router.delete("/my-data", tags=["user"])
+def erase_device_data(request: Request, db: DbSession) -> dict[str, Any]:
+    """Delete everything the server holds for this device: scenarios, saved routes and preferences.
+
+    The audit entry records only the counts and a short hash prefix, never the IP address, so the erasure itself
+    leaves no new personal data behind.
+    """
+    owner = require_client_key(request)
+    scenarios = db.scalars(select(Scenario).where(Scenario.owner_hash == owner)).all()
+    for scenario in scenarios:
+        db.delete(scenario)
+    saved = db.execute(delete(SavedRoute).where(SavedRoute.client_hash == owner)).rowcount
+    prefs = db.execute(delete(UserPreference).where(UserPreference.client_hash == owner)).rowcount
+    counts = {"scenarios": len(scenarios), "saved_routes": saved, "preferences": prefs}
+    record_audit(db, actor=f"device:{owner[:12]}", action="device.erase", entity="device", detail=counts)
+    db.commit()
+    return {"deleted": counts}
+
 
 @router.get("/saved-routes", tags=["user"])
 def list_saved_routes(request: Request, db: DbSession) -> dict[str, Any]:

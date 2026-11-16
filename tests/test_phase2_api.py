@@ -105,3 +105,27 @@ def test_bus_and_metro_journeys_become_available_when_both_feeds_are_loaded(clie
     features = {f["id"]: f for f in client.get("/api/features").json()["features"]}
     assert features["metro"]["state"] == "AVAILABLE"
     assert features["bus_metro_journeys"]["state"] == "AVAILABLE"
+
+
+def test_a_device_can_erase_everything_the_server_holds_for_it(client):
+    from tests.helpers import CLIENT_A, CLIENT_B, client_headers
+
+    load_demo(client)
+    route = client.get("/api/routes", params={"classification": UNVERIFIED, "q": "DEMO-1"}).json()["results"][0]
+    for key in (CLIENT_A, CLIENT_B):
+        response = client.post("/api/saved-routes", headers=client_headers(key), json={
+            "gtfs_route_id": route["gtfs_route_id"], "classification": UNVERIFIED, "label": "mine",
+        })
+        assert response.status_code == 201
+    saved_pref = client.put("/api/preferences", headers=client_headers(CLIENT_A), json={"values": {"theme": "dark"}})
+    assert saved_pref.status_code == 200, saved_pref.text
+    erased = client.delete("/api/my-data", headers=client_headers(CLIENT_A))
+    assert erased.status_code == 200
+    assert erased.json()["deleted"] == {"scenarios": 0, "saved_routes": 1, "preferences": 1}
+    assert client.get("/api/preferences", headers=client_headers(CLIENT_A)).json()["values"] == {}
+    assert client.get("/api/saved-routes", headers=client_headers(CLIENT_A)).json()["saved"] == []
+    assert len(client.get("/api/saved-routes", headers=client_headers(CLIENT_B)).json()["saved"]) == 1
+
+
+def test_erasing_needs_a_device_key(client):
+    assert client.delete("/api/my-data").status_code == 400

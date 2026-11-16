@@ -317,3 +317,14 @@ def test_verification_is_asked_for_on_the_page_and_never_in_a_browser_dialog():
     assert 'case "sourceDecisionForm":' in source
     assert 'data-action="decision-cancel"' in source
 
+
+
+def test_every_scrollable_table_can_be_reached_by_keyboard():
+    """axe rule scrollable-region-focusable: a table that scrolls sideways must be focusable and labelled."""
+    app = read("app.js")
+    wraps = re.findall(r'<div class="table-wrap"[^>]*>', app)
+    assert wraps, "no table containers found"
+    for tag in wraps:
+        assert 'tabindex="0"' in tag, tag
+        assert 'role="region"' in tag, tag
+        assert "aria-label=" in tag, tag

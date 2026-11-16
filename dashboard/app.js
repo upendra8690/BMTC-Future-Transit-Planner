@@ -776,7 +776,7 @@
     var rows = (direction.stops || []).map(function (s) {
       return '<tr><td class="num">' + esc(s.sequence) + "</td><td>" + esc(s.name) + "</td><td>" + esc(s.arrival || "") + "</td><td>" + esc(s.departure || "") + "</td></tr>";
     }).join("");
-    return "<h3>" + esc(heading) + '</h3><div class="table-wrap"><table><thead><tr>' +
+    return "<h3>" + esc(heading) + '</h3><div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: heading })) + '"><table><thead><tr>' +
       '<th class="num">' + esc(t("route.col_seq")) + "</th><th>" + esc(t("route.col_stop")) + "</th><th>" + esc(t("route.col_arrival")) + "</th><th>" + esc(t("route.col_departure")) + "</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
@@ -900,7 +900,7 @@
       (isToday ? '<p class="muted">' + esc(t("timetable.hint_today", { zone: zoneName() })) + "</p>" : "") +
       (afterMidnight ? '<p class="muted">' + esc(t("timetable.after_midnight")) + "</p>" : "") +
       (data.trips.length > MAX_TRIPS_SHOWN ? '<p class="muted">' + esc(t("timetable.truncated", { max: MAX_TRIPS_SHOWN })) + "</p>" : "") +
-      '<div class="table-wrap"><table><thead><tr><th>' + esc(t("timetable.col_trip")) + "</th><th>" + esc(t("timetable.col_towards")) +
+      '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.timetable") })) + '"><table><thead><tr><th>' + esc(t("timetable.col_trip")) + "</th><th>" + esc(t("timetable.col_towards")) +
       "</th><th>" + esc(t("timetable.col_first")) + "</th><th>" + esc(t("timetable.col_last")) + '</th><th class="num">' + esc(t("timetable.col_stops")) +
       "</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
@@ -1024,7 +1024,7 @@
         "</td><td>" + esc(dayLabel(d.departure_local, today)) + "</td><td>" + esc(minutes) + "</td></tr>";
     }).join("");
     var body = data.departures.length
-      ? '<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>' + esc(t("stop.col_time")) + "</th><th>" + esc(t("stop.col_route")) +
+      ? '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.departures") })) + '" style="margin-top:12px"><table><thead><tr><th>' + esc(t("stop.col_time")) + "</th><th>" + esc(t("stop.col_route")) +
         "</th><th>" + esc(t("stop.col_towards")) + "</th><th>" + esc(t("stop.col_day")) + "</th><th>" + esc(t("journey.col_wait")) +
         "</th></tr></thead><tbody>" + rows + "</tbody></table></div>"
       : '<div class="empty" style="margin-top:12px">' + esc(messageFor(data.message_code, data.message)) + "</div>";
@@ -1619,7 +1619,7 @@
         return "<tr><td><strong>" + esc(y.year) + "</strong></td><td>" + cell(y.official) + "</td><td>" + cell(y.unverified) +
           '</td><td class="num">' + esc(fmtNum(y.your_scenarios)) + "</td></tr>";
       }).join("");
-      return '<div class="table-wrap"><table><thead><tr><th>' + esc(t("cmp.col_year")) + "</th><th>" + esc(t("cmp.col_official")) +
+      return '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.years") })) + '"><table><thead><tr><th>' + esc(t("cmp.col_year")) + "</th><th>" + esc(t("cmp.col_official")) +
         "</th><th>" + esc(t("cmp.col_unverified")) + '</th><th class="num">' + esc(t("cmp.col_yours")) + "</th></tr></thead><tbody>" +
         rows + "</tbody></table></div>";
     });
@@ -1643,7 +1643,7 @@
           '</td><td class="num">' + estimateText(data.b.estimate[key], unitKey) +
           '</td><td class="num">' + estimateText(data.difference_b_minus_a[key], unitKey) + "</td></tr>";
       };
-      result.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("cmp.col_estimate")) + '</th><th class="num">' +
+      result.innerHTML = '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.comparison") })) + '"><table><thead><tr><th>' + esc(t("cmp.col_estimate")) + '</th><th class="num">' +
         esc(data.a.scenario.name) + '</th><th class="num">' + esc(data.b.scenario.name) + '</th><th class="num">' + esc(t("cmp.col_diff")) +
         "</th></tr></thead><tbody>" +
         row(t("cmp.row_distance"), "estimated_distance_km", "unit.km") +
@@ -1846,7 +1846,7 @@
     var box = document.getElementById("adminSources");
     if (box) {
       box.innerHTML = sources.length
-        ? '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.col_name")) +
+        ? '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.sources") })) + '"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.col_name")) +
           "</th><th>" + esc(t("admin.col_kind")) + "</th><th>" + esc(t("admin.col_class")) + "</th><th>" + esc(t("admin.col_status")) +
           "</th></tr></thead><tbody>" + sources.map(adminSourceRow).join("") + "</tbody></table></div>"
         : '<div class="empty">' + esc(t("admin.sources_none")) + "</div>";
@@ -1887,7 +1887,7 @@
         '<button type="button" class="danger" data-action="import-delete" data-id="' + esc(imp.id) + '" aria-label="' +
         esc(t("admin.import_delete", { id: imp.id })) + '">' + esc(t("common.delete")) + "</button></td></tr>";
     }).join("");
-    box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.upload_file")) +
+    box.innerHTML = '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.imports") })) + '"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.upload_file")) +
       "</th><th>" + esc(t("admin.col_class")) + "</th><th>" + esc(t("admin.col_status")) + '</th><th><span class="sr-only">' +
       esc(t("common.delete")) + "</span></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
@@ -1923,7 +1923,7 @@
       return "<tr><td>" + esc(utcText(entry.time)) + "</td><td>" + esc(entry.actor) + "</td><td>" + esc(entry.action) +
         "</td><td>" + esc(entity) + '</td><td class="muted">' + esc(detail) + "</td></tr>";
     }).join("");
-    box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.audit_time")) + "</th><th>" + esc(t("admin.audit_actor")) +
+    box.innerHTML = '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.audit") })) + '"><table><thead><tr><th>' + esc(t("admin.audit_time")) + "</th><th>" + esc(t("admin.audit_actor")) +
       "</th><th>" + esc(t("admin.audit_action")) + "</th><th>" + esc(t("admin.audit_entity")) + "</th><th>" + esc(t("admin.audit_detail")) +
       "</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
@@ -2405,8 +2405,34 @@
       '<label class="switch"><input type="checkbox" name="lowData"' + (state.lowData ? " checked" : "") + "> " + esc(t("settings.lowdata")) + "</label>" +
       '<p class="muted small">' + esc(t("settings.lowdata_hint")) + "</p>" +
       '<label class="switch"><input type="checkbox" name="largeText"' + (state.largeText ? " checked" : "") + "> " + esc(t("settings.largetext")) + "</label>" +
-      '<p class="muted small">' + esc(t("settings.language_hint")) + "</p></form></section>"
+      '<p class="muted small">' + esc(t("settings.language_hint")) + "</p></form></section>" +
+      '<section class="card"><h2>' + esc(t("erase.title")) + "</h2><p>" + esc(t("erase.body")) + "</p>" +
+      '<div id="eraseBox"><button type="button" class="danger" data-action="erase-ask">' + esc(t("erase.button")) + "</button></div></section>"
     );
+  }
+
+  // Erasure: the server deletes everything linked to this device's key; this browser forgets its lists and its key.
+  function askErase() {
+    var box = document.getElementById("eraseBox");
+    if (!box) return;
+    box.innerHTML = '<p class="banner error" role="alert">' + esc(t("erase.confirm")) + "</p>" +
+      '<div class="toolbar"><button type="button" class="danger" data-action="erase-do">' + esc(t("erase.yes")) + "</button>" +
+      '<button type="button" class="secondary" data-action="erase-cancel">' + esc(t("erase.no")) + "</button></div>";
+  }
+
+  async function eraseMyData() {
+    try {
+      await api("/api/my-data", { method: "DELETE" });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    storage.set(PREFIX + "favStops", "[]");
+    storage.set(PREFIX + "recent", "[]");
+    storage.set(PREFIX + "clientKey", "");
+    memoryClientKey = "";
+    toast(t("erase.done"));
+    render();
   }
 
   async function renderMore(args, token) {
@@ -2731,6 +2757,15 @@
         break;
       case "show-map":
         showHomeMap();
+        break;
+      case "erase-ask":
+        askErase();
+        break;
+      case "erase-cancel":
+        render();
+        break;
+      case "erase-do":
+        eraseMyData();
         break;
       default:
         break;
