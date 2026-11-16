@@ -6,6 +6,51 @@ A screen existing does not make a feature Done.
 
 Legend for data source: GTFS = static GTFS feed; RT = GTFS-Realtime; OSM = OpenStreetMap; — = none needed.
 
+## Namma BMTC 2.0 capability comparison
+
+What Namma BMTC 2.0 offers is taken from press reports ([Curly Tales](https://curlytales.com/bengalurus-namma-bmtc-app-lets-you-book-bus-metro-tickets-on-a-single-platform/),
+[Asianet](https://www.asianetnews.com/yatra/namma-bmtc-2-0-app-features-articleshow-g6ayaqp),
+[VARINDIA](https://www.varindia.com/news/bmtc-2-0-brings-bus-metro-services-under-one-app)) and the owner's screenshots.
+The community "open-bmtc" documentation describes the official app's private API; it is **not** a permission to use it.
+
+| # | Capability | In our app now | Legitimate data source exists? | Public API? | Auth required? | Partner permission? | Payment provider? | Our status |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Live bus tracking | No | BMTC realtime data (aggregator sharing reported) | No public endpoint found | Yes | **Yes** | No | Blocked; adapter Planned |
+| 2 | Stop-wise arrivals | Scheduled only | Static GTFS (scheduled); RT for live | Static: portal download | Unknown | Live: **Yes** | No | Scheduled: Done (needs data); live: Blocked |
+| 3 | Route discovery | Yes | DULT GTFS | Portal download | Unknown | Licence to confirm | No | Done (needs real data) |
+| 4 | Bus journey planning | Yes (RAPTOR) | DULT GTFS | Portal download | Unknown | Licence to confirm | No | Done (needs real data) |
+| 5 | Fare discovery | One-ride GTFS fares | GTFS fares if included; official fare tables | Unknown | — | Licence | No | Partial |
+| 6 | Single bus tickets | No | BMTC/ONDC ticketing | Not public | Yes | **Yes** | **Yes** | Blocked |
+| 7 | Digital bus passes | No | BMTC | Not public | Yes | **Yes** | **Yes** | Blocked; pass information Planned |
+| 8 | Pass categories (Vayu Vajra, Vajra, etc.) | No | BMTC official pages | No (information) | No | No for information | No | Planned (information with links) |
+| 9 | Airport services | No | Vayu Vajra routes in GTFS | Portal download | Unknown | Licence | No | Planned |
+| 10 | Namma Metro information | No | DULT GTFS (BMRCL); community feed | Portal download | Unknown | Licence | No | Planned; blocked on data |
+| 11 | Bus + Metro journeys | Engine supports multi-feed | Both GTFS feeds | Portal download | Unknown | Licences | No | Planned; blocked on data |
+| 12 | Metro QR ticketing | No | ONDC network | ONDC protocol (for registered participants) | Yes | **Yes (ONDC onboarding)** | **Yes** | Blocked |
+| 13 | NCMC | No | NPCI / issuing banks (information) | No | — | For operations: **Yes** | — | Information Planned; operations Unavailable |
+| 14 | UPI / cards / wallets | No | Payment gateways | Yes (merchant APIs) | Yes | Merchant KYC | **Yes** | Blocked; wallet Unavailable (RBI licence) |
+| 15 | Account and ticket history | Device-only saved routes | Our own database | — | — | No | No | Accounts Planned (Neon); ticket history Blocked |
+| 16 | Notifications and service updates | No | Web Push (ours); alerts from GTFS-RT or official announcements | Web Push: yes | — | Alerts feed: Yes | No | Planned |
+| 17 | Kannada and English | Yes, plus Telugu and Hindi | — | — | — | — | — | Done (review pending) |
+
+## Requested in the 4.0 brief (new)
+
+| Feature | Status |
+|---|---|
+| Rename to Bengaluru Transit Planner | Planned (Phase 1) |
+| 9-section navigation (Home, Nearby, Plan Journey, Live Tracking, Tickets and Passes, Metro, Favourites, My Account, More Services) | Planned (Phase 1) |
+| Light and dark mode | Planned (Phase 1) |
+| Low-data mode (no map tiles until tapped, smaller payloads) | Planned (Phase 1) |
+| Senior-friendly large text and big touch targets | Planned (Phase 1) |
+| Bus categories (Ordinary, BIG 10, BIG Circle, Vajra, Vayu Vajra) | Planned; shown only when the data confirms them |
+| Service alerts | Planned (admin-entered with a cited source; GTFS-RT alerts when available) |
+| Password reset | Planned (Phase 5); needs an email provider |
+| Future services directory (railways, airport, cabs, hotels, temples, hospitals, government) | Planned as official links only |
+| Parking, EV charging, toilets, water | Planned from OpenStreetMap |
+| Traffic and road disruptions | Unavailable (no authorised free source identified) |
+| iOS | PWA on iPhone: Planned (free). Native iOS build: Unavailable at ₹0 (needs a Mac and the Apple Developer Program) |
+| AAB (Play Store bundle) build | Planned (Phase 13) |
+
 ## Bus: routes, stops, timetables, fares
 
 | Feature | Existing (3.0) | Missing | Backend | Frontend | Data source | Permission needed | Tests | Status |

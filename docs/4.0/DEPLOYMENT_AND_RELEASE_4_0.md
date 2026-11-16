@@ -51,7 +51,7 @@ People with the current debug-signed app must uninstall it once before installin
 
 ## Release checklist (4.0)
 1. All phases' "done" items pass tests on SQLite and Postgres; lint and security checks pass.
-2. `FEATURE_MATRIX_4.0.md` statuses are true.
+2. `FEATURE_MATRIX_4_0.md` statuses are true.
 3. Screenshots regenerated from the running app.
 4. APK built, signed (if secrets exist), checksum published.
 5. Release notes and known limitations written.

@@ -1,7 +1,16 @@
-# Project audit for 4.0 (Phase 0)
+# Project audit: Bengaluru Transit Planner 4.0 (Phase 0)
 
 Audit date: 16 November 2026. Baseline: `main` at commit `1fda4de` (release 3.0.0, plus the Render, APK and icon work).
 Version 3.0 is preserved: it stays on `main` and is tagged `v3.0.0`. All 4.0 work happens on the `v4` branch.
+
+**Git state:** 9 commits on `main`, clean working tree, branches `main` and `v4`, tags `v3.0.0` and `app-latest`.
+**Documents read:** README, SOURCES, CHANGELOG, `docs/SECURITY_ASVS.md`, `docs/PRIVACY.md`, `docs/DEPLOY.md`,
+`docs/API.md`, `docs/architecture.md`, `android/README.md`.
+
+**Phase 0 document set** (all in `docs/4.0/`): this audit, `ARCHITECTURE_4_0.md`, `IMPLEMENTATION_ROADMAP_4_0.md`,
+`API_INTEGRATION_REGISTER.md`, `DATA_SOURCE_REGISTER.md`, `SECURITY_PLAN_4_0.md`, `TEST_PLAN_4_0.md`, plus
+supporting `FEATURE_MATRIX_4_0.md` (includes the Namma BMTC 2.0 comparison), `DATABASE_DESIGN_4_0.md` and
+`DEPLOYMENT_AND_RELEASE_4_0.md`.
 
 ## 1. What exists today
 
@@ -64,7 +73,7 @@ compression-ratio limits; audit log for admin actions; OWASP ASVS 5.0 self-mappi
 3. **No-build frontend.** One codebase serves the web, the PWA and the Android wrapper, which is what a ₹0 budget needs.
 4. **Strong test culture**, which lets 4.0 change things safely.
 
-## 3. Gaps against the 4.0 brief (summary; details in `FEATURE_MATRIX_4.0.md`)
+## 3. Gaps against the 4.0 brief (summary; details in `FEATURE_MATRIX_4_0.md`)
 
 | Area | Gap |
 |---|---|
@@ -84,7 +93,7 @@ compression-ratio limits; audit log for admin actions; OWASP ASVS 5.0 self-mappi
 
 | # | Risk | Impact | Proposed handling |
 |---|---|---|---|
-| R1 | **Name and look-alike risk.** "BMTC" in the name, and a home screen modelled on Namma BMTC, can read as official. App stores remove apps that imply an affiliation they don't have. | High | Decision D-NAME in `ARCHITECTURE_4.0.md`. Keep the "Unofficial" notice everywhere regardless. |
+| R1 | **Name and look-alike risk.** "BMTC" in the name, and a home screen modelled on Namma BMTC, can read as official. App stores remove apps that imply an affiliation they don't have. | High | Decision D-NAME in `ARCHITECTURE_4_0.md`. Keep the "Unofficial" notice everywhere regardless. |
 | R2 | **No persistent database on the free host.** Render free disk is wiped on restart, so accounts and favourites would vanish. | High for Phase 5 | Decision D-DB: a free hosted Postgres (for example Neon), set up from your account. |
 | R3 | **No official data licence confirmed.** The DULT Transport Data Hub is reported but its terms are unknown. | High | Contact DULT/BMTC; until then use only data whose terms are known, labelled `UNVERIFIED_FEED`. |
 | R4 | **Ticketing, payments, NCMC and live GPS need organisations, not code.** ONDC buyer-app registration, payment-gateway KYC and agency data agreements all need a registered entity. | Blocks Phases 7–8 activation | Build adapters and UI states; keep features `DISABLED` with the reason shown. |

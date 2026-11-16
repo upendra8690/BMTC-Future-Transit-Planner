@@ -24,6 +24,12 @@ audit log of admin actions; no secrets in the repository (`.env` ignored).
 | Supply chain | Vulnerable packages | `pip-audit` and Dependabot in CI; pinned versions in `requirements-verified.txt` |
 | Android | WebView abuse | Only the planner's host loads; no JavaScript bridge exposes secrets; release signing key never in git |
 | Secrets | Leaks | Environment variables / GitHub secrets only; `.env` ignored; secret scanning on the repo |
+| Password reset | Token theft or reuse; account enumeration | Single-use random tokens stored hashed, 30-minute expiry; same response whether or not the email exists; needs an email provider (see the integration register) |
+| Account enumeration | Learning which emails are registered | Identical messages and similar timing for unknown email vs wrong password, on login, sign-up and reset |
+| SSRF | Server fetching attacker-chosen URLs (feed URLs, webhooks) | Outbound fetches only to admin-configured HTTPS hosts on an allowlist; block private and link-local IP ranges; timeouts and size limits |
+| CORS | Other sites reading user data with the user's cookies | CORS stays closed by default (`CORS_ORIGINS` empty); credentialed CORS never allowed for `*` |
+| Data leakage | Personal data in logs or error pages | No request bodies, emails or coordinates in logs; generic 500 pages; debug off in production |
+| Backup security | Backups exposing accounts | Provider-managed encrypted Postgres backups; exports never stored in the web root; restore drill extended to Postgres |
 | Backups | Loss of accounts | Postgres provider backups (D3) plus a documented export |
 
 ## Privacy
@@ -32,7 +38,11 @@ audit log of admin actions; no secrets in the repository (`.env` ignored).
 - No phone number, no SMS, no tracking pixels or third-party analytics.
 - Account deletion removes personal data immediately; data export as JSON.
 - Privacy policy and terms pages in the app (Phase 11), reviewed by you (not legal advice).
-- Retention periods in `DATABASE_DESIGN_4.0.md`.
+- Retention periods in `DATABASE_DESIGN_4_0.md`.
+
+## Security report format (Phase 12)
+Each finding is reported with: finding, severity, evidence, reproduction steps, impact, remediation, retest result.
+A finding is closed only when the retest has actually been run.
 
 ## Known gaps to accept for a ₹0 demo
 - Free hosting has no WAF or DDoS protection beyond the provider's defaults.

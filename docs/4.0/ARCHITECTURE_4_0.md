@@ -1,4 +1,19 @@
-# Architecture for 4.0
+# Architecture: Bengaluru Transit Planner 4.0
+
+## 0. Frontend structure (Phase 1)
+
+- **Navigation:** a bottom bar with Home, Nearby, Plan Journey, Metro and More, plus a menu (top-left) that holds all
+  nine sections: Home, Nearby, Plan Journey, Live Tracking, Tickets and Passes, Metro, Favourites, My Account,
+  More Services. Hash routes (`#/home`, `#/nearby`, …) keep deep links working in the browser and the Android shell.
+  The 3.0 views (Routes, Stops, Scenarios, Compare, Data sources, Administration) stay reachable from More Services.
+- **Theme:** CSS custom properties for colours; light and dark themes follow the system setting, with a manual
+  switch saved per device. All colour pairs checked for WCAG AA contrast.
+- **Low-data mode:** map tiles load only when the user taps the map; smaller result pages; no background refresh.
+  Saved per device; switched on automatically when the browser reports Save-Data.
+- **Large text:** a setting that scales the base font and touch targets for senior-friendly use.
+- **States:** every screen has loading, empty, offline (with saved-copy label) and error states, plus an
+  "unavailable" state rendered from `/api/features` for features awaiting a provider.
+- **iOS:** iPhone users install the PWA from Safari (free). A native iOS build is not planned at ₹0.
 
 ## 1. Target shape
 

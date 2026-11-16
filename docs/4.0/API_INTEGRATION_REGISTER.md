@@ -7,6 +7,20 @@ production dependency until it is confirmed in writing.
 Every integration is built behind an adapter with three states, shown to users and admins:
 `DISABLED` (no permission or credentials; the reason is shown), `DEMO` (synthetic data, labelled), `ACTIVE` (authorised and verified).
 
+The licence and status of each **dataset** is tracked in `DATA_SOURCE_REGISTER.md`; this file covers services and
+access routes.
+
+## 0. Additions for the 4.0 master brief
+
+| Integration | Operator | Permission / requirement | Cost | Status |
+|---|---|---|---|---|
+| BMTC real-time data for aggregators | BMTC (reported by [Construction World](https://www.constructionworld.in/amp/transport-infrastructure/highways-and-roads-infrastructure/bmtc-to-share-real-time-bus-data-with-aggregators/97367)) | Application and data-sharing agreement; terms unknown | Unknown | Blocked; the owner may enquire |
+| Email (password reset, account notices) | A transactional email provider with a free tier (for example Brevo or Resend; check current terms) | Account, verified sender domain or address; API key kept server-side | Free tier (limits apply) | Planned for Phase 5; owner chooses |
+| Indian Railways, airport, cabs, hotels, temple bookings | Each operator's official website | Linking only; no scraping or automated booking | Free | Planned as links (Phase 8) |
+| Traffic / road disruptions | Bengaluru Traffic Police announcements; commercial traffic APIs | Official feed not identified; commercial APIs paid | Paid or unavailable | Unavailable |
+| Apple App Store (native iOS) | Apple | Apple Developer Program, a Mac with Xcode | Paid (annual) | Unavailable at ₹0; iPhone users use the PWA |
+| Google Play (AAB) | Google | Developer account; store policies on naming and affiliation | One-time US$25 | Optional |
+
 ## 1. Transit data
 
 ### 1.1 BMTC + BMRCL static GTFS via DULT Transport Data Hub
