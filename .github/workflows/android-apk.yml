@@ -37,6 +37,15 @@ jobs:
           channel: stable
           cache: true
 
+      # Keep Gradle's downloads between runs, so builds fetch less from Maven Central (which rate-limits CI runners).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/flutter_app/pubspec.yaml', '.github/workflows/android-apk.yml') }}
+          restore-keys: gradle-${{ runner.os }}-
+
       - name: Create the native Android project around the starter
         run: |
           flutter create --platforms=android --project-name bmtc_planner_app --org io.github.upendra8690 .
@@ -78,7 +87,14 @@ jobs:
       - name: Build release APK
         run: |
           set -o pipefail
-          if ! flutter build apk --release --dart-define=PLANNER_URL="$PLANNER_URL" 2>&1 | tee build.log; then
+          ok=0
+          for attempt in 1 2 3; do
+            if flutter build apk --release --dart-define=PLANNER_URL="$PLANNER_URL" 2>&1 | tee build.log; then ok=1; break; fi
+            # Retry only when a download was rate-limited or failed; real build errors fail straight away.
+            grep -qE '429|Too Many Requests|Could not GET|Could not resolve' build.log || break
+            echo "Download problem on attempt $attempt; waiting before retrying"; sleep $((attempt * 90))
+          done
+          if [ "$ok" != 1 ]; then
             # Surface the end of the log as an annotation, which is readable without signing in.
             tail -n 60 build.log | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}' | sed 's/^/::error title=APK build log tail::/'
             echo
