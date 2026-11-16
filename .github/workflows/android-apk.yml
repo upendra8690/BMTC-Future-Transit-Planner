@@ -1,0 +1,93 @@
+name: Android APK
+
+# Builds the Flutter WebView wrapper in android/flutter_app and publishes it on the "app-latest" release,
+# so anyone can download the APK from GitHub without the Play Store.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "dashboard/icons/**"
+      - ".github/workflows/android-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PLANNER_URL: https://bmtc-future-transit-planner-3-0.onrender.com/
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android/flutter_app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create the native Android project around the starter
+        run: |
+          flutter create --platforms=android --project-name bmtc_planner_app --org io.github.upendra8690 .
+          rm -rf test
+          manifest=android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.INTERNET' "$manifest" || \
+            sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <application|' "$manifest"
+          sed -i 's|android:label="[^"]*"|android:label="BMTC Planner"|' "$manifest"
+          grep -n 'INTERNET\|android:label' "$manifest"
+
+      - name: App icon from the dashboard icon
+        run: |
+          cp ../../dashboard/icons/icon-512.png app_icon.png
+          flutter pub add --dev flutter_launcher_icons
+          cat > flutter_launcher_icons.yaml <<'EOF'
+          flutter_launcher_icons:
+            android: true
+            ios: false
+            image_path: "app_icon.png"
+          EOF
+          flutter pub get
+          dart run flutter_launcher_icons
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Build release APK
+        run: |
+          flutter build apk --release --dart-define=PLANNER_URL="$PLANNER_URL"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/BMTC-Planner.apk"
+          ls -la "$GITHUB_WORKSPACE/BMTC-Planner.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BMTC-Planner-apk
+          path: BMTC-Planner.apk
+
+      - name: Publish on the app-latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: app-latest
+          name: "📱 BMTC Planner — Android app (latest)"
+          make_latest: true
+          files: BMTC-Planner.apk
+          body: |
+            **Download `BMTC-Planner.apk` below and open it on your Android phone.**
+
+            Android will ask you to allow installs from your browser or file manager the first time. That is normal for apps outside the Play Store.
+
+            The app opens the live planner at ${{ env.PLANNER_URL }}
+            - The free server sleeps when idle, so the first load can take up to a minute.
+            - Signed with a debug key, built automatically by GitHub Actions from commit ${{ github.sha }}.
+            - Unofficial project. Not affiliated with BMTC, BMRCL or Namma Metro. The demo shows invented data.
+
+            Prefer no download? Open the link in Chrome and choose **Install app** / **Add to Home screen**.

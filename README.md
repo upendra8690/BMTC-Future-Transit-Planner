@@ -9,6 +9,8 @@
 **Plan Bengaluru bus journeys today and sketch the network of 2027 to 2030, without ever mixing guesses with facts.**
 
 [![CI](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/ci.yml/badge.svg)](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/ci.yml)
+[![Android APK](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/android-apk.yml/badge.svg)](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/android-apk.yml)
+[![Live demo](https://img.shields.io/badge/live%20demo-online-2EA44F?style=flat-square&logo=render&logoColor=white)](https://bmtc-future-transit-planner-3-0.onrender.com/)
 ![Version 3.0.0](https://img.shields.io/badge/version-3.0.0-0B5CAD?style=flat-square)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
@@ -21,6 +23,12 @@
 ![WCAG 2.1 AA](https://img.shields.io/badge/axe--core-WCAG%202.1%20AA-2EA44F?style=flat-square)
 ![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?style=flat-square&logo=ruff&logoColor=black)
 ![Languages](https://img.shields.io/badge/UI-English%20%C2%B7%20%E0%B2%95%E0%B2%A8%E0%B3%8D%E0%B2%A8%E0%B2%A1%20%C2%B7%20%E0%B0%A4%E0%B1%86%E0%B0%B2%E0%B1%81%E0%B0%97%E0%B1%81%20%C2%B7%20%E0%A4%B9%E0%A4%BF%E0%A4%A8%E0%A5%8D%E0%A4%A6%E0%A5%80-6E40C9?style=flat-square)
+
+<a href="https://bmtc-future-transit-planner-3-0.onrender.com/"><img alt="Try it live" src="https://img.shields.io/badge/%F0%9F%9A%80%20Try%20it%20live-open%20the%20planner-0B5CAD?style=for-the-badge"></a>
+&nbsp;
+<a href="https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/releases/latest/download/BMTC-Planner.apk"><img alt="Download the Android app" src="https://img.shields.io/badge/%F0%9F%93%B1%20Android%20app-download%20APK-3DDC84?style=for-the-badge&logo=android&logoColor=white"></a>
+
+<sub>Free hosting: the server sleeps when idle, so the first visit can take up to a minute to wake it.</sub>
 
 [**Why**](#-why-this-exists) · [**Screenshots**](#-screenshots) · [**What's new**](#-whats-new-in-30) · [**Quick start**](#-quick-start) · [**Features**](#-features) · [**API**](#-api-in-30-seconds) · [**Architecture**](#%EF%B8%8F-architecture) · [**Quality**](#-quality) · [**Roadmap**](#%EF%B8%8F-roadmap)
 
@@ -92,6 +100,13 @@ When there is no verified timetable for a year, the planner says so plainly inst
 Full list in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## 🚀 Quick start
+
+### 📱 On your phone (no Play Store needed)
+
+- **Android app:** download [`BMTC-Planner.apk`](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/releases/latest/download/BMTC-Planner.apk) from the [latest release](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/releases/latest) and open it. Android asks once to allow installs from your browser; that is normal for apps outside the Play Store.
+- **Any phone (Android or iPhone):** open [bmtc-future-transit-planner-3-0.onrender.com](https://bmtc-future-transit-planner-3-0.onrender.com/) and choose **Install app** (Chrome) or **Share → Add to Home Screen** (Safari). It works offline after the first visit.
+
+The live demo loads the invented `SYNTHETIC_DEMO` feed on every start (`scripts/seed_demo_feed.py`), and anything created there is wiped when the free server restarts.
 
 ### 🪟 Windows (two clicks)
 

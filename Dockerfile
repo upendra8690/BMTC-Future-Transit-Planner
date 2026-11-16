@@ -39,4 +39,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # exec makes uvicorn the main process, so it receives the stop signal directly. --proxy-headers takes the client
 # address from X-Forwarded-For only when the connection comes from one of the FORWARDED_ALLOW_IPS addresses.
-CMD ["sh", "-c", "exec uvicorn app.main:create_app --factory --app-dir backend --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips \"$FORWARDED_ALLOW_IPS\""]
+# scripts/container_start.sh starts uvicorn; on Render it also loads the demo feed and trusts Render's proxy.
+CMD ["sh", "scripts/container_start.sh"]
