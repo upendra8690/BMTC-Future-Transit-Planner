@@ -60,10 +60,10 @@ jobs:
           EOF
           cat > flutter_native_splash.yaml <<'EOF'
           flutter_native_splash:
-            color: "#3730a3"
+            color: "#0b47a8"
             image: assets/icon/foreground.png
             android_12:
-              color: "#3730a3"
+              color: "#0b47a8"
               image: assets/icon/foreground.png
             ios: false
             web: false

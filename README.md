@@ -4,7 +4,9 @@
 
 <br>
 
-# 🚌 BMTC Future Transit Planner 3.0
+<img src="assets/app-icon-preview.png" alt="BMTC Planner app icon" width="112">
+
+# BMTC Future Transit Planner 3.0
 
 **Plan Bengaluru bus journeys today and sketch the network of 2027 to 2030, without ever mixing guesses with facts.**
 
