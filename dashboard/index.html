@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Bus timetables from the loaded feeds, each labelled by its source, and clearly labelled future scenarios for 2027 to 2030. English, Kannada, Telugu and Hindi.">
+  <meta name="description" content="Bengaluru Transit Planner: an independent app for Bengaluru bus and Namma Metro routes, stops, timetables and journeys, with every piece of data labelled by its source. English, Kannada, Telugu and Hindi. Not an official BMTC or BMRCL app.">
   <meta name="theme-color" content="#0b5cad">
   <meta name="color-scheme" content="light dark">
-  <title>BMTC Future Transit Planner</title>
+  <title>Bengaluru Transit Planner</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">
@@ -14,13 +14,56 @@
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body data-view="home">
   <noscript>
-    <p class="noscript">This planner needs JavaScript to show timetables. Please turn JavaScript on in your browser.<br>
-    ಈ ಯೋಜಕಕ್ಕೆ ಜಾವಾಸ್ಕ್ರಿಪ್ಟ್ ಬೇಕು. ನಿಮ್ಮ ಬ್ರೌಸರ್ನಲ್ಲಿ ಅದನ್ನು ಚಾಲೂ ಮಾಡಿ.<br>
-    इस प्लानर को समय-सारणी दिखाने के लिए JavaScript चाहिए। कृपया अपने ब्राउज़र में JavaScript चालू करें।<br>
-    ఈ ప్లానర్ సమయ పట్టికలు చూపించడానికి జావాస్క్రిప్ట్ అవసరం. దయచేసి మీ బ్రౌజర్‌లో జావాస్క్రిప్ట్‌ను ఆన్ చేయండి.</p>
+    <p class="noscript">This app needs JavaScript to show timetables. Please turn JavaScript on in your browser.<br>
+    ಈ ಆ್ಯಪ್‌ಗೆ ಜಾವಾಸ್ಕ್ರಿಪ್ಟ್ ಬೇಕು. ನಿಮ್ಮ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಅದನ್ನು ಚಾಲೂ ಮಾಡಿ.<br>
+    इस ऐप को समय-सारणी दिखाने के लिए JavaScript चाहिए। कृपया अपने ब्राउज़र में JavaScript चालू करें।<br>
+    ఈ యాప్ సమయ పట్టికలు చూపించడానికి జావాస్క్రిప్ట్ అవసరం. దయచేసి మీ బ్రౌజర్‌లో జావాస్క్రిప్ట్‌ను ఆన్ చేయండి.</p>
   </noscript>
+
+  <!-- Opening screen. Original artwork: a generic Bengaluru skyline, a metro viaduct and a city bus. It fades out
+       when the app is ready, and on its own after a few seconds if the app cannot start. -->
+  <div id="splash" class="splash" aria-hidden="true">
+    <div class="splash-inner">
+      <img class="splash-logo" src="/icons/icon-192.png" alt="" width="96" height="96">
+      <p class="splash-name" data-i18n="app.brand">Bengaluru Transit Planner</p>
+      <p class="splash-tagline" data-i18n="splash.tagline">Bus, Metro and journeys for Bengaluru</p>
+      <svg class="splash-city" viewBox="0 0 360 150" role="presentation" focusable="false">
+        <g class="sky-towers" fill="currentColor" opacity="0.28">
+          <rect x="8" y="58" width="26" height="62"/><rect x="40" y="38" width="20" height="82"/>
+          <rect x="66" y="66" width="30" height="54"/><rect x="262" y="44" width="24" height="76"/>
+          <rect x="292" y="62" width="30" height="58"/><rect x="328" y="30" width="22" height="90"/>
+          <path d="M128 120 V86 h104 v34 z M140 86 v-14 h80 v14 z M160 72 q20 -34 40 0 z M178 40 h4 v-6 h-4 z"/>
+          <rect x="130" y="92" width="6" height="28" opacity="0.6"/><rect x="224" y="92" width="6" height="28" opacity="0.6"/>
+        </g>
+        <g class="viaduct" fill="currentColor" opacity="0.5">
+          <rect x="0" y="100" width="360" height="5" rx="2"/>
+          <rect x="40" y="105" width="5" height="15"/><rect x="140" y="105" width="5" height="15"/>
+          <rect x="240" y="105" width="5" height="15"/><rect x="330" y="105" width="5" height="15"/>
+        </g>
+        <g class="splash-train">
+          <rect x="0" y="88" width="78" height="12" rx="5" fill="#a855f7"/>
+          <rect x="6" y="91" width="10" height="5" rx="1.5" fill="#ffffff" opacity="0.85"/>
+          <rect x="22" y="91" width="10" height="5" rx="1.5" fill="#ffffff" opacity="0.85"/>
+          <rect x="38" y="91" width="10" height="5" rx="1.5" fill="#ffffff" opacity="0.85"/>
+          <rect x="54" y="91" width="10" height="5" rx="1.5" fill="#ffffff" opacity="0.85"/>
+        </g>
+        <rect x="0" y="134" width="360" height="3" fill="currentColor" opacity="0.35"/>
+        <g class="splash-bus">
+          <rect x="0" y="112" width="86" height="22" rx="5" fill="#f59e0b"/>
+          <rect x="6" y="116" width="12" height="8" rx="2" fill="#0c2d6b"/>
+          <rect x="22" y="116" width="12" height="8" rx="2" fill="#0c2d6b"/>
+          <rect x="38" y="116" width="12" height="8" rx="2" fill="#0c2d6b"/>
+          <rect x="54" y="116" width="12" height="8" rx="2" fill="#0c2d6b"/>
+          <rect x="70" y="115" width="12" height="15" rx="2" fill="#0c2d6b"/>
+          <circle cx="18" cy="135" r="5" fill="#111827"/><circle cx="68" cy="135" r="5" fill="#111827"/>
+        </g>
+      </svg>
+      <p class="splash-unofficial" data-i18n="splash.unofficial">Independent app. Not an official BMTC or BMRCL app.</p>
+      <p id="splashVersion" class="splash-version"></p>
+    </div>
+  </div>
 
   <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
 
@@ -34,7 +77,10 @@
 
   <header class="topbar">
     <button id="navToggle" class="icon-btn" type="button" aria-label="Open menu" data-i18n-aria="menu.open" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
-    <h1 class="brand" data-i18n="app.brand">BMTC Future Transit Planner</h1>
+    <a class="brand-link" href="#/home">
+      <img class="brand-logo" src="/icons/favicon-32.png" alt="" width="32" height="32">
+      <h1 class="brand" data-i18n="app.brand">Bengaluru Transit Planner</h1>
+    </a>
     <div class="top-controls">
       <label class="picker year-picker">
         <span class="sr-only" data-i18n="year.label">Planning year</span>
@@ -59,9 +105,19 @@
 
   <div class="layout">
     <nav id="sidebar" class="sidebar" aria-label="Main navigation" data-i18n-aria="nav.label">
+      <p class="nav-group" data-i18n="nav.group_main">App</p>
+      <a href="#/home" data-nav data-i18n="nav.home">Home</a>
+      <a href="#/nearby" data-nav data-i18n="nav.nearby">Nearby stops</a>
+      <a href="#/journey" data-nav data-i18n="nav.journey">Plan a journey</a>
+      <a href="#/live" data-nav data-i18n="nav.live">Live tracking</a>
+      <a href="#/tickets" data-nav data-i18n="nav.tickets">Tickets and passes</a>
+      <a href="#/metro" data-nav data-i18n="nav.metro">Namma Metro</a>
+      <a href="#/favourites" data-nav data-i18n="nav.favourites">Favourites</a>
+      <a href="#/account" data-nav data-i18n="nav.account">My account</a>
+      <a href="#/more" data-nav data-i18n="nav.more">More services</a>
+      <p class="nav-group" data-i18n="nav.group_tools">Planner tools</p>
       <a href="#/routes" data-nav data-i18n="nav.routes">Routes and timetables</a>
       <a href="#/stops" data-nav data-i18n="nav.stops">Stops</a>
-      <a href="#/journey" data-nav data-i18n="nav.journey">Direct journeys</a>
       <a href="#/scenarios" data-nav data-i18n="nav.scenarios">Future scenarios</a>
       <a href="#/compare" data-nav data-i18n="nav.compare">Compare</a>
       <a href="#/sources" data-nav data-i18n="nav.sources">Data sources</a>
@@ -74,7 +130,15 @@
     </main>
   </div>
 
-  <footer class="site-note"><p data-i18n="app.disclaimer">Unofficial. This planner is not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro or any transport operator. Times are scheduled, not live.</p></footer>
+  <footer class="site-note"><p data-i18n="app.disclaimer">Unofficial and independently developed: not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro, Chalo or the Government of Karnataka. Times are scheduled, not live.</p></footer>
+
+  <nav id="bottomNav" class="bottom-nav" aria-label="Quick navigation" data-i18n-aria="nav.quick">
+    <a href="#/home" data-nav><span class="bn-icon" aria-hidden="true">&#8962;</span><span data-i18n="nav.home">Home</span></a>
+    <a href="#/nearby" data-nav><span class="bn-icon" aria-hidden="true">&#9673;</span><span data-i18n="nav.nearby_short">Nearby</span></a>
+    <a href="#/journey" data-nav><span class="bn-icon" aria-hidden="true">&#8644;</span><span data-i18n="nav.plan_short">Plan</span></a>
+    <a href="#/metro" data-nav><span class="bn-icon" aria-hidden="true">&#9410;</span><span data-i18n="nav.metro_short">Metro</span></a>
+    <a href="#/more" data-nav><span class="bn-icon" aria-hidden="true">&#8943;</span><span data-i18n="nav.more_short">More</span></a>
+  </nav>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

@@ -1,10 +1,13 @@
 name: Android APK
 
-# Builds the Flutter WebView wrapper in android/flutter_app and publishes it on the "app-latest" release,
-# so anyone can download the APK from GitHub without the Play Store.
+# Builds the Flutter WebView wrapper in android/flutter_app.
+#   main -> the released app (opens the live 3.x site), published on the "app-latest" release.
+#   v4   -> a 4.0 preview (opens the 4.0 preview site), published as the "app-v4-preview" pre-release.
+#           Skipped until the repository variable V4_PLANNER_URL names a deployed 4.0 site, because the APK only
+#           shows the website it points at.
 on:
   push:
-    branches: [main]
+    branches: [main, v4]
     paths:
       - "android/**"
       - "dashboard/icons/**"
@@ -16,10 +19,14 @@ permissions:
   contents: write
 
 env:
-  PLANNER_URL: https://bmtc-future-transit-planner-3-0.onrender.com/
+  IS_V4: ${{ github.ref_name == 'v4' }}
+  PLANNER_URL: ${{ github.ref_name == 'v4' && vars.V4_PLANNER_URL || 'https://bmtc-future-transit-planner-3-0.onrender.com/' }}
+  APP_LABEL: ${{ github.ref_name == 'v4' && 'Bengaluru Transit' || 'BMTC Planner' }}
+  RELEASE_TAG: ${{ github.ref_name == 'v4' && 'app-v4-preview' || 'app-latest' }}
 
 jobs:
   apk:
+    if: github.ref_name != 'v4' || vars.V4_PLANNER_URL != ''
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -53,7 +60,7 @@ jobs:
           manifest=android/app/src/main/AndroidManifest.xml
           grep -q 'android.permission.INTERNET' "$manifest" || \
             sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <application|' "$manifest"
-          sed -i 's|android:label="[^"]*"|android:label="BMTC Planner"|' "$manifest"
+          sed -i "s|android:label=\"[^\"]*\"|android:label=\"$APP_LABEL\"|" "$manifest"
           grep -n 'INTERNET\|android:label' "$manifest"
 
       - name: App icon and launch screen (assets/app-icon.svg, rendered into assets/icon/)
@@ -108,12 +115,14 @@ jobs:
           name: BMTC-Planner-apk
           path: BMTC-Planner.apk
 
-      - name: Publish on the app-latest release
+      - name: Publish the APK (app-latest for main, app-v4-preview pre-release for v4)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: app-latest
-          name: "📱 BMTC Planner — Android app (latest)"
-          make_latest: true
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ env.IS_V4 == 'true' && '🧪 Bengaluru Transit Planner 4.0 — preview APK (not the stable app)' || '📱 BMTC Planner — Android app (latest)' }}
+          prerelease: ${{ env.IS_V4 == 'true' }}
+          make_latest: ${{ env.IS_V4 != 'true' }}
           files: BMTC-Planner.apk
           body: |
             **Download `BMTC-Planner.apk` below and open it on your Android phone.**

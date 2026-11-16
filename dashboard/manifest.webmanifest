@@ -1,7 +1,7 @@
 {
-  "name": "BMTC Future Transit Planner",
-  "short_name": "BMTC Planner",
-  "description": "Bus timetables from the loaded feeds, each labelled by its source, and labelled future scenarios for 2027 to 2030.",
+  "name": "Bengaluru Transit Planner",
+  "short_name": "BLR Transit",
+  "description": "Independent app for Bengaluru bus and Namma Metro routes, stops, timetables and journeys. Not an official BMTC or BMRCL app.",
   "id": "/",
   "lang": "en",
   "dir": "ltr",

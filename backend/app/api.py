@@ -40,7 +40,7 @@ from .models import (
 )
 from .schemas import PLANNING_YEARS, DataSourceIn, PreferencesIn, SavedRouteIn, ScenarioIn, VerificationIn
 from .security import client_ip, optional_client_hash, require_admin, require_client_key, safe_filename
-from .services import planner
+from .services import catalogue, planner
 from .services import scenarios as scn
 from .services import schedule as sched
 from .services.audit import record_audit
@@ -49,6 +49,8 @@ from .services.maintenance import MaintenanceError, backup_and_verify, sqlite_fi
 from .services.verification import VerificationError, set_verification
 
 router = APIRouter()
+
+APP_VERSION = "4.0.0-alpha.1"
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
@@ -163,8 +165,8 @@ def service_clock(request: Request, db: DbSession) -> dict[str, Any]:
 def meta(request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
     return {
-        "name": "BMTC Future Transit Planner",
-        "version": "3.0.0",
+        "name": "Bengaluru Transit Planner",
+        "version": APP_VERSION,
         "unofficial": True,
         "affiliation": (
             "Not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro or any transport operator."
@@ -194,6 +196,18 @@ def meta(request: Request) -> dict[str, Any]:
         },
         "admin_enabled": bool(settings.admin_api_key),
     }
+
+
+@router.get("/features", tags=["system"])
+def features(db: DbSession) -> dict[str, Any]:
+    """What works right now. States: AVAILABLE, NO_DATA, UNAVAILABLE (needs an authorisation), PLANNED."""
+    return {"version": APP_VERSION, "features": catalogue.feature_states(db)}
+
+
+@router.get("/services", tags=["system"])
+def services() -> dict[str, Any]:
+    """Official websites and public helplines, each checked on the stated date. Links only; nothing is booked here."""
+    return catalogue.services_directory()
 
 
 # ---------------------------------------------------------------- years

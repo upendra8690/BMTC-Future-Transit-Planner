@@ -1,5 +1,28 @@
 # Changelog
 
+## 4.0.0-alpha.1 — 2026-11-16 (branch `v4`, not released)
+
+Phase 1 of Bengaluru Transit Planner 4.0: one mobile-first app shell. All 3.0 features are kept.
+
+### Added
+- **New name:** Bengaluru Transit Planner (web page, manifest, API title and `/api/meta`). The unofficial notice now also names Chalo and the Government of Karnataka.
+- **Opening screen:** original artwork (a generic Bengaluru skyline, a Metro viaduct and a city bus), the app name and the unofficial notice. It hides when the app is ready, and on its own after 4 seconds if the app cannot start.
+- **Home screen:** route/stop search that hands the query to Routes or Stops, a Bengaluru map card with "Stops near me", and ten tiles, each showing the feature's real status.
+- **Navigation:** a menu with the nine sections (Home, Nearby stops, Plan a journey, Live tracking, Tickets and passes, Namma Metro, Favourites, My account, More services) and the 3.0 planner tools; a bottom bar on phones.
+- **Honest sections:** Live tracking and Tickets and passes say plainly that they are not available and why, and point to official channels. Namma Metro lists Metro lines when a Metro feed (GTFS `route_type` 1) is loaded, and says so when none is.
+- **Settings (My account):** light, dark or device theme; low-data mode (the home map loads only on tap; on by default when the browser asks to save data); larger text and buttons. Saved on the device only.
+- **More services:** an SOS card that opens the phone dialler for 112 (the app sends no alerts itself), official websites and helplines checked on 16 November 2026, the 3.0 tools, and an app-status list of every feature.
+- **API:** `GET /api/features` (each feature's state: AVAILABLE, NO_DATA, UNAVAILABLE or PLANNED, with a reason) and `GET /api/services` (official links and helplines; kept for offline reading).
+- **Translations:** 114 new entries in each of English, Kannada, Telugu and Hindi (first drafts for review; see `docs/4.0/TRANSLATION_REVIEW_CHECKLIST.md`).
+- **Android workflow:** builds a separate 4.0 preview APK from `v4` once the variable `V4_PLANNER_URL` names a deployed 4.0 site; it is published as the `app-v4-preview` pre-release and never replaces the stable APK.
+
+### Changed
+- The default page is Home instead of Routes. The year-status panel appears only on the planner tools.
+- Version 4.0.0-alpha.1 in `/api/meta` and the OpenAPI document; service-worker cache `bmtc-planner-shell-v4`.
+
+### Not included yet
+Live tracking, tickets, passes, payments and NCMC card services stay unavailable (no authorised provider). Accounts, notifications, facilities and the AI assistant are planned for later phases.
+
 ## 3.0.0 — 2026-11-16
 
 Built on 2.0.0. The direct journeys, scenarios, audit log, nearby stops, backups and saved routes were already in 2.0. The changes to them are listed below.

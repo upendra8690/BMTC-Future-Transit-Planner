@@ -19,9 +19,9 @@ LANGUAGES = ("en", "kn", "te", "hi")
 # Text that is the same in every language on purpose: product name, format strings, abbreviations.
 ALLOWED_UNTRANSLATED = {"app.brand", "clock.line", "common.pdf", "route.col_seq", "admin.col_id"}
 # Keys whose full name is built at run time from a prefix, such as "cls." + classification code.
-DYNAMIC_PREFIXES = ("cls.", "day.", "msgcode.")
+DYNAMIC_PREFIXES = ("cls.", "day.", "msgcode.", "feature.state.", "feature.reason.", "feature.name.", "svc.cat.")
 # Storage keys the dashboard may write. The admin key must never be one of them.
-STORED_KEYS = {"clientKey", "lang", "classification", "year"}
+STORED_KEYS = {"clientKey", "lang", "classification", "year", "theme", "lowData", "largeText"}
 DYNAMIC_CODE = (
     r"\beval\s*\(",
     r"new\s+Function\s*\(",
@@ -269,12 +269,15 @@ def test_the_service_worker_saves_only_public_timetable_answers():
     found = re.search(r"var SAVED_API = (/.*/);", sw)
     assert found, "SAVED_API allowlist not found in sw.js"
     allowed = re.compile(found.group(1)[1:-1])
-    for path in ["/api/routes", "/api/routes/R1", "/api/routes/R1/timetable", "/api/stops", "/api/data-sources"]:
+    kept = ["/api/routes", "/api/routes/R1", "/api/routes/R1/timetable", "/api/stops", "/api/data-sources",
+            "/api/services"]
+    for path in kept:
         assert allowed.fullmatch(path), f"should be kept for offline reading: {path}"
     never_kept = [
         "/api/clock", "/api/meta", "/api/health", "/api/journey", "/api/plan", "/api/stops/nearby",
         "/api/stops/S1/departures", "/api/routes/R1/timetable.csv", "/api/years/2027/status",
         "/api/scenarios", "/api/scenarios/compare", "/api/saved-routes", "/api/preferences", "/api/admin/stats",
+        "/api/features",
     ]
     for path in never_kept:
         assert not allowed.fullmatch(path), f"must never be kept: {path}"

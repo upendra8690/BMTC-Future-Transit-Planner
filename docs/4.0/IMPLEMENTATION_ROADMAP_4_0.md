@@ -7,6 +7,8 @@ The app stays deployable after every stable phase.
 Status labels used in all reports: **Implemented and tested**, **Implemented, awaiting provider access**, **Planned**,
 **Unavailable**, **Demo-only**.
 
+**Progress:** Phase 0 done · Phase 1 done (4.0.0-alpha.1; see `PHASE_REPORTS.md`) · Phase 2 next.
+
 | Phase | Scope | ₹0? | Blocked parts | Owner actions |
 |---|---|---|---|---|
 | 0 | Audit and plans (these documents) | Yes | — | Decisions made 16 Nov 2026 |

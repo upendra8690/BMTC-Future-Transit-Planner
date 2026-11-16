@@ -72,7 +72,17 @@
     scenarioEditId: null,
     scenarioStops: [],
     route: null,
+    features: null,
+    services: null,
+    version: "",
+    theme: "system",
+    lowData: false,
+    largeText: false,
+    autoNearby: false,
+    pendingQuery: "",
   };
+
+  var startedAt = Date.now();
 
   var el = {
     view: document.getElementById("view"),
@@ -559,6 +569,15 @@
     el.view.innerHTML = html;
   }
 
+  // A search typed on the home screen is handed to the Routes or Stops page, which shows it in its own search box.
+  function takePendingQuery(formId) {
+    var query = state.pendingQuery || "";
+    state.pendingQuery = "";
+    var form = document.getElementById(formId);
+    if (query && form && form.elements.q) form.elements.q.value = query;
+    return query;
+  }
+
   function routeParts() {
     return location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   }
@@ -569,18 +588,28 @@
     state.renderedDate = todayKey();
     destroyMap();
     var parts = routeParts();
-    var name = parts[0] && Object.prototype.hasOwnProperty.call(ROUTES, parts[0]) ? parts[0] : "routes";
+    var name = parts[0] && Object.prototype.hasOwnProperty.call(ROUTES, parts[0]) ? parts[0] : "home";
+    var isSection = NEW_SECTIONS.indexOf(name) !== -1;
+    document.body.setAttribute("data-view", isSection ? name : "tools");
     document.querySelectorAll("[data-nav]").forEach(function (link) {
       if (link.getAttribute("href") === "#/" + name) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
     setMenu(false);
-    renderYearStatus();
+    if (isSection && name !== "nearby") {
+      state.yearToken += 1;
+      el.yearStatus.innerHTML = "";
+      el.yearStatus.hidden = true;
+    } else {
+      el.yearStatus.hidden = false;
+      renderYearStatus();
+    }
     try {
       await ROUTES[name](parts.slice(1), token);
     } catch (err) {
       if (token === state.viewToken) setView(panelError(err, "rerender"));
     }
+    hideSplash();
   }
 
   // Fills one panel with the result of job(). Stale answers are dropped; errors stay inside the panel.
@@ -715,8 +744,9 @@
       '<div id="routeResults" style="margin-top:12px"></div></section>' +
       '<section class="card"><h2>' + esc(t("routes.saved_title")) + '</h2><div id="savedRoutes"></div></section>'
     );
+    var routeQuery = takePendingQuery("routeSearch");
     await Promise.all([
-      loadRouteResults("", document.getElementById("routeResults"), token),
+      loadRouteResults(routeQuery, document.getElementById("routeResults"), token),
       loadSaved(document.getElementById("savedRoutes"), token),
     ]);
   }
@@ -899,7 +929,7 @@
       '<div id="stopResults"></div></section>'
     );
     makeMap("stopMap");
-    await loadStops("", token);
+    await loadStops(takePendingQuery("stopSearch"), token);
   }
 
   function plotStops(stops, here) {
@@ -1984,7 +2014,322 @@
   }
 
   // ---------------------------------------------------------------- routing table
+  // ---------------------------------------------------------------- 4.0 app sections
+  // Home, Nearby, Live tracking, Tickets, Metro, Favourites, My account and More services. Every section reads what
+  // the server says works right now (/api/features), so a feature that needs data or an authorisation explains
+  // itself instead of pretending to work.
+  var BENGALURU = [12.9716, 77.5946];
+  var METRO_TYPES = [1, 400, 401, 402];
+  var NEW_SECTIONS = ["home", "nearby", "live", "tickets", "metro", "favourites", "account", "more"];
+
+  // Small line icons, drawn for this app.
+  var ICONS = {
+    nearby: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
+    plan: '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h6a3 3 0 0 0 0-6h-4a3 3 0 0 1 0-6h6"/>',
+    live: '<path d="M5 12a7 7 0 0 1 14 0"/><path d="M8.5 12a3.5 3.5 0 0 1 7 0"/><circle cx="12" cy="12" r="1.3"/><path d="M12 13.5V20"/>',
+    routes: '<rect x="5" y="4" width="14" height="13" rx="3"/><path d="M5 11h14M8 20l1-3M16 20l-1-3"/><circle cx="8.5" cy="14" r=".8"/><circle cx="15.5" cy="14" r=".8"/>',
+    metro: '<rect x="6" y="3" width="12" height="14" rx="3"/><path d="M6 10h12M9 21l2-4M15 21l-2-4"/>',
+    tickets: '<path d="M4 8a2 2 0 0 0 0 4v4h16v-4a2 2 0 0 0 0-4V4H4z"/><path d="M14 4v12" stroke-dasharray="2 2"/>',
+    favourites: '<path d="M12 20l-7-7a4.2 4.2 0 0 1 6-6l1 1 1-1a4.2 4.2 0 0 1 6 6z"/>',
+    airport: '<path d="M3 14l18-5-2-2-6 1-5-5-2 1 3 5-4 1-2-2-1 1 2 4z"/>',
+    sos: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
+    more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  };
+
+  function icon(name) {
+    return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (ICONS[name] || "") + "</svg>";
+  }
+
+  async function loadFeatures() {
+    try {
+      var data = await api("/api/features");
+      var map = {};
+      data.features.forEach(function (f) {
+        map[f.id] = f;
+      });
+      state.features = map;
+      state.version = data.version;
+      var version = document.getElementById("splashVersion");
+      if (version) version.textContent = t("more.version", { version: data.version });
+    } catch (_) {
+      /* Without the list, tiles simply show no status chip. */
+    }
+    return state.features || {};
+  }
+
+  function featureChip(id) {
+    var feature = state.features && state.features[id];
+    if (!feature) return "";
+    return '<span class="chip state-' + esc(feature.state.toLowerCase()) + '">' + esc(t("feature.state." + feature.state)) + "</span>";
+  }
+
+  function featureReason(id) {
+    var feature = state.features && state.features[id];
+    return feature && feature.reason ? t("feature.reason." + feature.reason) : "";
+  }
+
+  function tile(href, iconName, label, featureId, tone) {
+    return '<a class="tile tone-' + tone + '" href="' + href + '">' +
+      '<span class="tile-icon">' + icon(iconName) + "</span>" +
+      '<span class="tile-label">' + esc(label) + "</span>" + (featureId ? featureChip(featureId) : "") + "</a>";
+  }
+
+  async function renderHome(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      '<section class="hero card">' +
+      '<form id="homeSearch" class="home-search" role="search">' +
+      '<label class="sr-only" for="homeQuery">' + esc(t("home.search_label")) + "</label>" +
+      '<input id="homeQuery" name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("home.search_placeholder")) + '">' +
+      '<div class="home-search-actions">' +
+      '<button type="submit" name="kind" value="routes">' + esc(t("home.find_route")) + "</button>" +
+      '<button type="submit" name="kind" value="stops" class="secondary">' + esc(t("home.find_stop")) + "</button></div></form>" +
+      "</section>" +
+      '<section class="card map-card"><div class="card-head"><h2>' + esc(t("home.map_title")) + "</h2>" +
+      '<button type="button" class="secondary" data-action="home-nearby">' + esc(t("home.near_me")) + "</button></div>" +
+      '<div id="homeMap" class="map home-map" role="region" aria-label="' + esc(t("home.map_title")) + '"></div></section>' +
+      '<section class="tiles" aria-label="' + esc(t("home.services")) + '">' +
+      tile("#/nearby", "nearby", t("nav.nearby"), "nearby_stops", "red") +
+      tile("#/journey", "plan", t("nav.journey"), "journey_planner", "amber") +
+      tile("#/live", "live", t("nav.live"), "live_tracking", "blue") +
+      tile("#/routes", "routes", t("home.timetables"), "bus_timetables", "teal") +
+      tile("#/metro", "metro", t("nav.metro"), "metro", "violet") +
+      tile("#/tickets", "tickets", t("nav.tickets"), "bus_tickets", "orange") +
+      tile("#/favourites", "favourites", t("nav.favourites"), "favourites", "pink") +
+      tile("#/more/airport", "airport", t("home.airport"), null, "sky") +
+      tile("#/more/sos", "sos", t("home.sos"), "sos_call", "danger") +
+      tile("#/more", "more", t("nav.more"), null, "slate") +
+      "</section>"
+    );
+    if (state.lowData) {
+      var holder = document.getElementById("homeMap");
+      if (holder) {
+        holder.innerHTML = '<div class="map-placeholder"><p>' + esc(t("home.map_lowdata")) + "</p>" +
+          '<button type="button" class="secondary" data-action="show-map">' + esc(t("home.show_map")) + "</button></div>";
+      }
+    } else {
+      showHomeMap();
+    }
+  }
+
+  function showHomeMap() {
+    var map = makeMap("homeMap");
+    if (map) map.setView(BENGALURU, 11);
+  }
+
+  async function renderNearby(args, token) {
+    await renderStops([], token);
+    if (state.autoNearby && token === state.viewToken) {
+      state.autoNearby = false;
+      nearbyStops();
+    }
+  }
+
+  async function officialLinks(categoryIds) {
+    var data = await loadServices();
+    var cats = data.categories.filter(function (c) {
+      return !categoryIds || categoryIds.indexOf(c.id) !== -1;
+    });
+    return cats.map(function (c) {
+      return '<h3 id="svc-' + esc(c.id) + '">' + esc(t("svc.cat." + c.id)) + '</h3><ul class="list links">' + c.items.map(serviceItem).join("") + "</ul>";
+    }).join("") + '<p class="muted small">' + esc(t("more.checked", { date: formatCalendarDate(data.checked) })) + "</p>";
+  }
+
+  async function loadServices() {
+    if (!state.services) state.services = await api("/api/services");
+    return state.services;
+  }
+
+  function serviceItem(item) {
+    var actions = "";
+    if (item.tel && /^[0-9]{3,12}$/.test(item.tel)) {
+      actions += '<a class="button-link" href="tel:' + esc(item.tel) + '">' + esc(t("more.call", { number: item.tel })) + "</a>";
+    }
+    var href = safeHref(item.url);
+    if (href) {
+      actions += '<a class="button-link secondary" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(t("more.open_site")) + "</a>";
+    }
+    return '<li><div><div class="title">' + esc(item.name) + '</div><div class="muted small">' + esc(item.source) + "</div></div>" +
+      '<div class="row-actions">' + actions + "</div></li>";
+  }
+
+  function unavailableCard(titleKey, bodyKey, featureId) {
+    var reason = featureReason(featureId);
+    return '<section class="card unavailable"><div class="card-head"><h2>' + esc(t(titleKey)) + "</h2>" + featureChip(featureId) + "</div>" +
+      "<p>" + esc(t(bodyKey)) + "</p>" + (reason ? '<p class="muted">' + esc(reason) + "</p>" : "") + "</section>";
+  }
+
+  async function renderLive(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      unavailableCard("live.unavailable_title", "live.body", "live_tracking") +
+      '<section class="card"><h2>' + esc(t("live.scheduled_title")) + "</h2><p>" + esc(t("live.scheduled_body")) + "</p>" +
+      '<p><a class="button-link" href="#/nearby">' + esc(t("live.scheduled_link")) + "</a></p></section>" +
+      '<section class="card"><h2>' + esc(t("live.official_title")) + '</h2><div id="liveLinks"></div></section>'
+    );
+    await fillPanel(document.getElementById("liveLinks"), token, function () {
+      return officialLinks(["bus"]);
+    });
+  }
+
+  async function renderTickets(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      unavailableCard("tickets.title", "tickets.body", "bus_tickets") +
+      '<section class="card"><h2>' + esc(t("tickets.where")) + "</h2>" +
+      "<p>" + esc(t("tickets.bus_channels")) + "</p><p>" + esc(t("tickets.metro_channels")) + '</p><div id="ticketLinks"></div></section>' +
+      unavailableCard("tickets.ncmc_title", "tickets.ncmc_body", "ncmc_cards")
+    );
+    await fillPanel(document.getElementById("ticketLinks"), token, function () {
+      return officialLinks(["bus", "metro"]);
+    });
+  }
+
+  async function renderMetro(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      '<section class="card"><div class="card-head"><h2>' + esc(t("metro.title")) + "</h2>" + featureChip("metro") + "</div>" +
+      '<p class="muted">' + esc(t("metro.intro")) + "</p>" + segmentedClassification() +
+      '<div id="metroLines" style="margin-top:12px"></div></section>' +
+      '<section class="card"><h2>' + esc(t("metro.tickets_title")) + "</h2><p>" + esc(t("tickets.metro_channels")) + "</p>" +
+      '<p><a class="button-link secondary" href="#/tickets">' + esc(t("nav.tickets")) + "</a></p></section>"
+    );
+    await fillPanel(document.getElementById("metroLines"), token, async function () {
+      var params = new URLSearchParams({ classification: state.classification, limit: "500" });
+      var data = await api("/api/routes?" + params.toString());
+      var lines = data.results.filter(function (r) {
+        return METRO_TYPES.indexOf(Number(r.route_type)) !== -1;
+      });
+      if (!lines.length) return '<div class="empty">' + esc(t("metro.no_data")) + "</div>";
+      return '<h3>' + esc(t("metro.lines")) + '</h3><ul class="list">' + lines.map(routeItem).join("") + "</ul>";
+    });
+  }
+
+  async function renderFavourites(args, token) {
+    setView(
+      '<section class="card"><h2>' + esc(t("fav.title")) + '</h2><p class="muted">' + esc(t("fav.intro")) + "</p>" +
+      '<div id="savedRoutes"></div></section>'
+    );
+    await loadSaved(document.getElementById("savedRoutes"), token);
+  }
+
+  function radio(name, value, current, labelKey) {
+    return '<label class="choice"><input type="radio" name="' + name + '" value="' + value + '"' + (current === value ? " checked" : "") + "> " + esc(t(labelKey)) + "</label>";
+  }
+
+  async function renderAccount(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      '<section class="card"><div class="card-head"><h2>' + esc(t("account.title")) + "</h2>" + featureChip("accounts") + "</div>" +
+      "<p>" + esc(t("account.guest")) + '</p><p class="muted">' + esc(t("account.coming")) + "</p></section>" +
+      '<section class="card"><h2>' + esc(t("settings.title")) + "</h2>" +
+      '<form id="settingsForm" class="settings">' +
+      '<fieldset><legend>' + esc(t("settings.theme")) + "</legend>" +
+      radio("theme", "system", state.theme, "settings.theme_system") + radio("theme", "light", state.theme, "settings.theme_light") +
+      radio("theme", "dark", state.theme, "settings.theme_dark") + "</fieldset>" +
+      '<label class="switch"><input type="checkbox" name="lowData"' + (state.lowData ? " checked" : "") + "> " + esc(t("settings.lowdata")) + "</label>" +
+      '<p class="muted small">' + esc(t("settings.lowdata_hint")) + "</p>" +
+      '<label class="switch"><input type="checkbox" name="largeText"' + (state.largeText ? " checked" : "") + "> " + esc(t("settings.largetext")) + "</label>" +
+      '<p class="muted small">' + esc(t("settings.language_hint")) + "</p></form></section>"
+    );
+  }
+
+  async function renderMore(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      '<section class="card sos-card" id="svc-sos"><h2>' + esc(t("sos.title")) + "</h2><p>" + esc(t("sos.body")) + "</p>" +
+      '<p><a class="button-link danger-link" href="tel:112">' + esc(t("sos.call")) + "</a></p></section>" +
+      '<section class="card"><h2>' + esc(t("more.official")) + '</h2><div id="moreLinks"></div></section>' +
+      '<section class="card"><h2>' + esc(t("more.tools")) + '</h2><ul class="list">' +
+      [["#/routes", "nav.routes"], ["#/stops", "nav.stops"], ["#/scenarios", "nav.scenarios"], ["#/compare", "nav.compare"], ["#/sources", "nav.sources"], ["#/admin", "nav.admin"]]
+        .map(function (pair) {
+          return '<li><a href="' + pair[0] + '">' + esc(t(pair[1])) + "</a></li>";
+        }).join("") + "</ul></section>" +
+      '<section class="card"><h2>' + esc(t("more.status")) + '</h2><p class="muted">' + esc(t("more.status_intro")) + "</p>" + featureTable() + "</section>" +
+      '<section class="card"><h2>' + esc(t("more.about")) + "</h2><p>" + esc(t("app.disclaimer")) + "</p>" +
+      '<p class="muted">' + esc(t("more.version", { version: state.version || "" })) + "</p></section>"
+    );
+    await fillPanel(document.getElementById("moreLinks"), token, function () {
+      return officialLinks(null);
+    });
+    if (args[0]) {
+      var target = document.getElementById("svc-" + args[0]);
+      if (target && target.scrollIntoView) target.scrollIntoView({ block: "start" });
+    }
+  }
+
+  function featureTable() {
+    var features = state.features || {};
+    var ids = Object.keys(features);
+    if (!ids.length) return '<div class="empty">' + esc(t("common.na")) + "</div>";
+    return '<ul class="list feature-list">' + ids.map(function (id) {
+      return '<li><div><div class="title">' + esc(t("feature.name." + id)) + "</div>" +
+        (features[id].reason ? '<div class="muted small">' + esc(featureReason(id)) + "</div>" : "") + "</div>" + featureChip(id) + "</li>";
+    }).join("") + "</ul>";
+  }
+
+  // ---------------------------------------------------------------- settings: theme, low data, large text
+  function applySettings() {
+    var root = document.documentElement;
+    if (state.theme === "light" || state.theme === "dark") root.setAttribute("data-theme", state.theme);
+    else root.removeAttribute("data-theme");
+    root.classList.toggle("large-text", !!state.largeText);
+  }
+
+  function loadSettings() {
+    var theme = storage.get(PREFIX + "theme");
+    state.theme = theme === "light" || theme === "dark" ? theme : "system";
+    var low = storage.get(PREFIX + "lowData");
+    var saveData = !!(navigator.connection && navigator.connection.saveData);
+    state.lowData = low === null ? saveData : low === "1";
+    state.largeText = storage.get(PREFIX + "largeText") === "1";
+    applySettings();
+  }
+
+  function saveSetting(target) {
+    if (target.name === "theme") {
+      state.theme = target.value === "light" || target.value === "dark" ? target.value : "system";
+      storage.set(PREFIX + "theme", state.theme);
+    } else if (target.name === "lowData") {
+      state.lowData = !!target.checked;
+      storage.set(PREFIX + "lowData", state.lowData ? "1" : "0");
+    } else if (target.name === "largeText") {
+      state.largeText = !!target.checked;
+      storage.set(PREFIX + "largeText", state.largeText ? "1" : "0");
+    } else {
+      return;
+    }
+    applySettings();
+    toast(t("settings.saved"));
+  }
+
+  function hideSplash() {
+    var splash = document.getElementById("splash");
+    if (!splash || splash.classList.contains("done")) return;
+    var wait = Math.max(0, 900 - (Date.now() - startedAt));
+    setTimeout(function () {
+      splash.classList.add("done");
+      setTimeout(function () {
+        splash.hidden = true;
+      }, 450);
+    }, wait);
+  }
+
   var ROUTES = {
+    home: renderHome,
+    nearby: renderNearby,
+    live: renderLive,
+    tickets: renderTickets,
+    metro: renderMetro,
+    favourites: renderFavourites,
+    account: renderAccount,
+    more: renderMore,
     routes: renderRoutes,
     stops: renderStops,
     journey: renderJourney,
@@ -2188,6 +2533,13 @@
       case "admin-key-clear":
         forgetAdminKey();
         break;
+      case "home-nearby":
+        state.autoNearby = true;
+        location.hash = "#/nearby";
+        break;
+      case "show-map":
+        showHomeMap();
+        break;
       default:
         break;
     }
@@ -2229,6 +2581,12 @@
       case "adminKeyForm":
         saveAdminKey(form.elements.key);
         break;
+      case "homeSearch":
+        state.pendingQuery = String(form.elements.q.value || "").trim();
+        location.hash = event.submitter && event.submitter.value === "stops" ? "#/stops" : "#/routes";
+        break;
+      case "settingsForm":
+        break;
       default:
         handled = false;
     }
@@ -2243,7 +2601,9 @@
   el.view.addEventListener("change", function (event) {
     var target = event.target;
     if (!target) return;
-    if (target.id === "scnYearFilter") {
+    if (target.form && target.form.id === "settingsForm") {
+      saveSetting(target);
+    } else if (target.id === "scnYearFilter") {
       loadScenarioList(document.getElementById("scnList"), state.viewToken);
     } else if (target.name === "when" && target.form && target.form.elements.date) {
       // Leave now is the default; the date is used only when "On a date" is chosen.
@@ -2291,6 +2651,7 @@
   // ---------------------------------------------------------------- startup
   function init() {
     state.lang = pickInitialLanguage();
+    loadSettings();
     populateLanguages();
     var savedYear = Number(storage.get(PREFIX + "year"));
     if (PLANNING_YEARS.indexOf(savedYear) !== -1) state.year = savedYear;
@@ -2310,7 +2671,7 @@
         main.focus();
       });
     }
-    if (!location.hash) history.replaceState(null, "", "#/routes");
+    if (!location.hash) history.replaceState(null, "", "#/home");
     setView(loadingCard());
     // Dates come from the server clock, so the first render waits for it (or for its failure).
     loadClock().then(function () {
