@@ -26,7 +26,16 @@ Dotted lines are integrations that stay `DISABLED` until an operator authorises 
 
 ## 2. Decisions
 
-Each decision has a recommendation. **D1, D3, D4 and D-NAME need your answer before Phase 1.**
+**Decided by the owner on 16 November 2026:**
+
+| Decision | Choice |
+|---|---|
+| D1 UI | One responsive web UI (the PWA, redesigned mobile-first) inside the Flutter Android shell with native bridges |
+| D3 Database | Free Neon Postgres for production accounts (owner sets it up at Phase 5); SQLite for development and tests |
+| D4 Data | Official DULT Transport Data Hub feed first (owner downloads it with its licence page); demo data until then; a community Metro feed only as `UNVERIFIED_FEED` and only if its licence allows |
+| D-NAME | The app is renamed **Bengaluru Transit Planner**. "BMTC" and "Namma Metro" appear only in descriptions, with the unofficial notice. The GitHub repository name stays. |
+
+The options considered are kept below for the record.
 
 ### D1. One UI or two? (needs your answer)
 - **Recommended: one responsive web UI** (the existing PWA, redesigned mobile-first), shown inside the Flutter app with
