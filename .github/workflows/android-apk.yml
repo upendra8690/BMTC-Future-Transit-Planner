@@ -8,6 +8,7 @@ on:
     paths:
       - "android/**"
       - "dashboard/icons/**"
+      - "assets/app-icon.svg"
       - ".github/workflows/android-apk.yml"
   workflow_dispatch:
 
@@ -46,18 +47,30 @@ jobs:
           sed -i 's|android:label="[^"]*"|android:label="BMTC Planner"|' "$manifest"
           grep -n 'INTERNET\|android:label' "$manifest"
 
-      - name: App icon from the dashboard icon
+      - name: App icon and launch screen (assets/app-icon.svg, rendered into assets/icon/)
         run: |
-          cp ../../dashboard/icons/icon-512.png app_icon.png
-          flutter pub add --dev flutter_launcher_icons
+          flutter pub add --dev flutter_launcher_icons flutter_native_splash
           cat > flutter_launcher_icons.yaml <<'EOF'
           flutter_launcher_icons:
             android: true
             ios: false
-            image_path: "app_icon.png"
+            image_path: "assets/icon/icon.png"
+            adaptive_icon_background: "assets/icon/background.png"
+            adaptive_icon_foreground: "assets/icon/foreground.png"
+          EOF
+          cat > flutter_native_splash.yaml <<'EOF'
+          flutter_native_splash:
+            color: "#3730a3"
+            image: assets/icon/foreground.png
+            android_12:
+              color: "#3730a3"
+              image: assets/icon/foreground.png
+            ios: false
+            web: false
           EOF
           flutter pub get
           dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
 
       - name: Analyze
         run: flutter analyze --no-fatal-infos
