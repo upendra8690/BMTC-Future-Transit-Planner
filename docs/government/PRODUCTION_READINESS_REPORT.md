@@ -4,7 +4,7 @@ Measured 16 November 2026 on a developer laptop (Intel Core i5-1235U, 15.7 GB RA
 SYNTHETIC demo feeds (2 bus routes, 1 Metro line, 10 stops). **These results describe demo-sized data only.** A full
 BMTC feed has thousands of stops and routes; performance must be re-measured with real data.
 
-## Load test (`tests/audit/load_test.py`, rate limit raised for the test)
+## Load test (`tests/audit/load_audit.py`, rate limit raised for the test)
 | Users | Requests | Errors | p50 | p95 | Max |
 |---|---|---|---|---|---|
 | 1 | 90 | 0 | 13 ms | 28 ms | 45 ms |

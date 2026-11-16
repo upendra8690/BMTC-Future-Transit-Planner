@@ -1,4 +1,4 @@
-"""Concurrent load test against the test server (rate limit raised for this test only). Usage: python load_test.py"""
+"""Concurrent load test against the test server (rate limit raised for this test only). Usage: python load_audit.py"""
 import random
 import statistics
 import time
