@@ -64,7 +64,13 @@ jobs:
 
       - name: Build release APK
         run: |
-          flutter build apk --release --dart-define=PLANNER_URL="$PLANNER_URL"
+          set -o pipefail
+          if ! flutter build apk --release --dart-define=PLANNER_URL="$PLANNER_URL" 2>&1 | tee build.log; then
+            # Surface the end of the log as an annotation, which is readable without signing in.
+            tail -n 60 build.log | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}' | sed 's/^/::error title=APK build log tail::/'
+            echo
+            exit 1
+          fi
           cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/BMTC-Planner.apk"
           ls -la "$GITHUB_WORKSPACE/BMTC-Planner.apk"
 
