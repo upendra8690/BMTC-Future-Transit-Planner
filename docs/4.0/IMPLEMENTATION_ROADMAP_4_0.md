@@ -7,7 +7,7 @@ The app stays deployable after every stable phase.
 Status labels used in all reports: **Implemented and tested**, **Implemented, awaiting provider access**, **Planned**,
 **Unavailable**, **Demo-only**.
 
-**Progress:** Phase 0 done · Phase 1 done (4.0.0-alpha.1; see `PHASE_REPORTS.md`) · Phase 2 next.
+**Progress:** Phase 0 done · Phase 1 done (4.0.0-alpha.1) · Phase 2 done (4.0.0-alpha.2) · Metro stations and bus + Metro journeys (parts of Phases 4 and 7) done on demo data · Phase 5 (accounts) next. See `PHASE_REPORTS.md`.
 
 | Phase | Scope | ₹0? | Blocked parts | Owner actions |
 |---|---|---|---|---|

@@ -752,3 +752,72 @@ def database_counts(session: Session) -> dict[str, int]:
         "scenarios": session.scalar(select(func.count(Scenario.id))) or 0,
         "audit_entries": session.scalar(select(func.count(AuditLog.id))) or 0,
     }
+
+
+# ---------------------------------------------------------------- 4.0: routes at a stop, Metro stations
+
+METRO_ROUTE_TYPES = (1, 400, 401, 402, 403, 404, 405)
+
+
+def stop_routes(session: Session, stop: Stop, classification: str) -> dict[str, Any]:
+    """Every route that calls at this stop in the feed, with the directions (headsigns) it runs towards."""
+    rows = session.execute(
+        select(Route.id, Route.short_name, Route.long_name, Route.gtfs_route_id, Route.route_type, Route.color,
+               Trip.headsign)
+        .join(Trip, Trip.route_id == Route.id)
+        .join(StopTime, StopTime.trip_id == Trip.id)
+        .where(StopTime.stop_id == stop.id)
+        .distinct()
+    ).all()
+    routes: dict[int, dict[str, Any]] = {}
+    for route_id, short, long_name, gtfs_route, route_type, color, headsign in rows:
+        entry = routes.setdefault(route_id, {
+            "id": route_id,
+            "route_number": short or gtfs_route,
+            "route_name": long_name,
+            "route_type": route_type,
+            "color": color,
+            "towards": [],
+        })
+        if headsign and headsign not in entry["towards"] and headsign != stop.name:
+            entry["towards"].append(headsign)
+    result = sorted(routes.values(), key=lambda r: (r["route_number"] or "", r["id"]))
+    for entry in result:
+        entry["towards"].sort()
+    return {
+        "classification": classification,
+        "stop": stop_dict(stop, classification),
+        "routes": result,
+        "message_code": None if result else "NO_TRIPS",
+    }
+
+
+def metro_stations(session: Session, classification: str, *, query: str, limit: int) -> dict[str, Any]:
+    """Stops served by a Metro route (GTFS route_type 1 and the extended urban-rail types), with their lines."""
+    import_ids = eligible_import_ids(session, classification)
+    if not import_ids:
+        return {"classification": classification, "stations": [], "message_code": _no_data_code(classification)}
+    stmt = (
+        select(Stop, Route.id, Route.short_name, Route.gtfs_route_id, Route.color)
+        .join(StopTime, StopTime.stop_id == Stop.id)
+        .join(Trip, Trip.id == StopTime.trip_id)
+        .join(Route, Route.id == Trip.route_id)
+        .where(Stop.import_id.in_(import_ids), Route.route_type.in_(METRO_ROUTE_TYPES))
+        .distinct()
+        .order_by(Stop.name)
+    )
+    term = fold(query)
+    if term:
+        stmt = stmt.where(fold_column(session, Stop.name).like(contains_pattern(term), escape=LIKE_ESCAPE))
+    stations: dict[int, dict[str, Any]] = {}
+    for stop, route_id, short, gtfs_route, color in session.execute(stmt).all():
+        entry = stations.get(stop.id)
+        if entry is None:
+            if len(stations) >= limit:
+                continue
+            entry = stations[stop.id] = {**stop_dict(stop, classification), "lines": []}
+        if not any(line["id"] == route_id for line in entry["lines"]):
+            entry["lines"].append({"id": route_id, "route_number": short or gtfs_route, "color": color})
+    result = list(stations.values())
+    return {"classification": classification, "stations": result,
+            "message_code": None if result else "NO_METRO_STATIONS"}

@@ -1,5 +1,53 @@
 # Feature matrix for 4.0
 
+## Current status — 4.0.0-alpha.2 (16 November 2026, branch `v4`)
+
+Statuses use exactly these labels: **WORKING AND TESTED** (works and has automated tests, on the demo feeds),
+**WORKING WITH VERIFIED DATA** (works on an officially verified feed), **REQUIRES EXTERNAL PROVIDER APPROVAL**,
+**REQUIRES CREDENTIALS**, **NOT IMPLEMENTED**, **BLOCKED**. No feature is WORKING WITH VERIFIED DATA yet, because
+no official feed has been loaded.
+
+| Feature | Status | Evidence / reason |
+|---|---|---|
+| Route search by number and name | WORKING AND TESTED | API tests; Edge workflow |
+| Stop search by name | WORKING AND TESTED | API tests; Edge workflow |
+| Offer the other data classification when a search is empty (never mixed) | WORKING AND TESTED | Edge workflow |
+| All stops on a route, by direction, with map | WORKING AND TESTED | 3.0 tests and browser checks; Edge workflow |
+| Routes serving a stop, with directions | WORKING AND TESTED | `test_phase2_api.py`; Edge workflow |
+| Route timetable, first and last trip of the day | WORKING AND TESTED | 3.0 timetable tests (first departure, last arrival) |
+| Scheduled departures at a stop | WORKING AND TESTED | 3.0 tests |
+| Nearby stops with user-approved location | WORKING AND TESTED | 3.0 tests and browser checks |
+| Walking directions to a stop (OpenStreetMap) | WORKING AND TESTED | Edge workflow checks the link |
+| Favourite routes (device) and favourite stops (device) | WORKING AND TESTED | 3.0 tests; Edge workflow saves and reopens a stop |
+| Recent searches (device only, clearable) | WORKING AND TESTED | Edge workflow |
+| Journey planner, up to 2 changes, walking transfers | WORKING AND TESTED | 3.0 planner and mutation tests |
+| Bus + Metro journeys with a mode on every ride | WORKING AND TESTED | `test_phase2_api.py`; Edge workflow (demo bus + demo Metro) |
+| Metro lines and station directory with search | WORKING AND TESTED | `test_phase2_api.py`; Edge workflow |
+| Fares from GTFS fare files (one-ride) | WORKING AND TESTED | 3.0 fare tests; no real fare feed loaded |
+| Feature status list and official links directory | WORKING AND TESTED | `test_features_api.py` |
+| Light/dark theme, low-data mode, larger text | WORKING AND TESTED | Edge runs |
+| English, Kannada, Telugu, Hindi | WORKING AND TESTED | Static tests (same keys, placeholders); translations not yet reviewed by native speakers |
+| Offline saved timetables and official links | WORKING AND TESTED | Service-worker tests; browser offline checks |
+| Future scenarios 2027-2030, comparison, CSV/PDF | WORKING AND TESTED | 3.0 tests (always labelled ESTIMATED) |
+| GTFS import, validation, source verification, audit log, backups | WORKING AND TESTED | 3.0 tests and restore drill |
+| Real BMTC and Namma Metro timetables | BLOCKED | Owner has not yet downloaded the DULT feed and its licence |
+| Bus categories (Ordinary, Vajra, Vayu Vajra, ...) | NOT IMPLEMENTED | Needs a feed that states categories; never guessed |
+| Airport (KIA) bus information | NOT IMPLEMENTED | Needs real routes; the official airport link is listed |
+| Live bus positions and live ETAs | REQUIRES EXTERNAL PROVIDER APPROVAL | BMTC live feed / aggregator agreement |
+| Bus tickets and passes | REQUIRES EXTERNAL PROVIDER APPROVAL | BMTC (or Chalo) ticketing agreement |
+| Metro QR tickets | REQUIRES EXTERNAL PROVIDER APPROVAL | ONDC buyer-app onboarding |
+| Payments (UPI, cards) | REQUIRES CREDENTIALS | Payment-gateway merchant account (and a ticketing agreement) |
+| NCMC card services | BLOCKED | Banks issue and recharge cards; out of scope |
+| Accounts, saved journeys across devices | REQUIRES CREDENTIALS | Neon Postgres connection string (owner) |
+| Password reset by email | REQUIRES CREDENTIALS | Email-provider API key (owner) |
+| Notifications | NOT IMPLEMENTED | Planned (Web Push, free) |
+| Facilities (toilets, water, parking, EV, hospitals) | NOT IMPLEMENTED | Planned (OpenStreetMap, free) |
+| AI travel assistant | NOT IMPLEMENTED | Planned (rule-based first) |
+| Role-based admin accounts | NOT IMPLEMENTED | Planned |
+| Android 4.0 APK | REQUIRES CREDENTIALS | Needs a deployed 4.0 site URL (`V4_PLANNER_URL`) |
+
+## Planning detail (Phase 0)
+
 Status values: **Done** (works and is tested), **Partial** (some parts work), **Planned** (buildable with free tools,
 not started), **Blocked** (needs a permission, credential, partner or payment that does not exist yet).
 A screen existing does not make a feature Done.

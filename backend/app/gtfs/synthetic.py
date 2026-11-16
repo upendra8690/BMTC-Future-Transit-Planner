@@ -103,3 +103,67 @@ def build_synthetic_feed(
         for name, content in files.items():
             archive.writestr(name, content)
     return buffer.getvalue()
+
+
+# ---------------------------------------------------------------- synthetic Metro line
+# A separate SYNTHETIC feed with one invented Metro line (GTFS route_type 1). Its stations sit within a short walk of
+# the demo bus stops, so bus + Metro journeys can be planned and tested. Nothing here is a real BMRCL line or station.
+METRO_AGENCY_NAME = "Demo Metro (SYNTHETIC)"
+METRO_STOPS = [
+    ("DM01", "Demo Metro Central", 12.9753, 77.5953),
+    ("DM02", "Demo Metro Hub", 12.9820, 77.5850),
+    ("DM03", "Demo Metro Tech Park", 12.9883, 77.6124),
+    ("DM04", "Demo Metro East", 12.9950, 77.6400),
+]
+METRO_ROUTE = ("DMR1", "DEMO-M1", "Demo Metro Line (SYNTHETIC)", ["DM02", "DM01", "DM03", "DM04"])
+METRO_ROUTE_COLOR = "7C3AED"
+# Every day, 05:00 to 23:00, every 10 minutes, 3 minutes between stations.
+METRO_SERVICE = ("DMALL", (1, 1, 1, 1, 1, 1, 1), 5 * 60, 23 * 60, 10)
+METRO_MINUTES_PER_SEGMENT = 3
+
+
+def build_synthetic_metro_feed(start: dt.date, end: dt.date) -> bytes:
+    """Return a GTFS ZIP with one invented Metro line for the given service window. Import it as SYNTHETIC_DEMO."""
+    stop_index = {stop_id: (name, lat, lon) for stop_id, name, lat, lon in METRO_STOPS}
+    rid, short, long_name, stop_ids = METRO_ROUTE
+    service, flags, first, last, headway = METRO_SERVICE
+    files: dict[str, str] = {
+        "agency.txt": (
+            "agency_id,agency_name,agency_url,agency_timezone\n"
+            f"DEMOM,{METRO_AGENCY_NAME},https://example.invalid/demo-metro,Asia/Kolkata\n"
+        ),
+        "routes.txt": (
+            "route_id,agency_id,route_short_name,route_long_name,route_type,route_color\n"
+            f"{rid},DEMOM,{short},{long_name},1,{METRO_ROUTE_COLOR}\n"
+        ),
+        "stops.txt": "stop_id,stop_name,stop_lat,stop_lon,location_type\n" + "".join(
+            f"{sid},{name},{lat},{lon},0\n" for sid, name, lat, lon in METRO_STOPS
+        ),
+        "calendar.txt": (
+            "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+            f"{service},{','.join(str(f) for f in flags)},{start.strftime('%Y%m%d')},{end.strftime('%Y%m%d')}\n"
+        ),
+    }
+    trips = ["route_id,service_id,trip_id,trip_headsign,direction_id,shape_id\n"]
+    times = ["trip_id,arrival_time,departure_time,stop_id,stop_sequence\n"]
+    shapes = ["shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"]
+    for direction in (0, 1):
+        ordered = stop_ids if direction == 0 else list(reversed(stop_ids))
+        shape_id = f"{rid}-D{direction}"
+        for seq, sid in enumerate(ordered, start=1):
+            _name, lat, lon = stop_index[sid]
+            shapes.append(f"{shape_id},{lat},{lon},{seq}\n")
+        for depart in range(first, last + 1, headway):
+            trip_id = f"{rid}-D{direction}-{depart:04d}"
+            trips.append(f"{rid},{service},{trip_id},{stop_index[ordered[-1]][0]},{direction},{shape_id}\n")
+            for seq, sid in enumerate(ordered, start=1):
+                at = _hms(depart + (seq - 1) * METRO_MINUTES_PER_SEGMENT)
+                times.append(f"{trip_id},{at},{at},{sid},{seq}\n")
+    files["trips.txt"] = "".join(trips)
+    files["stop_times.txt"] = "".join(times)
+    files["shapes.txt"] = "".join(shapes)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()

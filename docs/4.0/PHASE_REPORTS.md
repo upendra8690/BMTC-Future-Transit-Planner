@@ -46,3 +46,30 @@ deployed yet. It builds automatically once the repository variable `V4_PLANNER_U
 - Home search uses the selected classification (default "Official verified"). With no official feed loaded, it finds
   nothing until the user switches to "Unverified feed". Honest, but easy to miss; to revisit in Phase 2.
 - Kannada, Telugu and Hindi text is unreviewed (checklist added).
+
+## Phase 2 — Bus, stops, Metro stations, bus + Metro journeys (4.0.0-alpha.2, 16 November 2026)
+
+### Implemented and tested
+| Feature | How it was verified |
+|---|---|
+| Routes at a stop with directions | API tests (DEMO-1 and DEMO-2 at Demo Market; classification enforced; unknown stop 404) |
+| Metro station directory with search | API tests (4 demo stations, line colour, name filter, "no stations" message without a Metro feed) |
+| Bus + Metro journey with a mode on every ride | API test: Demo Lake View to Demo Metro Hub uses a bus, a 55 m walk and the Metro, each ride naming its feed |
+| Bus-only rides labelled bus | API test |
+| Bus + Metro journeys AVAILABLE only when both feeds are loaded | API test |
+| Empty search offers the other classification | Edge workflow |
+| Walking directions, save/reopen favourite stop, recent searches | Edge workflow |
+| Metro page in Hindi, Telugu, Kannada | Edge workflow |
+
+### Tests run
+| Check | Result |
+|---|---|
+| `ruff check .` | All checks passed |
+| `pytest` | 378 passed, 5 skipped |
+| Browser checks (Edge) | 121 passed, 0 failed |
+| Phase 2 Edge workflows (19 checks) | 19 passed, no JavaScript errors |
+| `pip-audit -r requirements.txt` | No known vulnerabilities found |
+
+### Not available, and why
+Real BMTC/Metro data (DULT feed not yet downloaded); bus categories (no source data); live tracking, tickets and
+payments (provider approval); accounts (Neon credentials). See the status table in `FEATURE_MATRIX_4_0.md`.

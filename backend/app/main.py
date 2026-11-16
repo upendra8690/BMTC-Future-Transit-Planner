@@ -79,7 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Bengaluru Transit Planner API",
-        version="4.0.0-alpha.1",
+        version="4.0.0-alpha.2",
         description=(
             "Verified timetables are shown separately from unverified feeds. "
             "Future scenarios are always labelled ESTIMATED_SCENARIO and are not official announcements."

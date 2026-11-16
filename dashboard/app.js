@@ -714,8 +714,25 @@
     var seq = ++state.searchToken;
     await fillPanel(panel, token, async function () {
       var params = new URLSearchParams({ classification: state.classification, year: String(state.year), q: query, limit: "100" });
-      return routeListHtml(await api("/api/routes?" + params.toString()));
+      var data = await api("/api/routes?" + params.toString());
+      return routeListHtml(data) + (data.results.length ? "" : await otherClassificationHint("/api/routes", query));
     }, seq);
+  }
+
+  // When nothing matches in the chosen classification, say whether the other one has matches. The two are never
+  // mixed: the user decides to switch, and the search is repeated there.
+  async function otherClassificationHint(path, query) {
+    var other = state.classification === "OFFICIAL_VERIFIED" ? "UNVERIFIED_FEED" : "OFFICIAL_VERIFIED";
+    try {
+      var params = new URLSearchParams({ classification: other, year: String(state.year), q: query, limit: "1" });
+      var data = await api(path + "?" + params.toString());
+      if (!data.results.length) return "";
+    } catch (_) {
+      return "";
+    }
+    return '<div class="notice"><p>' + esc(t("search.other_found", { cls: classLabel(state.classification), other: classLabel(other) })) + "</p>" +
+      '<button type="button" class="secondary" data-action="cls-search" data-cls="' + esc(other) + '" data-q="' + esc(query) + '">' +
+      esc(t("search.show_other", { other: classLabel(other) })) + "</button></div>";
   }
 
   async function loadSaved(panel, token) {
@@ -910,7 +927,7 @@
       var params = new URLSearchParams({ classification: state.classification, year: String(state.year), q: query, limit: "100" });
       var data = await api("/api/stops?" + params.toString());
       if (seq === state.searchToken && token === state.viewToken) plotStops(data.results, null);
-      return stopListHtml(data.results, false);
+      return stopListHtml(data.results, false) + (data.results.length ? "" : await otherClassificationHint("/api/stops", query));
     }, seq);
   }
 
@@ -1017,8 +1034,123 @@
       '<p class="muted">' + esc(t("stop.intro", { zone: data.service_timezone })) + "</p>" +
       '<div class="toolbar"><button type="button" class="secondary" data-action="rerender">' + esc(t("common.refresh")) + "</button></div>" +
       body +
-      '<p class="muted" style="margin-top:12px">' + esc(t("clock.scheduled_only")) + "</p></section>"
+      '<p class="muted" style="margin-top:12px">' + esc(t("clock.scheduled_only")) + "</p></section>" +
+      stopExtrasHtml(data.stop)
     );
+    await fillPanel(document.getElementById("stopRoutes"), token, async function () {
+      var routes = await api("/api/stops/" + encodeURIComponent(stopId) + "/routes?classification=" + encodeURIComponent(state.classification));
+      if (!routes.routes.length) return '<div class="empty">' + esc(t("stop.routes_none")) + "</div>";
+      return '<ul class="list">' + routes.routes.map(function (r) {
+        var towards = r.towards.length ? '<div class="muted">' + esc(t("stop.towards_list", { places: r.towards.join(", ") })) + "</div>" : "";
+        return '<li><div><div class="title"><span class="mode-tag">' + esc(t("mode." + modeOfType(r.route_type))) + "</span> " + esc(r.route_number || "") +
+          (r.route_name ? " - " + esc(r.route_name) : "") + "</div>" + towards + "</div>" +
+          '<div class="row-actions"><a class="button secondary" href="#/routes/' + esc(encodeURIComponent(r.id)) + '">' + esc(t("common.open")) + "</a></div></li>";
+      }).join("") + "</ul>";
+    });
+  }
+
+  var MODES = ["bus", "metro", "rail", "tram", "other"];
+  function modeOfType(routeType) {
+    var type = Number(routeType);
+    if ([1, 400, 401, 402, 403, 404, 405].indexOf(type) !== -1) return "metro";
+    if ([2, 100, 101, 102, 103, 106, 109].indexOf(type) !== -1) return "rail";
+    if ([0, 900, 901, 902].indexOf(type) !== -1) return "tram";
+    if (type === 3 || (type >= 700 && type <= 799)) return "bus";
+    return "other";
+  }
+
+  function walkingDirectionsUrl(stop) {
+    if (!validCoord(stop.lat, stop.lon)) return null;
+    return "https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=%3B" + stop.lat.toFixed(6) + "%2C" + stop.lon.toFixed(6);
+  }
+
+  function stopExtrasHtml(stop) {
+    var saved = favouriteStops().some(function (f) {
+      return f.gtfs === stop.gtfs_stop_id && f.cls === stop.classification;
+    });
+    var walk = walkingDirectionsUrl(stop);
+    return '<section class="card"><h2>' + esc(t("stop.routes_title")) + '</h2><div id="stopRoutes"></div></section>' +
+      '<section class="card"><div class="toolbar">' +
+      (walk ? '<a class="button-link secondary" href="' + esc(walk) + '" target="_blank" rel="noopener noreferrer">' + esc(t("stop.walk")) + "</a>" : "") +
+      (saved
+        ? '<button type="button" class="secondary" data-action="unfav-stop" data-gtfs="' + esc(stop.gtfs_stop_id) + '" data-cls="' + esc(stop.classification) + '">' + esc(t("stop.unsave")) + "</button>"
+        : '<button type="button" data-action="fav-stop" data-gtfs="' + esc(stop.gtfs_stop_id) + '" data-cls="' + esc(stop.classification) + '" data-name="' + esc(stop.name) + '">' + esc(t("stop.save")) + "</button>") +
+      "</div>" + (walk ? '<p class="muted small">' + esc(t("stop.walk_note")) + "</p>" : "") + "</section>";
+  }
+
+  // ---------------------------------------------------------------- device-only lists: favourite stops, recent searches
+  // Kept in this browser only (never sent to the server), so they work offline and need no account.
+  function readList(key) {
+    try {
+      var value = JSON.parse(storage.get(PREFIX + key) || "[]");
+      return Array.isArray(value) ? value : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function favouriteStops() {
+    return readList("favStops").filter(function (f) {
+      return f && typeof f.gtfs === "string" && (f.cls === "OFFICIAL_VERIFIED" || f.cls === "UNVERIFIED_FEED");
+    });
+  }
+
+  function setFavouriteStop(node, on) {
+    var gtfs = node.getAttribute("data-gtfs");
+    var cls = node.getAttribute("data-cls");
+    var list = favouriteStops().filter(function (f) {
+      return !(f.gtfs === gtfs && f.cls === cls);
+    });
+    if (on) list.unshift({ gtfs: gtfs, cls: cls, name: String(node.getAttribute("data-name") || gtfs).slice(0, 200) });
+    storage.set(PREFIX + "favStops", JSON.stringify(list.slice(0, 50)));
+    toast(t(on ? "stop.saved" : "stop.unsaved"));
+    render();
+  }
+
+  // A saved stop is found again by its GTFS id, because internal ids change when a feed is re-imported.
+  async function openFavouriteStop(node) {
+    var gtfs = node.getAttribute("data-gtfs");
+    var cls = node.getAttribute("data-cls");
+    var data;
+    try {
+      data = await api("/api/stops?" + new URLSearchParams({ classification: cls, q: gtfs, limit: "100" }).toString());
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    var match = data.results.filter(function (stop) {
+      return stop.gtfs_stop_id === gtfs;
+    })[0];
+    if (!match) {
+      toast(t("fav.stop_gone"));
+      return;
+    }
+    state.classification = cls;
+    storage.set(PREFIX + "classification", cls);
+    location.hash = "#/stops/" + encodeURIComponent(match.id);
+  }
+
+  function recentSearches() {
+    return readList("recent").filter(function (r) {
+      return r && (r.kind === "routes" || r.kind === "stops") && typeof r.q === "string" && r.q;
+    });
+  }
+
+  function addRecent(kind, query) {
+    if (!query) return;
+    var list = recentSearches().filter(function (r) {
+      return !(r.kind === kind && r.q.toLowerCase() === query.toLowerCase());
+    });
+    list.unshift({ kind: kind, q: query.slice(0, 80) });
+    storage.set(PREFIX + "recent", JSON.stringify(list.slice(0, 8)));
+  }
+
+  function recentHtml() {
+    var list = recentSearches();
+    if (!list.length) return "";
+    return '<div class="recent"><span class="recent-title">' + esc(t("recent.title")) + "</span>" + list.map(function (r) {
+      return '<button type="button" class="chip-button" data-action="recent" data-kind="' + esc(r.kind) + '" data-q="' + esc(r.q) + '">' + esc(r.q) + "</button>";
+    }).join("") + '<button type="button" class="link-button" data-action="recent-clear">' + esc(t("recent.clear")) + "</button></div>";
   }
 
   // ---------------------------------------------------------------- direct journeys
@@ -1166,7 +1298,8 @@
         '<span class="muted">' + esc(t("journey.leg_walk_time", { minutes: fmtNum(leg.duration_minutes) })) + "</span></li>";
     }
     var towards = leg.headsign ? ' <span class="muted">' + esc(t("journey.leg_towards", { headsign: leg.headsign })) + "</span>" : "";
-    return '<li class="leg ride"><span class="leg-title">' +
+    var mode = MODES.indexOf(leg.mode) !== -1 ? leg.mode : "other";
+    return '<li class="leg ride mode-' + mode + '"><span class="mode-tag">' + esc(t("mode." + mode)) + "</span> " + '<span class="leg-title">' +
       esc(t("journey.leg_ride", { route: leg.route_number || "", from: leg.from.name, to: leg.to.name })) + "</span>" + towards + "<br>" +
       '<span class="muted">' + esc(t("journey.leg_times", {
         dep: formatClockTime(leg.departs_at),
@@ -2085,7 +2218,7 @@
       '<div class="home-search-actions">' +
       '<button type="submit" name="kind" value="routes">' + esc(t("home.find_route")) + "</button>" +
       '<button type="submit" name="kind" value="stops" class="secondary">' + esc(t("home.find_stop")) + "</button></div></form>" +
-      "</section>" +
+      recentHtml() + "</section>" +
       '<section class="card map-card"><div class="card-head"><h2>' + esc(t("home.map_title")) + "</h2>" +
       '<button type="button" class="secondary" data-action="home-nearby">' + esc(t("home.near_me")) + "</button></div>" +
       '<div id="homeMap" class="map home-map" role="region" aria-label="' + esc(t("home.map_title")) + '"></div></section>' +
@@ -2195,6 +2328,11 @@
       '<section class="card"><div class="card-head"><h2>' + esc(t("metro.title")) + "</h2>" + featureChip("metro") + "</div>" +
       '<p class="muted">' + esc(t("metro.intro")) + "</p>" + segmentedClassification() +
       '<div id="metroLines" style="margin-top:12px"></div></section>' +
+      '<section class="card"><h2>' + esc(t("metro.stations")) + "</h2>" +
+      '<form id="metroSearch" class="toolbar" role="search">' +
+      '<label class="field" style="flex:1 1 240px">' + esc(t("metro.search_label")) +
+      '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("metro.search_placeholder")) + '"></label>' +
+      '<button type="submit">' + esc(t("common.search")) + '</button></form><div id="metroStations"></div></section>' +
       '<section class="card"><h2>' + esc(t("metro.tickets_title")) + "</h2><p>" + esc(t("tickets.metro_channels")) + "</p>" +
       '<p><a class="button-link secondary" href="#/tickets">' + esc(t("nav.tickets")) + "</a></p></section>"
     );
@@ -2207,14 +2345,46 @@
       if (!lines.length) return '<div class="empty">' + esc(t("metro.no_data")) + "</div>";
       return '<h3>' + esc(t("metro.lines")) + '</h3><ul class="list">' + lines.map(routeItem).join("") + "</ul>";
     });
+    await loadMetroStations("", token);
+  }
+
+  async function loadMetroStations(query, token) {
+    var seq = ++state.searchToken;
+    await fillPanel(document.getElementById("metroStations"), token, async function () {
+      var params = new URLSearchParams({ classification: state.classification, q: query });
+      var data = await api("/api/metro/stations?" + params.toString());
+      if (!data.stations.length) {
+        return '<div class="empty">' + esc(query ? t("metro.no_stations_match") : messageFor(data.message_code)) + "</div>";
+      }
+      return '<ul class="list">' + data.stations.map(function (st) {
+        var lines = st.lines.map(function (line) {
+          var colour = /^[0-9A-Fa-f]{6}$/.test(line.color || "") ? "#" + line.color : "var(--scenario)";
+          return '<span class="line-chip" style="border-color:' + colour + '">' + esc(line.route_number) + "</span>";
+        }).join(" ");
+        return '<li><div><div class="title">' + esc(st.name) + '</div><div class="muted">' + lines + "</div></div>" +
+          '<div class="row-actions"><a class="button secondary" href="#/stops/' + esc(encodeURIComponent(st.id)) + '">' + esc(t("stops.departures")) + "</a></div></li>";
+      }).join("") + "</ul>";
+    }, seq);
   }
 
   async function renderFavourites(args, token) {
     setView(
       '<section class="card"><h2>' + esc(t("fav.title")) + '</h2><p class="muted">' + esc(t("fav.intro")) + "</p>" +
-      '<div id="savedRoutes"></div></section>'
+      "<h3>" + esc(t("routes.saved_title")) + '</h3><div id="savedRoutes"></div>' +
+      "<h3>" + esc(t("fav.stops_title")) + "</h3>" + favouriteStopsHtml() + "</section>"
     );
     await loadSaved(document.getElementById("savedRoutes"), token);
+  }
+
+  function favouriteStopsHtml() {
+    var list = favouriteStops();
+    if (!list.length) return '<div class="empty">' + esc(t("fav.stops_none")) + "</div>";
+    return '<ul class="list">' + list.map(function (f) {
+      return '<li><div><div class="title">' + esc(f.name) + '</div><div class="muted">' + esc(f.gtfs) + "</div></div>" +
+        '<div class="row-actions">' + badge(f.cls) +
+        '<button type="button" class="secondary" data-action="open-fav-stop" data-gtfs="' + esc(f.gtfs) + '" data-cls="' + esc(f.cls) + '">' + esc(t("common.open")) + "</button>" +
+        '<button type="button" class="danger" data-action="unfav-stop" data-gtfs="' + esc(f.gtfs) + '" data-cls="' + esc(f.cls) + '">' + esc(t("common.remove")) + "</button></div></li>";
+    }).join("") + "</ul>";
   }
 
   function radio(name, value, current, labelKey) {
@@ -2467,6 +2637,28 @@
       case "cls":
         setClassification(node.getAttribute("data-cls"));
         break;
+      case "cls-search":
+        state.pendingQuery = node.getAttribute("data-q") || "";
+        setClassification(node.getAttribute("data-cls"));
+        break;
+      case "recent":
+        state.pendingQuery = node.getAttribute("data-q") || "";
+        location.hash = node.getAttribute("data-kind") === "stops" ? "#/stops" : "#/routes";
+        break;
+      case "recent-clear":
+        storage.set(PREFIX + "recent", "[]");
+        toast(t("recent.cleared"));
+        render();
+        break;
+      case "fav-stop":
+        setFavouriteStop(node, true);
+        break;
+      case "unfav-stop":
+        setFavouriteStop(node, false);
+        break;
+      case "open-fav-stop":
+        openFavouriteStop(node);
+        break;
       case "tt-load":
         loadTimetable(id, token);
         break;
@@ -2558,10 +2750,15 @@
     var handled = true;
     switch (form.id) {
       case "routeSearch":
+        addRecent("routes", String(form.elements.q.value || "").trim());
         loadRouteResults(String(form.elements.q.value || "").trim(), document.getElementById("routeResults"), token);
         break;
       case "stopSearch":
+        addRecent("stops", String(form.elements.q.value || "").trim());
         loadStops(String(form.elements.q.value || "").trim(), token);
+        break;
+      case "metroSearch":
+        loadMetroStations(String(form.elements.q.value || "").trim(), token);
         break;
       case "journeyForm":
         submitJourney(form, token);
@@ -2583,6 +2780,7 @@
         break;
       case "homeSearch":
         state.pendingQuery = String(form.elements.q.value || "").trim();
+        addRecent(event.submitter && event.submitter.value === "stops" ? "stops" : "routes", state.pendingQuery);
         location.hash = event.submitter && event.submitter.value === "stops" ? "#/stops" : "#/routes";
         break;
       case "settingsForm":

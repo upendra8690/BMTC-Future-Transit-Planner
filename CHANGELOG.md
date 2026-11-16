@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.0.0-alpha.2 — 2026-11-16 (branch `v4`, not released)
+
+Phase 2: bus and stop features, Metro stations, and bus + Metro journeys.
+
+### Added
+- `GET /api/stops/{id}/routes`: every route calling at a stop, with the places it runs towards.
+- `GET /api/metro/stations`: stations served by Metro routes (GTFS `route_type` 1 and urban-rail types), with their lines and colours, and a name search.
+- Journey legs now carry `mode` (bus, metro, rail, tram, other) and `route_type`; the app shows a Bus or Metro tag on every ride.
+- Stop page: routes at this stop, walking directions (OpenStreetMap), Save stop.
+- Favourites: saved stops next to saved routes (stops are kept on the device only).
+- Recent searches on Home (device only, with Clear).
+- Empty searches say when the other data classification has matches and offer to switch; the two are never mixed.
+- Namma Metro page: station directory with search.
+- A SYNTHETIC demo Metro line (`build_synthetic_metro_feed`), seeded on Render next to the demo buses, so bus + Metro planning can be tried. It is invented and labelled as such.
+- 27 new interface entries in each of the four languages.
+
+### Tests
+ruff clean; pytest 378 passed, 5 skipped; browser checks 121/121; 19 Edge workflow checks; pip-audit: no known vulnerabilities.
+
 ## 4.0.0-alpha.1 — 2026-11-16 (branch `v4`, not released)
 
 Phase 1 of Bengaluru Transit Planner 4.0: one mobile-first app shell. All 3.0 features are kept.

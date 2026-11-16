@@ -798,3 +798,32 @@ body:not([data-view="tools"]) .year-picker { display: none; }
 .settings fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 12px; }
 .choice, .switch { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .choice input, .switch input { width: 20px; height: 20px; }
+
+/* ================================================================ 4.0 Phase 2 */
+.mode-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  margin-right: 4px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: var(--neutral-bg);
+  color: var(--text);
+}
+.leg.mode-bus { border-left-color: #c2410c; }
+.leg.mode-metro { border-left-color: #7c3aed; }
+.leg.mode-bus .mode-tag { background: #fde7d6; color: #7c2d12; }
+.leg.mode-metro .mode-tag { background: #ede4ff; color: #4c1d95; }
+.line-chip { display: inline-block; padding: 0 8px; border: 2px solid var(--scenario); border-radius: 999px; font-weight: 700; font-size: 0.8rem; }
+.recent { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.recent-title { font-weight: 700; font-size: 0.85rem; }
+.chip-button {
+  min-height: 36px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.14);
+  color: inherit;
+  cursor: pointer;
+}
+.link-button { background: none; border: none; color: inherit; text-decoration: underline; cursor: pointer; min-height: 36px; }

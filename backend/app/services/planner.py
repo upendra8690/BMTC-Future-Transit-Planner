@@ -64,6 +64,24 @@ _CACHE: OrderedDict[tuple, _Network] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 
 
+# GTFS route_type (basic and extended) to the travel mode shown with each ride.
+_METRO_TYPES = {1, 400, 401, 402, 403, 404, 405}
+_RAIL_TYPES = {2, 100, 101, 102, 103, 106, 109}
+_TRAM_TYPES = {0, 900, 901, 902}
+
+
+def mode_of(route_type: int | None) -> str:
+    if route_type in _METRO_TYPES:
+        return "metro"
+    if route_type in _RAIL_TYPES:
+        return "rail"
+    if route_type in _TRAM_TYPES:
+        return "tram"
+    if route_type == 3 or (route_type is not None and 700 <= route_type <= 799):
+        return "bus"
+    return "other"
+
+
 @dataclass(frozen=True)
 class PlanSettings:
     min_transfer_seconds: int
@@ -103,7 +121,7 @@ class _Network:
         self.foot: list[list[tuple[int, int, int]]] = []
         self.pat_nodes: list[list[int]] = []
         self.pat_feed: list[int] = []
-        self.pat_route: list[tuple[int, str | None, str | None, str]] = []
+        self.pat_route: list[tuple[int, str | None, str | None, str, int]] = []
         self.pat_trips: list[list[tuple[int, str, str | None, dt.date]]] = []
         self.pat_arr: list[list[list[int]]] = []
         self.pat_dep: list[list[list[int]]] = []
@@ -266,9 +284,10 @@ def _add_import(session: Session, net: _Network, import_id: int, first_day: dt.d
     ):
         net.add_node(feed, stop.id, stop.gtfs_stop_id, stop.name, stop.lat, stop.lon)
     routes = {
-        route.id: (route.id, route.short_name, route.long_name, route.gtfs_route_id)
+        route.id: (route.id, route.short_name, route.long_name, route.gtfs_route_id, route.route_type)
         for route in session.execute(
-            select(Route.id, Route.short_name, Route.long_name, Route.gtfs_route_id).where(Route.import_id == import_id)
+            select(Route.id, Route.short_name, Route.long_name, Route.gtfs_route_id, Route.route_type)
+            .where(Route.import_id == import_id)
         )
     }
     day = first_day
@@ -615,7 +634,7 @@ def _format_option(
             _, pat, trip, board_pos, alight_pos = leg
             feed_index = net.pat_feed[pat]
             feed = net.feeds[feed_index]
-            _route_db_id, short_name, long_name, gtfs_route = net.pat_route[pat]
+            _route_db_id, short_name, long_name, gtfs_route, route_type = net.pat_route[pat]
             _trip_db_id, gtfs_trip, headsign, service_day = net.pat_trips[pat][trip]
             departs = net.pat_dep[pat][trip][board_pos]
             arrives = net.pat_arr[pat][trip][alight_pos]
@@ -629,6 +648,8 @@ def _format_option(
             arrival = arrives
             out_legs.append({
                 "type": "ride",
+                "mode": mode_of(route_type),
+                "route_type": route_type,
                 "timing": "scheduled",
                 "source": {
                     "import_id": feed.import_id,

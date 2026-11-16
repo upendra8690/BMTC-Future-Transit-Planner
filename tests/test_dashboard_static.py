@@ -19,9 +19,11 @@ LANGUAGES = ("en", "kn", "te", "hi")
 # Text that is the same in every language on purpose: product name, format strings, abbreviations.
 ALLOWED_UNTRANSLATED = {"app.brand", "clock.line", "common.pdf", "route.col_seq", "admin.col_id"}
 # Keys whose full name is built at run time from a prefix, such as "cls." + classification code.
-DYNAMIC_PREFIXES = ("cls.", "day.", "msgcode.", "feature.state.", "feature.reason.", "feature.name.", "svc.cat.")
+DYNAMIC_PREFIXES = (
+    "cls.", "day.", "msgcode.", "feature.state.", "feature.reason.", "feature.name.", "svc.cat.", "mode.",
+)
 # Storage keys the dashboard may write. The admin key must never be one of them.
-STORED_KEYS = {"clientKey", "lang", "classification", "year", "theme", "lowData", "largeText"}
+STORED_KEYS = {"clientKey", "lang", "classification", "year", "theme", "lowData", "largeText", "favStops", "recent"}
 DYNAMIC_CODE = (
     r"\beval\s*\(",
     r"new\s+Function\s*\(",
@@ -118,7 +120,8 @@ BACKEND = Path(__file__).resolve().parents[1] / "backend" / "app"
 # this list fails the test, and so does a listed code that the source no longer sets.
 SERVER_MESSAGE_CODES = {
     "DESTINATION_NOT_FOUND", "DESTINATION_NOT_SERVED", "NEED_BOTH_STOPS", "NOT_COVERED", "NO_DEPARTURES",
-    "NO_DIRECT_SERVICE", "NO_OFFICIAL_DATA", "NO_PLANNED_JOURNEY", "NO_SERVICE", "NO_TRIPS", "NO_UNVERIFIED_DATA",
+    "NO_DIRECT_SERVICE", "NO_METRO_STATIONS",
+    "NO_OFFICIAL_DATA", "NO_PLANNED_JOURNEY", "NO_SERVICE", "NO_TRIPS", "NO_UNVERIFIED_DATA",
     "ORIGIN_NOT_FOUND", "ORIGIN_NOT_SERVED", "SAME_STOP",
 }
 
@@ -230,12 +233,13 @@ def test_every_local_reference_in_the_page_and_stylesheet_exists():
         assert (DASHBOARD / ref.lstrip("/")).is_file(), f"styles.css refers to a missing file: {ref}"
 
 
-def test_the_only_external_host_is_the_map_tile_server():
+def test_the_only_external_hosts_are_openstreetmap_tiles_and_walking_directions():
     hosts = set()
     for name in ("index.html", "app.js", "i18n.js", "styles.css", "sw.js", "manifest.webmanifest"):
         hosts |= {match.group(1) for match in re.finditer(r"https?://([^/\s\"'`)]+)", read(name))}
     assert hosts, "expected the map tile address in app.js"
-    assert all(host.endswith("tile.openstreetmap.org") for host in hosts), sorted(hosts)
+    allowed = {"www.openstreetmap.org"}
+    assert all(host.endswith("tile.openstreetmap.org") or host in allowed for host in hosts), sorted(hosts)
 
 
 def test_the_network_is_used_only_through_the_one_send_function():

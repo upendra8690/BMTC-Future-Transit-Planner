@@ -50,7 +50,7 @@ from .services.verification import VerificationError, set_verification
 
 router = APIRouter()
 
-APP_VERSION = "4.0.0-alpha.1"
+APP_VERSION = "4.0.0-alpha.2"
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
@@ -357,6 +357,32 @@ def stop_departures(
     if stop is None or imp is None or imp.classification != cls:
         raise HTTPException(status_code=404, detail="Stop not found in this classification's data.")
     return sched.stop_departures(db, stop, cls, now=clock.utc_now(), limit=limit)
+
+
+@router.get("/stops/{stop_id}/routes", tags=["timetables"])
+def stop_routes(
+    stop_id: int,
+    db: DbSession,
+    classification: str = Query(CLASS_OFFICIAL),
+) -> dict[str, Any]:
+    """Every route that calls at this stop, with the places it runs towards."""
+    cls = _classification(classification)
+    stop = db.get(Stop, stop_id)
+    imp = _active_import(db, stop.import_id) if stop is not None else None
+    if stop is None or imp is None or imp.classification != cls:
+        raise HTTPException(status_code=404, detail="Stop not found in this classification's data.")
+    return sched.stop_routes(db, stop, cls)
+
+
+@router.get("/metro/stations", tags=["timetables"])
+def metro_stations(
+    db: DbSession,
+    classification: str = Query(CLASS_OFFICIAL),
+    q: str = Query("", max_length=80),
+    limit: int = Query(200, ge=1, le=500),
+) -> dict[str, Any]:
+    """Stations served by Metro routes (GTFS route_type 1 and urban-rail types), with the lines at each."""
+    return sched.metro_stations(db, _classification(classification), query=q, limit=limit)
 
 
 @router.get("/journey", tags=["timetables"])

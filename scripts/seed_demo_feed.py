@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load the SYNTHETIC demo feed into an empty database, so a fresh public demo has something to show.
+"""Load the SYNTHETIC demo feeds (demo buses and one demo Metro line) into an empty database.
 
   python scripts/seed_demo_feed.py
 
@@ -35,15 +35,23 @@ def main() -> int:
         print(f"seed_demo_feed: {existing} import(s) already recorded, nothing to do")
         return 0
 
+    import datetime as dt
+
     import import_gtfs
     import make_synthetic_gtfs
+    from app.gtfs.synthetic import build_synthetic_metro_feed
 
     with tempfile.TemporaryDirectory() as tmp:
         feed = Path(tmp) / "demo_feed.zip"
         make_synthetic_gtfs.main(["--out", str(feed)])
         code = import_gtfs.main(["--file", str(feed), "--new-source", "Synthetic demo", "--kind", "SYNTHETIC_DEMO",
                                  "--name", "demo_feed.zip"])
-    print("seed_demo_feed: demo feed imported" if code == 0 else f"seed_demo_feed: importer exited with {code}")
+        if code == 0:
+            metro = Path(tmp) / "demo_metro_feed.zip"
+            metro.write_bytes(build_synthetic_metro_feed(dt.date(2026, 6, 1), dt.date(2027, 12, 31)))
+            code = import_gtfs.main(["--file", str(metro), "--new-source", "Synthetic demo Metro",
+                                     "--kind", "SYNTHETIC_DEMO", "--name", "demo_metro_feed.zip"])
+    print("seed_demo_feed: demo feeds imported" if code == 0 else f"seed_demo_feed: importer exited with {code}")
     return code
 
 
