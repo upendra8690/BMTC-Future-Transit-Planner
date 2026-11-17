@@ -20,6 +20,7 @@ repository: `V4_SECURITY_REPORT.md` and `docs/launch/SECURITY_AUDIT.md`.
 | Location permission | PASS | Asked only on "Stops near me". A refusal gets a message and nothing is sent; the location is never stored |
 | Dependencies | PASS | pip-audit: no known vulnerabilities; bandit: no issues |
 | Provider actions | PASS | One refusing adapter per capability; tests prove no ticket, QR, receipt, balance or payment field can be returned |
+| Upcoming-transport edits | PASS | Admin key and a reason required; written to the audit log and the entry's public history; rules refuse "operating" without an opening date and unofficial expected dates (pytest 17, browser 17) |
 | Release safety | PASS | A push to `v4` cannot publish an Android release (workflow guard and `tests/test_release_guard.py`) |
 | Database backups | PARTIAL | The administrator SQLite backup with integrity check works; hosted PostgreSQL backups are not configured yet |
 | Android shell | PARTIAL | Navigation stays on the planner's own address; telephone and official links open in the dialler or browser. Not tested on a phone |

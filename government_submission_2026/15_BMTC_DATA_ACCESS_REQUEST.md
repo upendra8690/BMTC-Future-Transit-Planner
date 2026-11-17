@@ -58,4 +58,4 @@ Mopuru Upendra Reddy
 Independent developer, Bengaluru
 [Email address] · [Mobile number]
 Source code: https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0 (branch `v4`)
-Demonstration: [4.0 staging address]
+Demonstration: [4.0 address, added only after it is deployed and checked]

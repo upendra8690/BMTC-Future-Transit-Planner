@@ -3,9 +3,10 @@
 PROVIDERS records every outside data source or service the app uses or would need, with its licence and the app's
 permission status. Nothing in it is a credential.
 
-UPCOMING records transport projects with a status, the source the status comes from, and the date that source was
-checked. These entries are information only: the planner never uses them, because it plans only from loaded
-timetable feeds. A project is "Operating" only when a dated source reports that passengers can use it.
+UPCOMING holds the upcoming-transport entries checked when this version was written, and validate_upcoming() the
+rules every entry must meet. The entries live in the database (services/announcements.py), where administrators
+update them without code changes. They are information only: the planner never uses them. A project is "Operating"
+only when a dated source reports that passengers can use it.
 
 data_status() reads the loaded feeds and says, for each, whether its calendar still covers today.
 """
@@ -143,34 +144,49 @@ DATASET_PROVIDERS = frozenset({"dult_data_hub", "bmtc_gtfs", "bmrcl_data", "synt
 # ---------------------------------------------------------------- upcoming transport
 
 OPERATING, ANNOUNCED, UNDER_CONSTRUCTION = "OPERATING", "ANNOUNCED", "UNDER_CONSTRUCTION"
-PLANNED, AWAITING, UNAVAILABLE = "PLANNED", "AWAITING_CONFIRMATION", "UNAVAILABLE"
-PROJECT_STATUSES = (OPERATING, ANNOUNCED, UNDER_CONSTRUCTION, PLANNED, AWAITING, UNAVAILABLE)
+PLANNED, DELAYED, AWAITING = "PLANNED", "DELAYED", "AWAITING_CONFIRMATION"
+PROJECT_STATUSES = (ANNOUNCED, PLANNED, UNDER_CONSTRUCTION, DELAYED, AWAITING, OPERATING)
 
+TRANSPORT_TYPES = ("BUS_ROUTE", "ELECTRIC_BUS", "FEEDER", "METRO_EXTENSION", "METRO_STATION", "SUBURBAN_RAIL",
+                   "INTERCHANGE", "INTEGRATED_TICKETING")
+# Where a status comes from. Only OFFICIAL (the operator's or government's own announcement) may give an expected
+# start date; ESTIMATE and DEMO entries can never be shown as operating.
+SRC_OFFICIAL, SRC_PRESS, SRC_SECONDARY, SRC_ESTIMATE, SRC_DEMO = "OFFICIAL", "PRESS", "SECONDARY", "ESTIMATE", "DEMO"
+ANNOUNCEMENT_SOURCE_KINDS = (SRC_OFFICIAL, SRC_PRESS, SRC_SECONDARY, SRC_ESTIMATE, SRC_DEMO)
+TYPE_MODE = {"BUS_ROUTE": "bus", "ELECTRIC_BUS": "bus", "FEEDER": "bus", "METRO_EXTENSION": "metro",
+             "METRO_STATION": "metro", "SUBURBAN_RAIL": "rail"}
+
+# The entries checked when this version was written. They seed the database on first use; after that administrators
+# update them through the API (services/announcements.py) and these values are not read again.
 UPCOMING: list[dict[str, Any]] = [
     {
         "id": "metro_yellow",
-        "mode": "metro",
-        "name": "Namma Metro Yellow Line (RV Road to Bommasandra)",
+        "name": "Namma Metro Yellow Line",
+        "transport_type": "METRO_EXTENSION",
+        "location": "RV Road to Bommasandra",
+        "announcement": "Opened to passengers in August 2025.",
         "status": OPERATING,
-        "opened_on": "2025-08-11",
-        "expected": None,
+        "source_kind": SRC_SECONDARY,
         "announced_on": None,
-        "detail": "Opened to passengers in August 2025.",
+        "expected_start": None,
+        "opened_on": "2025-08-11",
         "sources": [{"title": "Yellow Line (Namma Metro) — Wikipedia",
                      "url": "https://en.wikipedia.org/wiki/Yellow_Line_(Namma_Metro)"}],
         "verified_on": CHECKED,
-        "confidence": "Secondary source; confirm on BMRCL's website",
+        "note": "Secondary source; confirm on BMRCL's website",
     },
     {
         "id": "metro_pink_elevated",
-        "mode": "metro",
-        "name": "Namma Metro Pink Line, elevated section (Kalena Agrahara to Tavarekere/SG Palya)",
+        "name": "Namma Metro Pink Line, elevated section",
+        "transport_type": "METRO_EXTENSION",
+        "location": "Kalena Agrahara to Tavarekere/SG Palya (six stations)",
+        "announcement": "Inaugurated on 13 November 2026; press reports say it opened to the public on 14 November "
+                        "2026.",
         "status": OPERATING,
-        "opened_on": "2026-11-14",
-        "expected": None,
+        "source_kind": SRC_PRESS,
         "announced_on": "2026-11-13",
-        "detail": "Inaugurated on 13 November 2026; press reports say it opened to the public on 14 November 2026 "
-                  "with six stations.",
+        "expected_start": None,
+        "opened_on": "2026-11-14",
         "sources": [
             {"title": "Deccan Herald — PM to open elevated Pink Line on November 13",
              "url": "https://www.deccanherald.com/india/karnataka/bengaluru/pm-modi-to-inaugurate-bengaluru-namma-"
@@ -180,82 +196,92 @@ UPCOMING: list[dict[str, Any]] = [
                     "agrahara-and-tavarekere-to-open-on-november-8248555.html"},
         ],
         "verified_on": CHECKED,
-        "confidence": "Press reports around the opening; confirm on BMRCL's website",
+        "note": "Press reports around the opening; confirm on BMRCL's website",
     },
     {
         "id": "metro_pink_underground",
-        "mode": "metro",
-        "name": "Namma Metro Pink Line, underground section (Dairy Circle to Nagawara)",
+        "name": "Namma Metro Pink Line, underground section",
+        "transport_type": "METRO_EXTENSION",
+        "location": "Dairy Circle to Nagawara",
+        "announcement": "Systems testing reported. Not open.",
         "status": UNDER_CONSTRUCTION,
-        "opened_on": None,
-        "expected": "2027 (reports differ: March or May 2027)",
+        "source_kind": SRC_SECONDARY,
         "announced_on": None,
-        "detail": "Systems testing reported. Not open.",
+        "expected_start": None,
+        "opened_on": None,
         "sources": [{"title": "Pink Line (Namma Metro) — Wikipedia",
                      "url": "https://en.wikipedia.org/wiki/Pink_Line_(Namma_Metro)"}],
         "verified_on": CHECKED,
-        "confidence": "Dates differ between sources",
+        "note": "No official opening date. Secondary sources report different targets in 2027",
     },
     {
         "id": "metro_blue",
-        "mode": "metro",
-        "name": "Namma Metro Blue Line (Central Silk Board to KR Puram to Airport)",
+        "name": "Namma Metro Blue Line",
+        "transport_type": "METRO_EXTENSION",
+        "location": "Central Silk Board to KR Puram (Phase 2A), KR Puram to the airport (Phase 2B)",
+        "announcement": "Under construction. Not open.",
         "status": UNDER_CONSTRUCTION,
-        "opened_on": None,
-        "expected": "Not confirmed (published targets range from late 2026 to 2028)",
+        "source_kind": SRC_SECONDARY,
         "announced_on": None,
-        "detail": "Phase 2A Silk Board to KR Puram and Phase 2B KR Puram to airport. Not open.",
+        "expected_start": None,
+        "opened_on": None,
         "sources": [{"title": "Blue Line (Namma Metro) — Wikipedia",
                      "url": "https://en.wikipedia.org/wiki/Blue_Line_(Namma_Metro)"}],
         "verified_on": CHECKED,
-        "confidence": "Dates conflict between sources",
+        "note": "No official opening date. Published targets conflict",
     },
     {
         "id": "suburban_mallige",
-        "mode": "rail",
-        "name": "Bengaluru Suburban Railway — Mallige line (Benniganahalli to Chikkabanavara)",
+        "name": "Bengaluru Suburban Railway — Mallige line",
+        "transport_type": "SUBURBAN_RAIL",
+        "location": "Benniganahalli to Chikkabanavara",
+        "announcement": "No suburban rail service is operating. Contract and land issues have been reported.",
         "status": UNDER_CONSTRUCTION,
-        "opened_on": None,
-        "expected": "Not confirmed (overall project deadline reported as March 2030)",
+        "source_kind": SRC_SECONDARY,
         "announced_on": None,
-        "detail": "No suburban rail service is operating. Contract and land issues have been reported.",
+        "expected_start": None,
+        "opened_on": None,
         "sources": [
             {"title": "Mallige line — Wikipedia", "url": "https://en.wikipedia.org/wiki/Mallige_line"},
             {"title": "Bengaluru Suburban Railway — Wikipedia",
              "url": "https://en.wikipedia.org/wiki/Bengaluru_Suburban_Railway"},
         ],
         "verified_on": CHECKED,
-        "confidence": "Secondary sources; check K-RIDE for current status",
+        "note": "No official opening date for passengers; check K-RIDE for the current status",
     },
     {
         "id": "bmtc_pink_feeders",
-        "mode": "bus",
-        "name": "BMTC feeder bus routes for Pink Line stations (5 routes)",
+        "name": "BMTC feeder bus routes for Pink Line stations",
+        "transport_type": "FEEDER",
+        "location": "Five routes serving the elevated Pink Line stations",
+        "announcement": "Reported as 28 buses making 401 trips a day on five new routes. Their timetables are not "
+                        "loaded in this app.",
         "status": OPERATING,
-        "opened_on": "2026-11-14",
-        "expected": None,
+        "source_kind": SRC_PRESS,
         "announced_on": None,
-        "detail": "Reported as 28 buses making 401 trips a day on five new routes. Their timetables are not loaded "
-                  "in this app.",
+        "expected_start": None,
+        "opened_on": "2026-11-14",
         "sources": [{"title": "Deccan Herald — five new feeder bus services at Pink Line stations",
                      "url": "https://www.deccanherald.com/india/karnataka/bengaluru/5-new-feeder-bus-services-to-"
                             "start-on-novemer-14-at-bengalurus-pink-line-metro-stations-4217860"}],
         "verified_on": CHECKED,
-        "confidence": "Press report; confirm routes on BMTC's website",
+        "note": "Press report; confirm routes on BMTC's website",
     },
     {
         "id": "bmtc_mini_ac_feeders",
-        "mode": "bus",
-        "name": "BMTC mini AC electric feeder buses near Metro stations (200 buses)",
+        "name": "BMTC mini AC electric feeder buses (about 200 buses)",
+        "transport_type": "ELECTRIC_BUS",
+        "location": "Within about 5 km of Metro stations",
+        "announcement": "A plan to use about 200 compact AC electric buses as Metro feeders.",
         "status": ANNOUNCED,
-        "opened_on": None,
-        "expected": "No delivery date published",
+        "source_kind": SRC_PRESS,
         "announced_on": "2026-09",
-        "detail": "A plan to use about 200 compact AC electric buses within about 5 km of Metro stations.",
+        "expected_start": None,
+        "opened_on": None,
         "sources": [{"title": "Channel IAM — Bengaluru Metro mini AC buses (September 2026)",
                      "url": "https://en.channeliam.com/2026/09/09/bengaluru-metro-mini-ac-buses/"}],
         "verified_on": CHECKED,
-        "confidence": "Announcement only",
+        "note": "Announcement only; no delivery date published",
     },
 ]
 
@@ -264,11 +290,26 @@ class RegistryError(ValueError):
     """An upcoming-transport entry that could mislead a traveller."""
 
 
-def validate_upcoming(entries: list[dict[str, Any]], today: dt.date) -> None:
-    """Reject entries that would show a service as running when no dated source says it is.
+def _period_start(value: str, ident: str, label: str) -> dt.date:
+    """The first day of a YYYY, YYYY-MM or YYYY-MM-DD value."""
+    parts = value.split("-")
+    try:
+        if len(parts) == 1:
+            return dt.date(int(parts[0]), 1, 1)
+        if len(parts) == 2:
+            return dt.date(int(parts[0]), int(parts[1]), 1)
+        return dt.date.fromisoformat(value)
+    except ValueError as exc:
+        raise RegistryError(f"{ident}: invalid {label} {value!r}") from exc
 
-    Every entry needs a known status, at least one source URL and a verification date. Only OPERATING entries may have
-    an opening date, and that date may not be in the future or after the date the source was checked.
+
+def validate_upcoming(entries: list[dict[str, Any]], today: dt.date) -> None:
+    """Reject entries that would show a service as running, or a date as official, without a source that says so.
+
+    Every entry needs a known status, type and source kind, at least one https source and a verification date that is
+    not in the future. Only OPERATING entries may have an opening date, which may not be in the future or after the
+    check. Only an OFFICIAL announcement may give an expected start date, and an estimate or a demonstration entry can
+    never be operating.
     """
     seen: set[str] = set()
     for entry in entries:
@@ -285,27 +326,41 @@ def validate_upcoming(entries: list[dict[str, Any]], today: dt.date) -> None:
         verified = entry.get("verified_on")
         if not verified:
             raise RegistryError(f"{ident}: needs a verification date")
-        verified_day = dt.date.fromisoformat(verified)
+        verified_day = _period_start(verified, ident, "verification date")
+        if verified_day > today:
+            raise RegistryError(f"{ident}: the verification date is in the future")
         opened = entry.get("opened_on")
         if status == OPERATING:
             if not opened:
                 raise RegistryError(f"{ident}: an operating service needs the date it opened")
-            opened_day = dt.date.fromisoformat(opened)
+            opened_day = _period_start(opened, ident, "opening date")
             if opened_day > today or opened_day > verified_day:
                 raise RegistryError(f"{ident}: marked operating before its opening date")
         elif opened:
             raise RegistryError(f"{ident}: only an operating service may have an opening date")
+        if entry.get("transport_type") not in TRANSPORT_TYPES:
+            raise RegistryError(f"{ident}: unknown transport type {entry.get('transport_type')!r}")
+        kind = entry.get("source_kind")
+        if kind not in ANNOUNCEMENT_SOURCE_KINDS:
+            raise RegistryError(f"{ident}: unknown source kind {kind!r}")
+        if status == OPERATING and kind in (SRC_ESTIMATE, SRC_DEMO):
+            raise RegistryError(f"{ident}: an estimate or a demonstration entry cannot be shown as operating")
+        expected = entry.get("expected_start")
+        if expected:
+            if kind != SRC_OFFICIAL:
+                raise RegistryError(f"{ident}: only an official announcement may give an expected start date")
+            if status == OPERATING:
+                raise RegistryError(f"{ident}: an operating service has an opening date, not an expected start")
+            _period_start(expected, ident, "expected start")
+        announced = entry.get("announced_on")
+        if announced and _period_start(announced, ident, "announcement date") > today:
+            raise RegistryError(f"{ident}: the announcement date is in the future")
+        if not str(entry.get("name") or "").strip():
+            raise RegistryError(f"{ident}: needs a name")
 
 
-def upcoming(today: dt.date) -> dict[str, Any]:
-    validate_upcoming(UPCOMING, today)
-    return {
-        "checked": CHECKED,
-        "statuses": list(PROJECT_STATUSES),
-        "note": "Status information only. The journey planner uses loaded timetables, never these entries. "
-                "No official timetable for these services is loaded in this app.",
-        "projects": [dict(entry, in_planner=False) for entry in UPCOMING],
-    }
+UPCOMING_NOTE = ("Status information only. The journey planner uses loaded timetables, never these entries. "
+                 "No official timetable for these services is loaded in this app.")
 
 
 # ---------------------------------------------------------------- data freshness

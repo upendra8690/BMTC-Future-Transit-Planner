@@ -85,11 +85,15 @@ details,** and it never shows a payment as successful.
 These feeds are kind `SYNTHETIC_DEMO`, so they can never be verified as official.
 
 ### 13. Upcoming-transport sources (status information only)
+These entries are kept in the database. Administrators update them without code changes; each change needs a
+reason and appears in the entry's public history. An expected start date is accepted only from an official
+announcement, so none of the entries below shows one.
+
 | Project | Status shown | Source | Confidence |
 |---|---|---|---|
 | Yellow Line | Operating since Aug 2025 | Wikipedia | Secondary |
 | Pink Line, elevated | Operating since 14 Nov 2026 | Deccan Herald; Oneindia | Press; to confirm with BMRCL |
-| Pink Line, underground | Under construction (2027) | Wikipedia | Dates differ between sources |
+| Pink Line, underground | Under construction; no official opening date shown | Wikipedia | Reported 2027 targets differ, so they appear only in a note |
 | Blue Line, including the airport section | Under construction | Wikipedia | Dates conflict |
 | Suburban rail, Mallige line | Under construction | Wikipedia | Deadline reported as 2030 |
 | BMTC Pink Line feeder routes (5) | Operating since 14 Nov 2026 | Deccan Herald | Press; no timetables loaded |

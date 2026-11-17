@@ -4,9 +4,9 @@ The demonstration takes about 15 minutes, followed by questions. It uses only th
 throughout.
 
 ## Before the meeting
-- Open the 4.0 staging address on a phone and on a laptop 5 minutes before the meeting. On the free hosting plan a
+- Open the 4.0 address on a phone and on a laptop 5 minutes before the meeting. On the free hosting plan a
   sleeping server can take up to a minute to wake.
-- **If there is no internet connection or no staging address,** run the app on the laptop:
+- **If there is no internet connection or no 4.0 address yet,** run the app on the laptop:
   `python scripts/migrate_database.py`, then `python scripts/seed_demo_feed.py`, then
   `python -m uvicorn app.main:create_app --factory --app-dir backend --port 8000`, and open
   http://127.0.0.1:8000/. Setup steps are in `docs/INSTALL_WINDOWS.md`. With Docker, instead run
@@ -23,12 +23,12 @@ throughout.
 | 4 | Metro journey | **Demo Metro Central** to **Demo Metro Tech Park**, **Metro only** | "The same planner, Metro only." |
 | 5 | Combined journey | **Demo Lake View** to **Demo Metro Hub**, **Bus and Metro** | "A bus ride, a walk to the station and a Metro ride, in one plan." |
 | 6 | Saved journey | Tap "Save this journey"; open Favourites; tap "Plan again" | "Saved on the phone itself; no account and no personal data." |
-| 7 | Upcoming transport | Scroll | "Each project has a status, sources and a date checked. A planned service is never shown as running." |
+| 7 | Upcoming transport | Scroll; open one entry's "Update history" | "Each project has a status, where that status comes from, sources and the date checked. A planned service is never shown as running, and only an official announcement can give an expected start date." |
 | 8 | Languages | Switch to ಕನ್ನಡ, then తెలుగు and हिन्दी, then back | "The whole interface is in four languages; native-speaker review is still pending." |
 | 9 | Accessibility | Turn on large text and dark mode | "No automated WCAG 2.1 AA violations; screen-reader testing is the next step." |
 | 10 | Data source labels | Open "Data and providers" | "The demo-only banner, and every source with its licence and permission status." |
 | 11 | Unavailable live features | Open Live tracking, then Tickets | "Unavailable until an authorised feed or agreement exists. Nothing is imitated; links go to the official channels." |
-| 12 | Admin and data status | Administration: the data sources and feeds | "Imports are validated. Only an OFFICIAL source can be verified; here the demo source is refused." |
+| 12 | Admin and data status | Administration: the data sources and feeds, then "Upcoming transport entries" | "Imports are validated. Only an OFFICIAL source can be verified; here the demo source is refused. Upcoming-transport entries are updated here with a reason, with no code change." |
 
 ## Presentation script (about 4 minutes)
 > Good morning. Thank you for your time.
@@ -51,7 +51,7 @@ throughout.
 > than imitate them. A demonstration feed can never be marked as official; only an official source, verified against
 > the publisher, can be.
 >
-> The evidence is in the package: 429 automated tests, a browser test of all 321 controls, security and privacy
+> The evidence is in the package: 459 automated tests, a browser test of all 323 controls, security and privacy
 > reports, and a list of known limitations.
 >
 > We are asking for four things. First, your technical feedback. Second, guidance on the official source and licence

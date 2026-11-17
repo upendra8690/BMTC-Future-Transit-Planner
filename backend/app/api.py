@@ -38,9 +38,18 @@ from .models import (
     UserPreference,
     utcnow,
 )
-from .schemas import PLANNING_YEARS, DataSourceIn, PreferencesIn, SavedRouteIn, ScenarioIn, VerificationIn
+from .schemas import (
+    PLANNING_YEARS,
+    AnnouncementIn,
+    AnnouncementUpdateIn,
+    DataSourceIn,
+    PreferencesIn,
+    SavedRouteIn,
+    ScenarioIn,
+    VerificationIn,
+)
 from .security import client_ip, optional_client_hash, require_admin, require_client_key, safe_filename
-from .services import assistant, catalogue, integrations, planner, registry
+from .services import announcements, assistant, catalogue, integrations, planner, registry
 from .services import scenarios as scn
 from .services import schedule as sched
 from .services.audit import record_audit
@@ -211,10 +220,44 @@ def services() -> dict[str, Any]:
 
 
 @router.get("/upcoming", tags=["system"])
-def upcoming_transport(request: Request, db: DbSession) -> dict[str, Any]:
-    """Transport projects with a status (OPERATING, ANNOUNCED, UNDER_CONSTRUCTION, PLANNED, AWAITING_CONFIRMATION,
-    UNAVAILABLE), each with its sources and the date they were checked. Information only: never used by the planner."""
-    return registry.upcoming(_service_today(request, db))
+def upcoming_transport(db: DbSession) -> dict[str, Any]:
+    """Upcoming transport: status information only, kept in the database and updated by administrators."""
+    return announcements.list_entries(db)
+
+
+_REQUIRED_WHEN_SENT = ("name", "transport_type", "status", "source_kind", "sources", "verified_on")
+
+
+@router.post("/admin/upcoming", status_code=201, tags=["admin"])
+def admin_create_upcoming(data: AnnouncementIn, request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request)
+    values = data.model_dump(exclude={"id", "reason"})
+    try:
+        return announcements.create(db, data.id, values, reason=data.reason, actor="admin", ip=client_ip(request),
+                                    today=_service_today(request, db))
+    except announcements.AnnouncementError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.patch("/admin/upcoming/{key}", tags=["admin"])
+def admin_update_upcoming(
+    key: Annotated[str, ApiPath(pattern=r"^[a-z0-9_]{2,60}$")], data: AnnouncementUpdateIn, request: Request,
+    db: DbSession,
+) -> dict[str, Any]:
+    require_admin(request)
+    changes: dict[str, Any] = {}
+    for field in sorted(data.model_fields_set - {"reason"}):
+        value = getattr(data, field)
+        if value is None and field in _REQUIRED_WHEN_SENT:
+            raise HTTPException(status_code=422, detail=f"{field} cannot be empty.")
+        if field == "sources":
+            value = [source.model_dump() for source in data.sources or []]
+        changes[field] = "" if value is None and field in ("location", "announcement", "note") else value
+    try:
+        return announcements.update(db, key, changes, reason=data.reason, actor="admin", ip=client_ip(request),
+                                    today=_service_today(request, db))
+    except announcements.AnnouncementError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 
 @router.get("/providers", tags=["system"])

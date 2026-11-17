@@ -66,7 +66,7 @@ This application is not, and does not imitate, the official Namma BMTC or Namma 
 ## D. Future transport (status information only; never used to plan journeys)
 | Feature | Status | Evidence and notes |
 |---|---|---|
-| Metro extensions (Yellow, Pink elevated and underground, Blue) | PASS | Upcoming screen: status, dates and sources for each; validator test rejects "operating" without an opening date; all source links open |
+| Metro extensions (Yellow, Pink elevated and underground, Blue) | PASS | Upcoming screen: status, where the status comes from, dates and sources for each. Kept in the database; administrators update them without code changes, with a reason and a public history. The rules refuse "operating" without an opening date and an expected start without an official announcement |
 | Suburban rail (Mallige line) | PASS | Status and sources |
 | New bus routes and feeder services | PARTIAL | The five BMTC Pink Line feeder routes appear as a status entry (press source); there are no timetables |
 | Electric buses | PARTIAL | One "announced" entry (200 mini AC electric feeder buses); no fleet data |
@@ -95,21 +95,21 @@ This application is not, and does not imitate, the official Namma BMTC or Namma 
 | Notifications | NOT IMPLEMENTED | |
 | Installable web app (PWA) | PASS | Chromium's installability check reports no errors. Not yet installed on a real phone |
 | Offline use | PASS | e2e step 10: shell and saved journeys open offline; planning shows an error with Retry |
-| Android app | BLOCKED | Not compiled on the test machine (no Flutter SDK). A compile-only check runs in GitHub Actions; its result is in `FINAL_SUBMISSION_READINESS.md`. Not installed on a phone. Calls, official links and the back button were fixed in code. "Stops near me" cannot get a location inside the shell |
+| Android app | PARTIAL | Compiles: the compile-only check in GitHub Actions passed for commit `ab94f8a` (nothing was published). Not installed or tested on a phone. Calls, official links and the back button were fixed in code. "Stops near me" cannot get a location inside the shell |
 | Accessibility of the app | PASS (automated) | axe: no violations on 15 screens in both themes. No screen-reader test yet |
 | Large text, dark mode, low-data mode | PASS | e2e: each switch changes the display |
 | Privacy: "Delete my data" | PASS | e2e: server records, device lists and device key all removed |
 | Administration: GTFS import, validation, verification, backup | PASS | Regression and e2e. Only sources of kind OFFICIAL can be verified; the demo source is refused |
 | Travel assistant | DEMO ONLY | Rule-based, not AI; English questions only; answers come from the timetable API; refuses live, ticket and payment questions |
-| Every control does something | PASS | e2e: 321 of 321 controls on 20 screens produced an effect |
+| Every control does something | PASS | e2e: 323 of 323 controls on 20 screens produced an effect |
 
 ## Totals
 | Status | Count of rows above |
 |---|---|
 | PASS | 20 |
 | DEMO ONLY | 13 |
-| PARTIAL | 8 |
+| PARTIAL | 9 |
 | AWAITING AUTHORISATION | 7 |
-| BLOCKED | 1 |
+| BLOCKED | 0 |
 | FAIL | 0 |
 | NOT IMPLEMENTED | 8 |

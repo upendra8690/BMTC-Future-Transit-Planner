@@ -23,5 +23,5 @@ fi
 
 # --no-access-log: uvicorn's access log would record every search text and "stops near me" coordinates with the
 # visitor's address. The planner's own log keeps method, path (no query string), status and time for changes only.
-exec uvicorn app.main:create_app --factory --app-dir backend --host 0.0.0.0 --port 8000 --no-access-log \
+exec uvicorn app.main:create_app --factory --app-dir backend --host 0.0.0.0 --port "${PORT:-8000}" --no-access-log \
   --proxy-headers --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}"

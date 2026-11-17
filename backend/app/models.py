@@ -339,3 +339,53 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class TransportAnnouncement(Base):
+    """An upcoming-transport entry: information only, never read by the journey planner.
+
+    Administrators add and update entries through the API, so no code change is needed when a project's status
+    changes. Each change is kept in ``changes`` with its reason.
+    """
+
+    __tablename__ = "transport_announcements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    transport_type: Mapped[str] = mapped_column(String(40))
+    location: Mapped[str] = mapped_column(String(300), default="")
+    announcement: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40))
+    source_kind: Mapped[str] = mapped_column(String(20))
+    # Partial ISO dates (YYYY, YYYY-MM or YYYY-MM-DD); opened_on is always a full date.
+    announced_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    expected_start: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    opened_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    sources_json: Mapped[str] = mapped_column(Text)
+    verified_on: Mapped[str] = mapped_column(String(10))
+    note: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+    changes: Mapped[list[TransportAnnouncementChange]] = relationship(
+        back_populates="announcement", cascade="all, delete-orphan",
+        order_by="TransportAnnouncementChange.id.desc()",
+    )
+
+
+class TransportAnnouncementChange(Base):
+    """One change to an upcoming-transport entry: who, when, why, and each field's old and new value."""
+
+    __tablename__ = "transport_announcement_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    announcement_id: Mapped[int] = mapped_column(
+        ForeignKey("transport_announcements.id", ondelete="CASCADE"), index=True
+    )
+    changed_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    actor: Mapped[str] = mapped_column(String(100))
+    reason: Mapped[str] = mapped_column(Text)
+    changes_json: Mapped[str] = mapped_column(Text)
+
+    announcement: Mapped[TransportAnnouncement] = relationship(back_populates="changes")

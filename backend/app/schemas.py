@@ -103,3 +103,53 @@ class PreferencesIn(BaseModel):
             if not re.fullmatch(r"[a-z_]{1,50}", key) or len(val) > 500:
                 raise ValueError(f"invalid preference '{key}'")
         return value
+
+
+# ---------------------------------------------------------------- upcoming-transport announcements
+# The Literals must match registry.PROJECT_STATUSES, TRANSPORT_TYPES and ANNOUNCEMENT_SOURCE_KINDS (a test checks).
+PARTIAL_DATE = r"^\d{4}(-\d{2}(-\d{2})?)?$"
+FULL_DATE = r"^\d{4}-\d{2}-\d{2}$"
+ProjectStatus = Literal["ANNOUNCED", "PLANNED", "UNDER_CONSTRUCTION", "DELAYED", "AWAITING_CONFIRMATION", "OPERATING"]
+TransportType = Literal["BUS_ROUTE", "ELECTRIC_BUS", "FEEDER", "METRO_EXTENSION", "METRO_STATION", "SUBURBAN_RAIL",
+                        "INTERCHANGE", "INTEGRATED_TICKETING"]
+AnnouncementSourceKind = Literal["OFFICIAL", "PRESS", "SECONDARY", "ESTIMATE", "DEMO"]
+
+
+class AnnouncementSourceIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    url: str = Field(max_length=500, pattern=r"^https://\S+$")
+
+
+class AnnouncementIn(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9_]{2,60}$")
+    name: str = Field(min_length=3, max_length=200)
+    transport_type: TransportType
+    location: str = Field(default="", max_length=300)
+    announcement: str = Field(default="", max_length=2000)
+    status: ProjectStatus
+    source_kind: AnnouncementSourceKind
+    announced_on: str | None = Field(default=None, pattern=PARTIAL_DATE)
+    expected_start: str | None = Field(default=None, pattern=PARTIAL_DATE)
+    opened_on: str | None = Field(default=None, pattern=FULL_DATE)
+    sources: list[AnnouncementSourceIn] = Field(min_length=1, max_length=5)
+    verified_on: str = Field(pattern=FULL_DATE)
+    note: str = Field(default="", max_length=300)
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class AnnouncementUpdateIn(BaseModel):
+    """Only the fields that are sent change. Send null to clear an optional date."""
+
+    name: str | None = Field(default=None, min_length=3, max_length=200)
+    transport_type: TransportType | None = None
+    location: str | None = Field(default=None, max_length=300)
+    announcement: str | None = Field(default=None, max_length=2000)
+    status: ProjectStatus | None = None
+    source_kind: AnnouncementSourceKind | None = None
+    announced_on: str | None = Field(default=None, pattern=PARTIAL_DATE)
+    expected_start: str | None = Field(default=None, pattern=PARTIAL_DATE)
+    opened_on: str | None = Field(default=None, pattern=FULL_DATE)
+    sources: list[AnnouncementSourceIn] | None = Field(default=None, min_length=1, max_length=5)
+    verified_on: str | None = Field(default=None, pattern=FULL_DATE)
+    note: str | None = Field(default=None, max_length=300)
+    reason: str = Field(min_length=3, max_length=500)

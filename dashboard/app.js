@@ -215,6 +215,18 @@
     return new Intl.DateTimeFormat(localeTag(), { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(date);
   }
 
+  // A YYYY, YYYY-MM or YYYY-MM-DD value, shown only as precisely as it was announced.
+  function formatPartialDate(value) {
+    var text = String(value || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return formatCalendarDate(text);
+    var m = /^(\d{4})-(\d{2})$/.exec(text);
+    if (m) {
+      var month = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1));
+      return new Intl.DateTimeFormat(localeTag(), { timeZone: "UTC", month: "long", year: "numeric" }).format(month);
+    }
+    return /^\d{4}$/.test(text) ? text : t("common.na");
+  }
+
   // A clock time (for example 08:12) in the service zone, from an ISO string that carries its own offset.
   function formatClockTime(iso) {
     var ms = Date.parse(iso);
@@ -631,9 +643,12 @@
     try {
       var data = await api("/api/years/" + encodeURIComponent(state.year) + "/status");
       if (seq !== state.yearToken) return;
+      // A heading names data only when that data exists; otherwise it says plainly that none is available.
+      var officialTitle = data.official.imports ? t("year.official_title", { year: state.year }) : t("year.official_none");
+      var unverifiedTitle = data.unverified.imports ? t("year.unverified_title", { year: state.year }) : t("year.unverified_none");
       el.yearStatus.innerHTML =
-        '<div class="banner official"><strong>' + badge("OFFICIAL_VERIFIED") + " " + esc(t("year.official_title", { year: state.year })) + "</strong>" + esc(data.official.message) + "</div>" +
-        '<div class="banner unverified"><strong>' + badge("UNVERIFIED_FEED") + " " + esc(t("year.unverified_title", { year: state.year })) + "</strong>" + esc(data.unverified.message) + "</div>" +
+        '<div class="banner official"><strong>' + badge("OFFICIAL_VERIFIED") + " " + esc(officialTitle) + "</strong>" + esc(data.official.message) + "</div>" +
+        '<div class="banner unverified"><strong>' + badge("UNVERIFIED_FEED") + " " + esc(unverifiedTitle) + "</strong>" + esc(data.unverified.message) + "</div>" +
         '<div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + "</strong>" + esc(t("scn.notice")) + "</div>";
     } catch (err) {
       if (seq === state.yearToken) el.yearStatus.innerHTML = '<div class="banner error" role="alert">' + esc(err.message) + "</div>";
@@ -1854,6 +1869,25 @@
       '<option value="OFFICIAL">OFFICIAL</option><option value="COMMUNITY">COMMUNITY</option>' +
       '<option value="SYNTHETIC_DEMO">SYNTHETIC_DEMO</option><option value="UNKNOWN" selected>UNKNOWN</option></select></label>' +
       '<div style="align-self:end"><button type="submit">' + esc(t("admin.src_add")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("admin.upcoming_title")) + "</h2>" +
+      '<p class="muted">' + esc(t("admin.upcoming_help")) + "</p>" +
+      '<form id="upcomingForm" class="form-grid">' +
+      '<label class="field">' + esc(t("admin.upcoming_entry")) + '<select name="entry" id="upcomingEntry"></select></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_id")) + '<input name="entry_id" maxlength="60" pattern="[a-z0-9_]{2,60}" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_name")) + '<input name="name" required minlength="3" maxlength="200"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_type")) + '<select name="transport_type" id="upcomingType"></select></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_location")) + '<input name="location" maxlength="300"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_text")) + '<textarea name="announcement" rows="2" maxlength="2000"></textarea></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_status")) + '<select name="status" id="upcomingStatus"></select></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_kind")) + '<select name="source_kind" id="upcomingKind"></select></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_announced")) + '<input name="announced_on" maxlength="10" pattern="\\d{4}(-\\d{2}(-\\d{2})?)?" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_expected")) + '<input name="expected_start" maxlength="10" pattern="\\d{4}(-\\d{2}(-\\d{2})?)?" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_opened")) + '<input name="opened_on" type="date"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_sources")) + '<textarea name="sources" rows="3" required maxlength="3000"></textarea></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_verified")) + '<input name="verified_on" type="date" required></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_note")) + '<input name="note" maxlength="300"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_reason")) + '<input name="reason" required minlength="3" maxlength="500" autocomplete="off"></label>' +
+      '<div class="align-end"><button type="submit">' + esc(t("admin.upcoming_save")) + "</button></div></form></section>" +
       '<section class="card"><h2>' + esc(t("admin.upload_title")) + "</h2>" +
       '<p class="muted">' + esc(t("admin.upload_help")) + "</p>" +
       '<form id="uploadForm" class="form-grid">' +
@@ -2073,6 +2107,7 @@
       api("/api/admin/imports", { admin: true }),
       api("/api/admin/stats", { admin: true }),
       api("/api/admin/audit-logs?limit=50", { admin: true }),
+      api("/api/upcoming"),
     ]);
     if (token !== state.viewToken || !document.getElementById("adminBody")) return;
     setAdminNotice("");
@@ -2080,6 +2115,90 @@
     renderAdminImports(results[1].imports);
     renderAdminStats(results[2]);
     renderAdminAudit(results[3].entries);
+    renderAdminUpcoming(results[4]);
+  }
+
+  // ---------------------------------------------------------------- administration: upcoming transport
+  function optionList(values, prefix, selected) {
+    return values.map(function (v) {
+      return '<option value="' + esc(v) + '"' + (v === selected ? " selected" : "") + ">" + esc(t(prefix + v)) + "</option>";
+    }).join("");
+  }
+
+  function renderAdminUpcoming(data) {
+    var form = document.getElementById("upcomingForm");
+    if (!form) return;
+    state.adminUpcoming = data;
+    var current = form.elements.entry.value;
+    form.elements.entry.innerHTML = '<option value="">' + esc(t("admin.upcoming_new")) + "</option>" +
+      data.projects.map(function (p) {
+        return '<option value="' + esc(p.id) + '"' + (p.id === current ? " selected" : "") + ">" + esc(p.name) + "</option>";
+      }).join("");
+    fillUpcomingForm(form);
+  }
+
+  function fillUpcomingForm(form) {
+    var data = state.adminUpcoming;
+    if (!data) return;
+    var key = form.elements.entry.value;
+    var p = data.projects.filter(function (x) { return x.id === key; })[0] || {};
+    form.elements.transport_type.innerHTML = optionList(data.transport_types, "upcoming.type.", p.transport_type);
+    form.elements.status.innerHTML = optionList(data.statuses, "upcoming.status.", p.status || "ANNOUNCED");
+    form.elements.source_kind.innerHTML = optionList(data.source_kinds, "upcoming.kind.", p.source_kind || "OFFICIAL");
+    // The field is "entry_id", not "id": a control named "id" would hide form.id, which the submit handler reads.
+    form.elements.entry_id.value = p.id || "";
+    form.elements.entry_id.disabled = Boolean(p.id);
+    ["name", "location", "announcement", "announced_on", "expected_start", "opened_on", "verified_on", "note"].forEach(function (f) {
+      form.elements[f].value = p[f] || "";
+    });
+    form.elements.sources.value = (p.sources || []).map(function (s) { return s.title + " | " + s.url; }).join("\n");
+    form.elements.reason.value = "";
+  }
+
+  // Each line is "Title | full https address". Returns null when a line does not follow that form.
+  function parseSources(text) {
+    var sources = [];
+    var lines = String(text || "").split("\n").map(function (l) { return l.trim(); }).filter(Boolean);
+    for (var i = 0; i < lines.length; i++) {
+      var cut = lines[i].lastIndexOf("|");
+      var title = cut > 0 ? lines[i].slice(0, cut).trim() : "";
+      var url = cut > 0 ? lines[i].slice(cut + 1).trim() : "";
+      if (!title || !/^https:\/\/\S+$/.test(url)) return null;
+      sources.push({ title: title, url: url });
+    }
+    return sources.length ? sources : null;
+  }
+
+  async function submitUpcoming(form, token) {
+    var sources = parseSources(form.elements.sources.value);
+    if (!sources) {
+      toast(t("admin.upcoming_bad_sources"));
+      return;
+    }
+    var body = { sources: sources, reason: String(form.elements.reason.value || "").trim() };
+    ["name", "transport_type", "location", "announcement", "status", "source_kind", "verified_on", "note"].forEach(function (f) {
+      body[f] = String(form.elements[f].value || "").trim();
+    });
+    ["announced_on", "expected_start", "opened_on"].forEach(function (f) {
+      body[f] = String(form.elements[f].value || "").trim() || null;
+    });
+    var key = form.elements.entry.value;
+    busy(form, true);
+    try {
+      if (key) {
+        await api("/api/admin/upcoming/" + encodeURIComponent(key), { admin: true, method: "PATCH", json: body });
+      } else {
+        body.id = String(form.elements.entry_id.value || "").trim();
+        await api("/api/admin/upcoming", { admin: true, method: "POST", json: body });
+        form.elements.entry.value = "";
+      }
+      toast(t("admin.upcoming_saved"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    } finally {
+      busy(form, false);
+    }
   }
 
   // ---------------------------------------------------------------- administration: actions
@@ -2625,23 +2744,40 @@
   }
 
   // ---------------------------------------------------------------- upcoming transport (information only)
-  var PROJECT_CHIP = { OPERATING: "available", ANNOUNCED: "planned", UNDER_CONSTRUCTION: "planned", PLANNED: "planned", AWAITING_CONFIRMATION: "no_data", UNAVAILABLE: "unavailable" };
+  var PROJECT_CHIP = { OPERATING: "available", ANNOUNCED: "planned", PLANNED: "planned", UNDER_CONSTRUCTION: "planned", DELAYED: "no_data", AWAITING_CONFIRMATION: "no_data" };
+
+  function historyLine(change) {
+    var c = change.changes || {};
+    var what = c.created ? t("upcoming.history_created")
+      : c.status ? t("upcoming.history_status", { from: t("upcoming.status." + c.status[0]), to: t("upcoming.status." + c.status[1]) })
+      : t("upcoming.history_details");
+    return "<li>" + esc(formatCalendarDate(String(change.at || "").slice(0, 10))) + ": " + esc(what) + ". " + esc(change.reason || "") + "</li>";
+  }
 
   function projectItem(p) {
     var chip = PROJECT_CHIP[p.status] || "unavailable";
     var mode = MODES.indexOf(p.mode) !== -1 ? p.mode : "other";
-    var when = p.status === "OPERATING" && p.opened_on
-      ? t("upcoming.opened", { date: formatCalendarDate(p.opened_on) })
-      : p.expected ? t("upcoming.expected", { text: p.expected }) : "";
+    var dates = [];
+    if (p.announced_on) dates.push(t("upcoming.announced", { date: formatPartialDate(p.announced_on) }));
+    if (p.status === "OPERATING" && p.opened_on) dates.push(t("upcoming.opened", { date: formatCalendarDate(p.opened_on) }));
+    // An expected start is shown only when it comes from an official announcement.
+    if (p.expected_start && p.official_announcement) dates.push(t("upcoming.expected", { text: formatPartialDate(p.expected_start) }));
     var links = (p.sources || []).map(function (s) {
       var href = safeHref(s.url);
       return href ? '<li><a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + "</a></li>" : "";
     }).join("");
+    var history = p.history || [];
     return '<li class="project"><div><div class="title">' + esc(p.name) + "</div>" +
-      '<div class="muted small"><span class="mode-tag">' + esc(t("mode." + mode)) + "</span> " + esc(when) + "</div>" +
-      "<p>" + esc(p.detail || "") + "</p>" +
+      '<div class="muted small"><span class="mode-tag">' + esc(t("mode." + mode)) + "</span> " +
+      '<span class="mode-tag">' + esc(t("upcoming.type." + p.transport_type)) + "</span> " +
+      "<strong>" + esc(t("upcoming.kind." + p.source_kind)) + "</strong></div>" +
+      (p.location ? '<div class="small">' + esc(t("upcoming.location", { text: p.location })) + "</div>" : "") +
+      "<p>" + esc(p.announcement || "") + "</p>" +
+      (dates.length ? '<div class="small">' + esc(dates.join(" · ")) + "</div>" : "") +
       '<div class="muted small">' + esc(t("upcoming.sources")) + '</div><ul class="plain-links">' + links + "</ul>" +
-      '<div class="muted small">' + esc(t("upcoming.verified", { date: formatCalendarDate(p.verified_on), note: p.confidence || "" })) + "</div></div>" +
+      '<div class="muted small">' + esc(t("upcoming.verified", { date: formatCalendarDate(p.verified_on), note: p.note || "" })) + "</div>" +
+      (history.length ? '<details class="small"><summary>' + esc(t("upcoming.history", { count: history.length })) + "</summary><ul>" + history.map(historyLine).join("") + "</ul></details>" : "") +
+      "</div>" +
       '<span class="chip state-' + chip + '">' + esc(t("upcoming.status." + p.status)) + "</span></li>";
   }
 
@@ -3100,6 +3236,9 @@
       case "sourceForm":
         submitSource(form, token);
         break;
+      case "upcomingForm":
+        submitUpcoming(form, token);
+        break;
       case "uploadForm":
         submitUpload(form, token);
         break;
@@ -3129,6 +3268,8 @@
     if (!target) return;
     if (target.form && target.form.id === "settingsForm") {
       saveSetting(target);
+    } else if (target.id === "upcomingEntry") {
+      fillUpcomingForm(target.form);
     } else if (target.id === "scnYearFilter") {
       loadScenarioList(document.getElementById("scnList"), state.viewToken);
     } else if (target.name === "when" && target.form && target.form.elements.date) {

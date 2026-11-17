@@ -18,9 +18,9 @@ collects no names, phone numbers, email addresses or payment details.
 | Area | Position |
 |---|---|
 | Transport data | **Demonstration data only.** Two invented feeds, named "Demo …", are labelled as unverified wherever they appear. No official BMTC or BMRCL data is loaded, and no permission has been requested yet. |
-| Software quality | **Tested on that demonstration data.** 429 automated tests pass. All 321 buttons, choices and links on 20 screens were exercised in a real browser, and none was decorative or broken. The automated accessibility scan (WCAG 2.1 AA) found no violations. The security self-assessment found no high-severity issue. See [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md). |
+| Software quality | **Tested on that demonstration data.** 459 automated tests pass. All 323 buttons, choices and links on 20 screens were exercised in a real browser, and none was decorative or broken. The automated accessibility scan (WCAG 2.1 AA) found no violations. The security self-assessment found no high-severity issue. See [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md). |
 | Live tracking, tickets, passes, Metro QR, payments, NCMC | **Not available.** Each needs written authorisation from the operator or provider. Until then the application says it is unavailable and points to the official channel. It never shows an invented result. |
-| Public availability | Version 3.0 runs as a public demonstration. Version 4.0 is ready to deploy as a separate staging service; its public address will be supplied with this package. |
+| Public availability | Version 3.0 runs as a public demonstration. Version 4.0 is ready to deploy as a separate service, `bengaluru-transit-planner-v4`, that cannot affect 3.0. Its public address will be added to this package only after it has been deployed and checked. |
 | Android | A WebView wrapper around the web application. It has not been tested on a phone yet. |
 
 ## What we request

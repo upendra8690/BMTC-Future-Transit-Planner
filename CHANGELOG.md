@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased (branch `v4`) — separate 4.0 deployment; editable upcoming transport, 2026-11-18
+- **Render.** `render.yaml` now defines only the new service `bengaluru-transit-planner-v4` (branch `v4`, Docker,
+  Singapore, health check `/api/health`), so it cannot touch the 3.0 service.
+  - The container listens on `PORT` (default 8000); CI starts it on port 10000, as Render does.
+  - The CI container job now asserts a 4.x version, the 4.0 page title and the upcoming entries.
+  - Exact dashboard steps are in `docs/launch/DEPLOYMENT_GUIDE.md`.
+  - `scripts/verify_deployment.py` proves a public address is 4.0 and that the 3.0 address is still 3.0.
+- **Upcoming transport is editable without code changes.** Entries live in the database (migration 0003: tables
+  `transport_announcements` and `transport_announcement_changes`). Each has a type, location and route, status,
+  where the status comes from, announcement date, expected start, operating date, sources, last verification, and a
+  public update history.
+  - Administrators add and change entries in the Administration screen (`POST /api/admin/upcoming`,
+    `PATCH /api/admin/upcoming/{id}`). Every change needs the admin key and a reason, and is audited.
+  - **Types:** new bus routes, electric buses, feeders, Metro extensions, new stations, suburban rail, interchanges,
+    integrated ticketing.
+  - **Statuses:** Announced, Planned, Under construction, Delayed, Awaiting confirmation, Operating.
+  - **Rules:**
+    - "Operating" needs an opening date that is not in the future.
+    - Only an official announcement may give an expected start date.
+    - An estimate or demonstration entry can never be operating.
+    - A verification date cannot be in the future.
+  - The seven checked entries seed an empty table. Their reported target years moved into notes, because none comes
+    from an official announcement.
+  - Tests: `tests/test_announcements.py` (17); 12 new rule tests in `tests/test_launch.py`;
+    `tests/browser/upcoming_admin_check.py`.
+- **Labels.** The year banner no longer says "Official verified data for {year}" when no verified timetable
+  exists. It now says "No officially verified timetable is currently available for this selection.", and likewise
+  for unverified feeds.
+- Service worker cache `bmtc-planner-shell-v6`, so phones fetch the new screens.
+
 ## Unreleased (branch `v4`) — government submission package, 2026-11-18
 - `government_submission_2026/`: 19 documents for a technical review by Karnataka transport authorities. They cover
   the proposal, the feature matrix by area, architecture, security, privacy, accessibility, the data, licence and

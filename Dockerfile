@@ -35,7 +35,7 @@ VOLUME ["/app/data"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"]
+    CMD ["python", "-c", "import os, sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/api/health', timeout=4).status == 200 else 1)"]
 
 # exec makes uvicorn the main process, so it receives the stop signal directly. --proxy-headers takes the client
 # address from X-Forwarded-For only when the connection comes from one of the FORWARDED_ALLOW_IPS addresses.

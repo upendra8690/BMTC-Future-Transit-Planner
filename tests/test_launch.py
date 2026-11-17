@@ -170,7 +170,8 @@ TODAY = dt.date(2026, 11, 17)
 
 
 def entry(**changes) -> dict:
-    base = {"id": "x", "status": "UNDER_CONSTRUCTION", "opened_on": None,
+    base = {"id": "x", "name": "Test line", "status": "UNDER_CONSTRUCTION", "opened_on": None,
+            "transport_type": "METRO_EXTENSION", "source_kind": "SECONDARY",
             "sources": [{"title": "t", "url": "https://example.org/"}], "verified_on": "2026-11-17"}
     base.update(changes)
     return base
@@ -189,10 +190,31 @@ def test_registry_entries_are_valid():
     (entry(sources=[]), "https source"),
     (entry(sources=[{"title": "t", "url": "http://insecure.example/"}]), "https source"),
     (entry(verified_on=None), "verification date"),
+    (entry(verified_on="2026-11-18"), "verification date is in the future"),
+    (entry(transport_type="TRAM"), "unknown transport type"),
+    (entry(source_kind="RUMOUR"), "unknown source kind"),
+    (entry(status="OPERATING", opened_on="2026-01-01", source_kind="ESTIMATE"), "cannot be shown as operating"),
+    (entry(status="OPERATING", opened_on="2026-01-01", source_kind="DEMO"), "cannot be shown as operating"),
+    (entry(expected_start="2027-03"), "only an official announcement"),
+    (entry(source_kind="PRESS", expected_start="2027"), "only an official announcement"),
+    (entry(status="OPERATING", opened_on="2026-01-01", source_kind="OFFICIAL", expected_start="2027"),
+     "not an expected start"),
+    (entry(source_kind="OFFICIAL", expected_start="2027-13"), "invalid expected start"),
+    (entry(announced_on="2027-01"), "announcement date is in the future"),
+    (entry(name=" "), "needs a name"),
 ])
 def test_a_future_service_cannot_be_marked_operating(bad, why):
     with pytest.raises(registry.RegistryError, match=why):
         registry.validate_upcoming([bad], TODAY)
+
+
+def test_official_announcements_may_give_an_expected_start_and_any_status_is_allowed():
+    registry.validate_upcoming([
+        entry(id="a", status="DELAYED", source_kind="OFFICIAL", expected_start="2027-06", announced_on="2026-10"),
+        entry(id="b", status="AWAITING_CONFIRMATION", transport_type="INTEGRATED_TICKETING"),
+        entry(id="c", status="PLANNED", transport_type="INTERCHANGE", source_kind="ESTIMATE"),
+        entry(id="d", status="ANNOUNCED", transport_type="METRO_STATION", source_kind="DEMO"),
+    ], TODAY)
 
 
 def test_upcoming_projects_are_never_used_by_the_planner(client):

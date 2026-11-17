@@ -7,7 +7,7 @@ dollars are charged in dollars.
 ## Today
 | Item | Provider | Cost |
 |---|---|---|
-| Hosting for the 3.0 demo and the 4.0 staging service | Render free plan | ₹0 |
+| Hosting for the 3.0 demo and the separate 4.0 service | Render free plan | ₹0 |
 | Source code, automated tests, Android builds | GitHub free plan | ₹0 |
 | Maps | OpenStreetMap tiles (light use) | ₹0 |
 | Development | The applicant's own time | Not charged |

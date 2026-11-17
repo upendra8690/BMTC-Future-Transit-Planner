@@ -838,3 +838,8 @@ body:not([data-view="tools"]) .year-picker { display: none; }
 .plain-links a { overflow-wrap: anywhere; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
 .chips .chip-button { border: 1px solid var(--line); background: var(--neutral-bg); color: var(--text); font-weight: 600; }
+
+/* Form buttons that sit at the bottom of a grid row. */
+.align-end {
+  align-self: end;
+}

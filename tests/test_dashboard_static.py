@@ -21,7 +21,8 @@ ALLOWED_UNTRANSLATED = {"app.brand", "clock.line", "common.pdf", "route.col_seq"
 # Keys whose full name is built at run time from a prefix, such as "cls." + classification code.
 DYNAMIC_PREFIXES = (
     "cls.", "day.", "msgcode.", "feature.state.", "feature.reason.", "feature.name.", "svc.cat.", "mode.",
-    "upcoming.status.", "providers.feed_state.", "providers.permission.", "providers.integration.", "integ.cap.",
+    "upcoming.status.", "upcoming.type.", "upcoming.kind.", "providers.feed_state.", "providers.permission.",
+    "providers.integration.", "integ.cap.",
 )
 # Storage keys the dashboard may write. The admin key must never be one of them.
 STORED_KEYS = {
@@ -331,3 +332,13 @@ def test_every_scrollable_table_can_be_reached_by_keyboard():
         assert 'tabindex="0"' in tag, tag
         assert 'role="region"' in tag, tag
         assert "aria-label=" in tag, tag
+
+
+def test_no_form_control_hides_a_form_property():
+    # A control named "id" makes form.id return that control, so the submit handler's switch on form.id misses the
+    # form and the browser submits it natively (a page reload with the fields in the address). Found in the
+    # upcoming-transport editor by tests/browser/upcoming_admin_check.py.
+    reserved = re.compile(r"""name=\\?["'](id|action|method|elements|submit|reset)\\?["']""")
+    for name in ("index.html", "app.js"):
+        found = reserved.findall(read(name))
+        assert not found, f"{name}: form controls named {found}"

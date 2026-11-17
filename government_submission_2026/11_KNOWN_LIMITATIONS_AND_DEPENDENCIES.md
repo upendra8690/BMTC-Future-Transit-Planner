@@ -8,7 +8,7 @@
 | 3 | **No tickets, passes, Metro QR, payments, wallet or NCMC** | Passengers are pointed to the official channels | Written agreements with the operator, ONDC, a payment aggregator and a bank |
 | 4 | **No passenger accounts.** Saved items belong to one device | Changing phones loses saved items | Accounts on PostgreSQL (designed, not built) |
 | 5 | **Free hosting.** The server sleeps when idle, taking up to a minute to wake, and its disk is wiped on restart | Slow first load; saved routes on the server can be lost | Paid always-on hosting and PostgreSQL with backups |
-| 6 | **4.0 is not yet publicly deployed.** The 3.0 version is public | Reviewers need a link, or an in-person demonstration | The owner creates the staging service from `render.yaml` |
+| 6 | **4.0 is not yet publicly deployed.** The 3.0 version is public | Reviewers need a link, or an in-person demonstration | The owner creates the separate service `bengaluru-transit-planner-v4` from `render.yaml` (`docs/launch/DEPLOYMENT_GUIDE.md`) |
 | 7 | **The Android app has not been tested on a phone.** Calls, official links and the back button were fixed in code only | Unknown behaviour on real devices | A phone test of the APK |
 | 8 | **Android "Stops near me".** The WebView shell does not grant location | Inside the Android app, search by stop name instead | Location support in the shell |
 | 9 | **Translations not reviewed** by native speakers | Wording may be unnatural | Review by native speakers |
@@ -23,7 +23,7 @@
 | Dependency | Used for | Cost today | Risk |
 |---|---|---|---|
 | DULT, BMTC, BMRCL data permission | All real timetables and fares | — | Without it the app stays a demonstration |
-| Render (hosting) | 3.0 demo; 4.0 staging | Free tier | Sleeps when idle; disk not persistent |
+| Render (hosting) | 3.0 demo; the separate 4.0 service | Free tier | Sleeps when idle; disk not persistent |
 | PostgreSQL, for example Neon | Persistent data for a pilot | Free tier available | Not set up yet |
 | GitHub and GitHub Actions | Source code, tests, Android builds | Free | — |
 | OpenStreetMap tiles | Maps | Free, light use only | Heavy use needs another tile source |
