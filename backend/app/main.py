@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
+from . import demo
 from .api import router
 from .config import DASHBOARD_DIR, Settings
 from .database import Database
@@ -125,7 +126,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 headers={"Retry-After": "60"},
             )
         else:
-            response = await call_next(request)
+            token = demo.enter(settings.demo_mode)
+            try:
+                response = await call_next(request)
+            finally:
+                demo.leave(token)
         _apply_security_headers(response, path, https=request.url.scheme == "https")
         elapsed_ms = (time.perf_counter() - started) * 1000
         if path.startswith("/api/") and request.method != "GET":

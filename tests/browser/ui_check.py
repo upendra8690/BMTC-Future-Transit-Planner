@@ -471,8 +471,9 @@ def journey_section(page):
     results = page.inner_text("#journeyResults")
     check("journeys are listed for Monday 11 January 2027, at most five options",
           1 <= options <= 5, str(options))
-    check("the result says live positions are not available",
-          "Live bus positions are not available" in results, results[:200])
+    check("the result says live vehicle information is unavailable and times are scheduled",
+          "Live vehicle information is currently unavailable" in results and "scheduled data, not live tracking"
+          in results, results[:200])
     check("the result labels the earliest arrival", "Earliest arrival" in results, results[:200])
     page.check('#journeyForm input[name="changes"][value="0"]')
     page.click('#journeyForm button[type="submit"]')

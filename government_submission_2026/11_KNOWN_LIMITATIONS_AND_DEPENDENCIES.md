@@ -3,7 +3,7 @@
 ## Limitations
 | # | Limitation | Effect on passengers | What removes it |
 |---|---|---|---|
-| 1 | **No official data.** Every timetable, route, stop, station and fare is invented demonstration data | The app cannot yet help a real journey | A written licence for BMTC and BMRCL GTFS (requests 15–17) |
+| 1 | **No official data.** The Namma Metro timetable comes from an unofficial community reconstruction (approximate times, no fares, no Pink Line); there is no real BMTC bus data at all | Metro journeys are indicative only; bus journeys are not possible | A written licence for BMTC and BMRCL GTFS (requests 15–17) |
 | 2 | **No live information.** No vehicle positions, arrival predictions or service alerts | Only scheduled times, always labelled "not live" | A BMTC real-time data agreement (GTFS-Realtime) |
 | 3 | **No tickets, passes, Metro QR, payments, wallet or NCMC** | Passengers are pointed to the official channels | Written agreements with the operator, ONDC, a payment aggregator and a bank |
 | 4 | **No passenger accounts.** Saved items belong to one device | Changing phones loses saved items | Accounts on PostgreSQL (designed, not built) |

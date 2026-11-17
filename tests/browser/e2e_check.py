@@ -504,7 +504,12 @@ def pwa_and_labels(browser) -> None:
         official = page.locator("#view li .badge.official, #view td .badge.official").count()
         check("labels", f"{screen}: no demo item is labelled Officially verified", official == 0, official)
     status = page.request.get(BASE + "api/data-status").json()
-    check("labels", "data status reports demo-only data and no live feed", status["demo_only"] and status["live_feed"] == "NONE")
+    # A demonstration server may also hold real community data, so it reports demonstration mode, flags every
+    # invented feed as demo, and reports no live feed.
+    invented = [f for f in status["feeds"] if f["kind"] == "SYNTHETIC_DEMO"]
+    check("labels", "data status reports demonstration mode, every invented feed as demo, and no live feed",
+          status["demo_mode"] is True and invented and all(f["demo"] for f in invented) and status["live_feed"] == "NONE",
+          status)
     sources = page.request.get(BASE + "api/data-sources").json()
     demo = [s for s in (sources if isinstance(sources, list) else sources.get("sources", [])) if s.get("kind") == "SYNTHETIC_DEMO"]
     check("labels", "every loaded source is SYNTHETIC_DEMO and not verified", demo and all(not s.get("verified") for s in demo), len(demo))

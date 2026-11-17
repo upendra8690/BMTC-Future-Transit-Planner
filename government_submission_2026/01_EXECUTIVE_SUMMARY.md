@@ -17,10 +17,10 @@ collects no names, phone numbers, email addresses or payment details.
 ## Where it stands today
 | Area | Position |
 |---|---|
-| Transport data | **Demonstration data only.** Two invented feeds, named "Demo …", are labelled as unverified wherever they appear. No official BMTC or BMRCL data is loaded, and no permission has been requested yet. |
-| Software quality | **Tested on that demonstration data.** 459 automated tests pass. All 323 buttons, choices and links on 20 screens were exercised in a real browser, and none was decorative or broken. The automated accessibility scan (WCAG 2.1 AA) found no violations. The security self-assessment found no high-severity issue. See [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md). |
+| Transport data | **No official data.** The public service shows the real Namma Metro Purple, Green and Yellow lines from an *unofficial community reconstruction* of BMRCL's published timetables (ODbL licence). It is labelled "Unverified feed" with "Approximate times", and its fares are never shown. There is no real BMTC bus data. Invented demonstration data appears only on a separate demonstration server, never on the public service. No permission has been requested yet. |
+| Software quality | **Tested on that demonstration data.** 470 automated tests pass. All 869 buttons, choices and links on 20 screens were exercised in a real browser, and none was decorative or broken. The automated accessibility scan (WCAG 2.1 AA) found no violations. The security self-assessment found no high-severity issue. See [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md). |
 | Live tracking, tickets, passes, Metro QR, payments, NCMC | **Not available.** Each needs written authorisation from the operator or provider. Until then the application says it is unavailable and points to the official channel. It never shows an invented result. |
-| Public availability | Version 3.0 runs as a public demonstration. Version 4.0 is ready to deploy as a separate service, `bengaluru-transit-planner-v4`, that cannot affect 3.0. Its public address will be added to this package only after it has been deployed and checked. |
+| Public availability | Version 3.0 and version 4.0 run as separate public services. Version 4.0 is at https://bengaluru-transit-planner-v4.onrender.com in real mode, without invented data, and was checked on 18 Nov 2026. The demonstration journeys run on a separate demonstration server. |
 | Android | A WebView wrapper around the web application. It has not been tested on a phone yet. |
 
 ## What we request

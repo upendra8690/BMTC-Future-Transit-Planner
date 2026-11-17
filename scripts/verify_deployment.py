@@ -10,6 +10,7 @@ a minute to answer the first request. The exit code is 0 only when every check p
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import sys
 import time
@@ -27,7 +28,8 @@ def fetch(url: str) -> tuple[int, dict[str, str], bytes]:
     headers = {"User-Agent": AGENT, "Accept": "application/json, text/html"}
     request = urllib.request.Request(url, headers=headers)  # noqa: S310 (scheme checked above)
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310 (scheme checked above)
+        # Only http and https addresses reach this line (checked above).
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310  # nosec B310
             return response.status, {k.lower(): v for k, v in response.headers.items()}, response.read()
     except urllib.error.HTTPError as exc:
         return exc.code, {k.lower(): v for k, v in exc.headers.items()}, exc.read()
@@ -66,13 +68,57 @@ def check_v4(base: str, report: Report) -> None:
     report.check("4.0 sends HSTS", "strict-transport-security" in headers)
     status, _, body = fetch(base + "/api/data-status")
     data = as_json(body)
-    report.check("4.0 says it serves demonstration data only", status == 200 and data.get("demo_only") is True,
-                 f"{len(data.get('feeds', []))} feeds")
-    status, _, body = fetch(base + "/api/upcoming")
-    projects = as_json(body).get("projects", [])
+    demo_mode = data.get("demo_mode") is True
+    print(f"INFO 4.0 runs in {'DEMONSTRATION' if demo_mode else 'REAL (public)'} mode")
+    status_up, _, body_up = fetch(base + "/api/upcoming")
+    projects = as_json(body_up).get("projects", [])
     report.check("4.0 upcoming transport loads, never used by the planner",
-                 status == 200 and bool(projects) and all(p.get("in_planner") is False for p in projects),
+                 status_up == 200 and bool(projects) and all(p.get("in_planner") is False for p in projects),
                  f"{len(projects)} entries")
+    if demo_mode:
+        check_demo(base, report, data)
+    else:
+        check_real(base, report, data)
+    query = urllib.parse.urlencode({"origin": "Indiranagar", "destination": "Jayanagar", "modes": "metro",
+                                    "date": _next_day()})
+    status, _, body = fetch(f"{base}/api/plan?{query}")
+    report.check("4.0 default (officially verified) journey shows no data", status == 200 and
+                 not as_json(body).get("options"), as_json(body).get("message", f"HTTP {status}"))
+
+
+def _next_day() -> str:
+    # Tomorrow in Bengaluru. timezone.utc, not datetime.UTC, so the script also runs on Python 3.10.
+    now = dt.datetime.now(dt.timezone.utc)  # noqa: UP017
+    return (now + dt.timedelta(hours=5, minutes=30, days=1)).date().isoformat()
+
+
+def check_real(base: str, report: Report, data: dict) -> None:
+    feeds = data.get("feeds", [])
+    report.check("4.0 real mode serves no invented feed", not any(f.get("demo") for f in feeds),
+                 [f.get("source") for f in feeds])
+    community = [f for f in feeds if f.get("kind") == "COMMUNITY"]
+    report.check("4.0 community Namma Metro timetable is loaded and current",
+                 bool(community) and all(f.get("state") == "CURRENT" for f in community),
+                 [(f.get("source"), f.get("state"), f.get("feed_end_date")) for f in community])
+    query = urllib.parse.urlencode({"origin": "Indiranagar", "destination": "Jayanagar", "modes": "metro",
+                                    "classification": "UNVERIFIED_FEED", "date": _next_day()})
+    status, _, body = fetch(f"{base}/api/plan?{query}")
+    options = as_json(body).get("options") or []
+    rides = [leg for leg in (options[0]["legs"] if options else []) if leg.get("type") == "ride"]
+    report.check("4.0 real Metro journey Indiranagar to Jayanagar: approximate times, no fare, correct station",
+                 status == 200 and bool(rides) and rides[-1]["to"]["name"] == "Jayanagar"
+                 and all(leg["timing"] == "approximate" and not leg["fares"] for leg in rides),
+                 [leg.get("route_number") for leg in rides])
+    query = urllib.parse.urlencode({"origin": "Demo Lake View", "destination": "Demo Metro Hub",
+                                    "classification": "UNVERIFIED_FEED"})
+    status, _, body = fetch(f"{base}/api/plan?{query}")
+    report.check("4.0 real mode does not plan with invented demo stops", status == 200 and
+                 not as_json(body).get("options"), as_json(body).get("message_code"))
+
+
+def check_demo(base: str, report: Report, data: dict) -> None:
+    report.check("4.0 demonstration feeds are loaded", any(f.get("demo") for f in data.get("feeds", [])),
+                 f"{len(data.get('feeds', []))} feeds")
     query = urllib.parse.urlencode({"classification": "UNVERIFIED_FEED"})
     status, _, body = fetch(f"{base}/api/routes?{query}")
     routes = as_json(body).get("results", [])
@@ -84,10 +130,6 @@ def check_v4(base: str, report: Report) -> None:
     report.check("4.0 bus + Metro demo journey is planned and marked not live",
                  status == 200 and bool(plan.get("options")) and plan.get("realtime") is False,
                  f"{len(plan.get('options', []))} options")
-    query = urllib.parse.urlencode({"origin": "Demo Lake View", "destination": "Demo Metro Hub"})
-    status, _, body = fetch(f"{base}/api/plan?{query}")
-    report.check("4.0 default (officially verified) journey shows no data", status == 200 and
-                 not as_json(body).get("options"), as_json(body).get("message", f"HTTP {status}"))
 
 
 def check_v3(base: str, report: Report) -> None:

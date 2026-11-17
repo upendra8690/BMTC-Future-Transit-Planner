@@ -93,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         "BACKUP_DIR": str(backups),
         "RATE_LIMIT_PER_MINUTE": "100000",
         "LOG_LEVEL": "WARNING",
+        # These checks drive the invented demo feeds, which only a demonstration server serves.
+        "DEMO_MODE": "1",
     }
     python = sys.executable
 

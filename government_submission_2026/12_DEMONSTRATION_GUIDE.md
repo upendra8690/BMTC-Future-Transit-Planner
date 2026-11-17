@@ -6,18 +6,21 @@ throughout.
 ## Before the meeting
 - Open the 4.0 address on a phone and on a laptop 5 minutes before the meeting. On the free hosting plan a
   sleeping server can take up to a minute to wake.
-- **If there is no internet connection or no 4.0 address yet,** run the app on the laptop:
-  `python scripts/migrate_database.py`, then `python scripts/seed_demo_feed.py`, then
-  `python -m uvicorn app.main:create_app --factory --app-dir backend --port 8000`, and open
-  http://127.0.0.1:8000/. Setup steps are in `docs/INSTALL_WINDOWS.md`. With Docker, instead run
-  `docker run -p 8000:8000 -e SEED_DEMO_FEED=1 <image>`.
+- **Two servers.**
+  - The **public 4.0 address runs in real mode.** It has the community Namma Metro timetable but no invented data, so
+    use it for step 0.
+  - **Steps 2–6 use the invented demo stops, so they need a demonstration server.** On the laptop, run
+    `DEMO_MODE=1 sh scripts/container_start.sh` (or with Docker,
+    `docker run -p 8000:8000 -e DEMO_MODE=1 <image>`) and open http://127.0.0.1:8000/. Every screen then shows the
+    demonstration banner. Setup steps are in `docs/INSTALL_WINDOWS.md`.
 - For step 12, sign in to Administration before the meeting. **Never show the admin key on screen.**
 - In the Plan screen, choose **"Unverified feed"**. The default, "Officially verified", is correctly empty.
 
 ## Steps
 | # | Show | Do | Say |
 |---|---|---|---|
-| 1 | Home | Show the search box, map and tiles | "One app for bus and Metro. This is unofficial and runs on invented data today." |
+| 0 | Real Namma Metro (public address) | Choose "Unverified feed"; plan **Indiranagar** to **Jayanagar**, Metro only | "Real stations and a real change at Majestic, from an unofficial community reconstruction of BMRCL's published timetable. Times are approximate and no fare is shown. Nothing here is official." |
+| 1 | Home (demonstration server) | Show the banner, search box, map and tiles | "From here on I use a demonstration server: the banner says so, and every invented place is named Demo." |
 | 2 | Route and stop search | Routes: type `DEMO`; Stops: type `Demo` | "Search by number or name. Every result is labelled with its source." |
 | 3 | Bus journey | Plan from **Demo Central** to **Demo Junction**, **Bus only** | "Scheduled times, never live. Each ride shows 'Unverified feed'." |
 | 4 | Metro journey | **Demo Metro Central** to **Demo Metro Tech Park**, **Metro only** | "The same planner, Metro only." |
@@ -51,7 +54,7 @@ throughout.
 > than imitate them. A demonstration feed can never be marked as official; only an official source, verified against
 > the publisher, can be.
 >
-> The evidence is in the package: 459 automated tests, a browser test of all 323 controls, security and privacy
+> The evidence is in the package: 470 automated tests, a browser test of all 869 controls, security and privacy
 > reports, and a list of known limitations.
 >
 > We are asking for four things. First, your technical feedback. Second, guidance on the official source and licence

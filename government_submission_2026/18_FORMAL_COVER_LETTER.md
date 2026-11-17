@@ -28,8 +28,8 @@ I wish to state clearly:
 - **No personal data.** It collects no names, phone numbers, email addresses, locations or payment details.
 
 The enclosed package documents the application with test evidence, including its limitations:
-- 459 automated tests pass;
-- every one of 323 on-screen controls was exercised in a browser;
+- 470 automated tests pass;
+- every one of 869 on-screen controls was exercised in a browser;
 - automated accessibility (WCAG 2.1 AA) and security checks found no violations or high-severity issues.
 
 **I respectfully request:**
@@ -53,4 +53,4 @@ Independent developer, Bengaluru
 Enclosures: Bengaluru Transit Planner submission package, documents 01 to 17.
 Source code and test reports: https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0 (branch `v4`, folder
 `government_submission_2026/`)
-Demonstration: [4.0 address, added only after it is deployed and checked]
+Demonstration: https://bengaluru-transit-planner-v4.onrender.com (check it with scripts/verify_deployment.py on the day of sending)

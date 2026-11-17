@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from .. import clock
+from .. import clock, demo
 from ..models import (
     CLASS_OFFICIAL,
     STATUS_COMPLETED,
@@ -63,6 +63,17 @@ def fold_column(session: Session, column: Any) -> Any:
     return func.lower(column)
 
 
+def name_match(session: Session, term: str, import_ids: list[int]) -> Any:
+    """Condition on Stop: the stops named exactly as the folded term, when any exists in these imports; otherwise the
+    stops whose names contain it. So "Jayanagar" finds Jayanagar and not Vijayanagar, while "jaya" still finds both.
+    """
+    folded = fold_column(session, Stop.name)
+    exact = folded == term
+    if session.scalar(select(Stop.id).where(Stop.import_id.in_(import_ids), exact).limit(1)) is not None:
+        return exact
+    return folded.like(contains_pattern(term), escape=LIKE_ESCAPE)
+
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -97,6 +108,7 @@ def eligible_import_ids(
         GtfsImport.classification == classification,
         GtfsImport.status == STATUS_COMPLETED,
         GtfsImport.is_active.is_(True),
+        demo.served_imports(),
     )
     if year is not None:
         stmt = stmt.where(
@@ -137,6 +149,7 @@ def year_coverage(
             GtfsImport.classification == classification,
             GtfsImport.status == STATUS_COMPLETED,
             GtfsImport.is_active.is_(True),
+            demo.served_imports(),
             GtfsImport.feed_start_date <= year_end,
             GtfsImport.feed_end_date >= year_start,
         )
@@ -195,7 +208,7 @@ def service_zone(session: Session, default_name: str) -> tuple[ZoneInfo, str]:
     name = session.scalar(
         select(Agency.timezone)
         .join(GtfsImport, GtfsImport.id == Agency.import_id)
-        .where(GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True))
+        .where(GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True), demo.served_imports())
         .order_by(GtfsImport.id.desc(), Agency.id)
         .limit(1)
     )
@@ -212,6 +225,7 @@ def feed_status(session: Session, classification: str, today: dt.date) -> dict[s
             GtfsImport.classification == classification,
             GtfsImport.status == STATUS_COMPLETED,
             GtfsImport.is_active.is_(True),
+            demo.served_imports(),
         )
     ).all()
     if not rows:
@@ -595,8 +609,8 @@ def direct_journeys(
         result["message_code"] = _no_data_code(classification)
         return result
 
-    origin_term = contains_pattern(origin_key)
-    destination_term = contains_pattern(destination_key)
+    origin_match = name_match(session, origin_key, import_ids)
+    destination_match = name_match(session, destination_key, import_ids)
     found: list[tuple[dt.datetime, dict[str, Any]]] = []
     o_stop = aliased(StopTime)
     d_stop = aliased(StopTime)
@@ -606,10 +620,8 @@ def direct_journeys(
     for import_id in import_ids:
         zone = import_zone(session, import_id)
         days = [on_date] if now is None else clock.candidate_service_dates(zone, now)
-        origin_ids = list(session.scalars(select(Stop.id).where(
-            Stop.import_id == import_id, fold_column(session, Stop.name).like(origin_term, escape=LIKE_ESCAPE))))
-        destination_ids = list(session.scalars(select(Stop.id).where(
-            Stop.import_id == import_id, fold_column(session, Stop.name).like(destination_term, escape=LIKE_ESCAPE))))
+        origin_ids = list(session.scalars(select(Stop.id).where(Stop.import_id == import_id, origin_match)))
+        destination_ids = list(session.scalars(select(Stop.id).where(Stop.import_id == import_id, destination_match)))
         if not origin_ids or not destination_ids:
             continue
         for day in days:
@@ -809,13 +821,18 @@ def metro_stations(session: Session, classification: str, *, query: str, limit: 
     term = fold(query)
     if term:
         stmt = stmt.where(fold_column(session, Stop.name).like(contains_pattern(term), escape=LIKE_ESCAPE))
-    stations: dict[int, dict[str, Any]] = {}
+    # A feed may list each platform as its own stop with the station's name. They are shown as one station, which
+    # keeps the first platform's identifier and lists every platform in stop_ids.
+    stations: dict[tuple[int, str], dict[str, Any]] = {}
     for stop, route_id, short, gtfs_route, color in session.execute(stmt).all():
-        entry = stations.get(stop.id)
+        key = (stop.import_id, fold(stop.name))
+        entry = stations.get(key)
         if entry is None:
             if len(stations) >= limit:
                 continue
-            entry = stations[stop.id] = {**stop_dict(stop, classification), "lines": []}
+            entry = stations[key] = {**stop_dict(stop, classification), "lines": [], "stop_ids": []}
+        if stop.id not in entry["stop_ids"]:
+            entry["stop_ids"].append(stop.id)
         if not any(line["id"] == route_id for line in entry["lines"]):
             entry["lines"].append({"id": route_id, "route_number": short or gtfs_route, "color": color})
     result = list(stations.values())

@@ -19,7 +19,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import KIND_SYNTHETIC, STATUS_COMPLETED, DataSource, GtfsImport
+from .. import demo
+from ..models import KIND_COMMUNITY, KIND_SYNTHETIC, STATUS_COMPLETED, DataSource, GtfsImport
 
 CHECKED = "2026-11-17"
 
@@ -125,6 +126,20 @@ PROVIDERS: list[dict[str, Any]] = [
         "limitations": "Light use only under the tile usage policy; switch provider before heavy use.",
     },
     {
+        "id": "bmrcl_community_gtfs",
+        "provider": "bmrcl-gtfs community project (unofficial)",
+        "dataset": "Namma Metro Purple, Green and Yellow lines: stations and timetables, reconstructed from the "
+                   "timetables BMRCL publishes and from OpenStreetMap",
+        "url": "https://github.com/Vonter/bmrcl-gtfs",
+        "licence": "ODbL-1.0 (Open Database License); contains OpenStreetMap data, (c) OpenStreetMap contributors",
+        "permission": "NOT_NEEDED",
+        "owner": "Community project; timetable source BMRCL; map data OpenStreetMap contributors",
+        "update_frequency": "When BMRCL publishes new timetables; this app uses the version of 17 Aug 2026",
+        "integration": "CONNECTED",
+        "limitations": "Unofficial and not verified by BMRCL. Times between the published ones are approximate. Its "
+                       "fares are estimates, so the app never shows them. The elevated Pink Line is not included.",
+    },
+    {
         "id": "synthetic_demo",
         "provider": "This project",
         "dataset": "Synthetic demo bus and Metro feeds",
@@ -139,7 +154,7 @@ PROVIDERS: list[dict[str, Any]] = [
 ]
 
 # Providers whose timetable data would be imported (the others are services the app calls or would call).
-DATASET_PROVIDERS = frozenset({"dult_data_hub", "bmtc_gtfs", "bmrcl_data", "synthetic_demo"})
+DATASET_PROVIDERS = frozenset({"dult_data_hub", "bmtc_gtfs", "bmrcl_data", "bmrcl_community_gtfs", "synthetic_demo"})
 
 # ---------------------------------------------------------------- upcoming transport
 
@@ -374,7 +389,7 @@ def data_status(db: Session, today: dt.date) -> dict[str, Any]:
     rows = db.execute(
         select(GtfsImport, DataSource)
         .join(DataSource, DataSource.id == GtfsImport.data_source_id)
-        .where(GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True))
+        .where(GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True), demo.served_imports())
         .order_by(GtfsImport.id)
     ).all()
     feeds = []
@@ -394,6 +409,9 @@ def data_status(db: Session, today: dt.date) -> dict[str, Any]:
             "publisher": source.publisher,
             "kind": source.kind,
             "demo": source.kind == KIND_SYNTHETIC,
+            "community": source.kind == KIND_COMMUNITY,
+            "source_url": source.source_url,
+            "license": source.license,
             "classification": feed.classification,
             "feed_start_date": start.isoformat() if start else None,
             "feed_end_date": end.isoformat() if end else None,
@@ -405,25 +423,34 @@ def data_status(db: Session, today: dt.date) -> dict[str, Any]:
         "today": today.isoformat(),
         "realtime": False,
         "live_feed": "NONE",
+        "demo_mode": not demo.demo_hidden(),
         "demo_only": bool(feeds) and all(f["demo"] for f in feeds),
         "feeds": feeds,
     }
 
 
-def providers(db: Session) -> dict[str, Any]:
-    latest = db.scalar(
+def _latest_import(db: Session, kind: str) -> Any:
+    return db.scalar(
         select(GtfsImport.created_at)
         .join(DataSource, DataSource.id == GtfsImport.data_source_id)
-        .where(DataSource.kind == KIND_SYNTHETIC, GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True))
+        .where(DataSource.kind == kind, GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True),
+               demo.served_imports())
         .order_by(GtfsImport.created_at.desc())
         .limit(1)
     )
+
+
+def providers(db: Session) -> dict[str, Any]:
+    latest = {
+        "synthetic_demo": _latest_import(db, KIND_SYNTHETIC),
+        "bmrcl_community_gtfs": _latest_import(db, KIND_COMMUNITY),
+    }
     out = []
     for entry in PROVIDERS:
         row = dict(entry)
         row["loads_data"] = entry["id"] in DATASET_PROVIDERS
         row["last_successful_update"] = None
-        if entry["id"] == "synthetic_demo" and latest is not None:
-            row["last_successful_update"] = latest.isoformat() + "Z"
+        if latest.get(entry["id"]) is not None:
+            row["last_successful_update"] = latest[entry["id"]].isoformat() + "Z"
         out.append(row)
     return {"checked": CHECKED, "providers": out}

@@ -6,9 +6,9 @@ action or approval.
 ## A. Before anything is sent
 | # | Item | Who | Done |
 |---|---|---|---|
-| 1 | Create the separate 4.0 service `bengaluru-transit-planner-v4` (Render → New → Blueprint → this repository → branch `v4`; full steps in `docs/launch/DEPLOYMENT_GUIDE.md`) | Owner | ☐ |
+| 1 | The separate 4.0 service `bengaluru-transit-planner-v4` exists (https://bengaluru-transit-planner-v4.onrender.com, branch `v4`); confirm in Render that its branch is still `v4` | Owner | ☐ |
 | 2 | Run `python scripts/verify_deployment.py <4.0 address> --v3 https://bmtc-future-transit-planner-3-0.onrender.com`; every line must say PASS. Then walk through document 12 on a phone | Owner | ☐ |
-| 3 | Put the checked 4.0 address in documents 15–18 (or offer an in-person demonstration instead) | Owner | ☐ |
+| 3 | The 4.0 address is already in documents 15–18; keep it only if step 2 passes on the day | Owner | ☐ |
 | 4 | Decide whether to add an open-source licence. Until then, do not describe the code as "open source"; say "publicly available" | Owner | ☐ |
 | 5 | Fill in the name, email, mobile number, date and signature in documents 15–18 | Owner | ☐ |
 | 6 | Telephone each office to confirm the addressee's designation and the postal address (section B) | Owner | ☐ |

@@ -34,6 +34,9 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..models import (
     CLASS_OFFICIAL,
+    KIND_COMMUNITY,
+    KIND_OFFICIAL,
+    KIND_SYNTHETIC,
     Agency,
     DataSource,
     FareAttribute,
@@ -46,6 +49,10 @@ from ..models import (
 )
 from . import schedule as sched
 from .text import fold
+
+# Fares are shown only from an official source, or from the labelled demonstration feed on a demonstration server.
+# Community and unknown sources may carry fares their authors estimated, so those are never shown as prices.
+FARE_SOURCE_KINDS = (KIND_OFFICIAL, KIND_SYNTHETIC)
 
 NEVER = 1 << 62
 DEFAULT_MAX_CHANGES = 2
@@ -110,6 +117,7 @@ class _Feed:
     publisher: str
     zone: Any
     agency_name: str | None
+    kind: str = ""
 
 
 class _Network:
@@ -276,13 +284,13 @@ def _local_iso(zone: Any, epoch: int) -> str:
 
 def _add_import(session: Session, net: _Network, import_id: int, first_day: dt.date, last_day: dt.date) -> None:
     zone = sched.import_zone(session, import_id)
-    source_name, publisher = session.execute(
-        select(DataSource.name, DataSource.publisher)
+    source_name, publisher, kind = session.execute(
+        select(DataSource.name, DataSource.publisher, DataSource.kind)
         .join(GtfsImport, GtfsImport.data_source_id == DataSource.id)
         .where(GtfsImport.id == import_id)
     ).one()
     agency = session.scalar(select(Agency.name).where(Agency.import_id == import_id).order_by(Agency.id).limit(1))
-    feed = net.add_feed(_Feed(import_id, source_name, publisher, zone, agency))
+    feed = net.add_feed(_Feed(import_id, source_name, publisher, zone, agency, kind))
     for stop in session.execute(
         select(Stop.id, Stop.gtfs_stop_id, Stop.name, Stop.lat, Stop.lon)
         .where(Stop.import_id == import_id)
@@ -534,8 +542,11 @@ def _fare_map(session: Session, import_ids: list[int]) -> dict[tuple[int, str | 
             FareAttribute,
             (FareAttribute.import_id == FareRule.import_id) & (FareAttribute.fare_id == FareRule.fare_id),
         )
+        .join(GtfsImport, GtfsImport.id == FareRule.import_id)
+        .join(DataSource, DataSource.id == GtfsImport.data_source_id)
         .where(
             FareRule.import_id.in_(import_ids),
+            DataSource.kind.in_(FARE_SOURCE_KINDS),
             FareRule.origin_id.is_(None),
             FareRule.destination_id.is_(None),
             FareRule.contains_id.is_(None),
@@ -568,7 +579,7 @@ def _fares_for(
 
 
 def _matching_nodes(session: Session, net: _Network, import_ids: list[int], term: str) -> tuple[list[int], bool]:
-    """Stops whose names contain the term, or whose stop code equals it.
+    """Stops named as the term (exactly, if any stop has that name; otherwise containing it), or whose code equals it.
 
     Returns the matching nodes and whether the list was cut at MAX_MATCHES.
     """
@@ -577,7 +588,7 @@ def _matching_nodes(session: Session, net: _Network, import_ids: list[int], term
         .where(
             Stop.import_id.in_(import_ids),
             or_(
-                sched.fold_column(session, Stop.name).like(sched.contains_pattern(term), escape=sched.LIKE_ESCAPE),
+                sched.name_match(session, term, import_ids),
                 sched.fold_column(session, Stop.gtfs_stop_id) == term,
             ),
         )
@@ -604,9 +615,11 @@ def _stop_out(net: _Network, node: int) -> dict[str, Any]:
     }
 
 
-def _fare_summary(ride_fares: list[list[dict[str, Any]]]) -> dict[str, Any]:
+def _fare_summary(ride_fares: list[list[dict[str, Any]]], withheld: bool = False) -> dict[str, Any]:
     if len(ride_fares) > 1:
         return {"code": "CHANGES_NOT_PRICED", "total": None}
+    if withheld:
+        return {"code": "NOT_VERIFIED", "total": None}
     only = ride_fares[0]
     if not only:
         return {"code": "NOT_IN_FEED", "total": None}
@@ -643,6 +656,7 @@ def _format_option(
     first_feed: int | None = None
     last_feed: int | None = None
     ride_fares: list[list[dict[str, Any]]] = []
+    fares_withheld = False
     feeds_used: list[int] = []
     for leg in legs:
         if leg[0] == "ride":
@@ -659,13 +673,15 @@ def _format_option(
             if feed_index not in feeds_used:
                 feeds_used.append(feed_index)
             leg_fares = _fares_for(fares, feed.import_id, gtfs_route)
+            fares_withheld = fares_withheld or feed.kind not in FARE_SOURCE_KINDS
             ride_fares.append(leg_fares)
             arrival = arrives
             out_legs.append({
                 "type": "ride",
                 "mode": mode_of(route_type),
                 "route_type": route_type,
-                "timing": "scheduled",
+                # A community feed reconstructs times between the published ones, so they are approximate.
+                "timing": "approximate" if feed.kind == KIND_COMMUNITY else "scheduled",
                 "source": {
                     "import_id": feed.import_id,
                     "name": feed.source_name,
@@ -713,7 +729,7 @@ def _format_option(
         "arrives_at": _local_iso(net.feeds[last_feed].zone, arrival),
         "duration_minutes": round((arrival - begin) / 60),
         "wait_minutes": max(0, (first_departs - start - pre_walk) // 60) if now_mode else None,
-        "fare": _fare_summary(ride_fares),
+        "fare": _fare_summary(ride_fares, fares_withheld),
         "labels": [],
         "legs": out_legs,
     }

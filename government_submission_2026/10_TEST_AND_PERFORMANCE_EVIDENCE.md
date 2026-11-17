@@ -9,21 +9,22 @@ Every result below comes from a real run.
 
 ## Which code was tested
 Unless the last column says otherwise, every suite was run on the final code of the commit that contains this
-document, on 18 Nov 2026. This round changed the application: editable upcoming transport, the year-banner wording, the
-admin editor and the container's `PORT` handling. So the browser, accessibility and security suites were run again.
+document, on 18 Nov 2026. The application changed again in this round: real mode separated from demonstration mode, the community Namma Metro
+timetable, and exact stop-name matching. So every suite below was run again on the final code.
 
 ## Results
 | # | Suite | Command | Result | Run on |
 |---|---|---|---|---|
 | 1 | Lint | `python -m ruff check .` | All checks passed | Final code |
-| 2 | Unit, API, integration, migration and static front-end tests | `python -m pytest -p no:cacheprovider` | **459 passed, 5 skipped, 0 failed** | Final code |
+| 2 | Unit, API, integration, migration and static front-end tests | `python -m pytest -p no:cacheprovider` | **470 passed, 5 skipped, 0 failed** | Final code |
 | 3 | Static security analysis | `python -m bandit -r backend/app` | No issues | Final code |
 | 4 | Release guard (a push cannot publish an Android release) | `python -m pytest tests/test_release_guard.py` | 4 passed; the same tests fail against the old workflow | Final code |
 | 5 | Browser regression, 3.0 and 4.0 | `python tests/browser/run_browser_checks.py --chrome <msedge.exe>` | 121 passed, 0 failed; other browser problems: 0 | Final code |
-| 6 | Launch screens, 4 languages, phone and desktop | `python tests/browser/launch_check.py <url>` | 264 of 264 | Final code |
-| 7 | End-to-end crawl, forms, user journey, PWA, labels | `python tests/browser/e2e_check.py <url> <admin-key-file> <report>` | 486 of 486; **323 controls, 0 decorative or broken** | Final code |
+| 6 | Launch screens, 4 languages, phone and desktop | `python tests/browser/launch_check.py <url>` | 268 of 268 | Final code |
+| 7 | End-to-end crawl, forms, user journey, PWA, labels | `python tests/browser/e2e_check.py <url> <admin-key-file> <report>` | 1,028 of 1,028; **869 controls, 0 decorative or broken** (demonstration server) | Final code |
 | 8 | Accessibility (axe-core, WCAG 2.1 A/AA and best practice) | `python tests/audit/audit_a11y.py <axe.min.js>` | No violations on 15 screens in 2 themes | Final code |
 | 9 | Security probes against a running server | `python tests/audit/security_probes.py <admin-key-file>` | 34 passed, 0 failed | Final code |
+| 10a | Real-mode screens, as the public service runs: no demo data, a real Metro journey with approximate times and no fare, one entry per station, ODbL attribution | `python tests/browser/real_mode_check.py <url>` | 14 of 14 | Final code |
 | 10 | Upcoming-transport editor, year banner, Kannada labels, at 390 px | `python tests/browser/upcoming_admin_check.py <url> <admin-key-file>` | 17 of 17 | Final code |
 | 11 | Deployment checker against a local server | `python scripts/verify_deployment.py http://127.0.0.1:8020` | Every application check passes. The HTTPS and HSTS checks fail on a laptop without TLS, as expected; they must pass on the public address | Final code |
 | 12 | Container start script with a Render-style `PORT` | `PORT=8061 SEED_DEMO_FEED=1 sh scripts/container_start.sh` | Listened on 8061, loaded both demo feeds, reported 4.0.0-beta.1 | Final code |

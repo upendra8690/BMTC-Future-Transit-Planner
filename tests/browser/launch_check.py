@@ -4,13 +4,18 @@ Usage: python tests/browser/launch_check.py [base_url] [screenshot_dir]
 Drives Microsoft Edge through Playwright at phone and desktop sizes, in every language, and fails on a console error,
 horizontal page scroll, a missing translation, or a flow that does not produce its result.
 """
+import json
 import sys
+import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8020/"
 SHOTS = Path(sys.argv[2]) if len(sys.argv) > 2 else None
+# What the server itself reports, so the screens are compared with the API rather than with fixed numbers.
+STATUS = json.load(urllib.request.urlopen(BASE.rstrip("/") + "/api/data-status", timeout=30))  # noqa: S310
+PROVIDERS = json.load(urllib.request.urlopen(BASE.rstrip("/") + "/api/providers", timeout=30))["providers"]  # noqa: S310
 LANGS = ["en", "kn", "te", "hi"]
 SCREENS = ["home", "journey", "upcoming", "assistant", "providers", "more", "tickets", "live", "metro"]
 results: list[tuple[str, bool, str]] = []
@@ -99,10 +104,16 @@ with sync_playwright() as p:
 
                 page.goto(BASE + "#/providers", wait_until="load")
                 settle(page)
-                check(f"{tag} providers shows demo-only banner", page.locator("#feedStatus .banner").count() == 1)
+                # The "only demonstration data" banner appears exactly when every served feed is a demo feed, and the
+                # demonstration-server banner exactly when the server runs with DEMO_MODE=1.
+                check(f"{tag} providers shows the demo-only banner only when all data is demo",
+                      page.locator("#feedStatus .banner").count() == (1 if STATUS["demo_only"] else 0))
+                check(f"{tag} demonstration banner matches the server's mode",
+                      page.locator("#demoBanner").is_visible() == bool(STATUS["demo_mode"]))
                 check(f"{tag} providers lists 6 blocked integrations",
                       page.locator("#integrationList li").count() == 6)
-                check(f"{tag} providers lists 9 providers", page.locator("#providerList li").count() == 9)
+                check(f"{tag} providers lists every provider the server registers ({len(PROVIDERS)})",
+                      page.locator("#providerList li").count() == len(PROVIDERS))
 
             check(f"{label}/{lang} no console errors", not errors, "; ".join(errors[:3]))
             ctx.close()

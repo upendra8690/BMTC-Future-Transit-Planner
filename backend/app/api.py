@@ -208,9 +208,10 @@ def meta(request: Request) -> dict[str, Any]:
 
 
 @router.get("/features", tags=["system"])
-def features(db: DbSession) -> dict[str, Any]:
+def features(request: Request, db: DbSession) -> dict[str, Any]:
     """What works right now. States: AVAILABLE, NO_DATA, UNAVAILABLE (needs an authorisation), PLANNED."""
-    return {"version": APP_VERSION, "features": catalogue.feature_states(db)}
+    return {"version": APP_VERSION, "demo_mode": request.app.state.settings.demo_mode,
+            "features": catalogue.feature_states(db)}
 
 
 @router.get("/services", tags=["system"])

@@ -1396,6 +1396,7 @@
       return t("journey.fare_several", { list: list });
     }
     if (fare.code === "CHANGES_NOT_PRICED") return t("journey.fare_changes");
+    if (fare.code === "NOT_VERIFIED") return t("journey.fare_not_verified");
     return t("journey.fare_not_in_feed");
   }
 
@@ -1418,7 +1419,9 @@
         arr: formatClockTime(leg.arrives_at),
         minutes: fmtNum(leg.duration_minutes)
       })) + "</span> " + badge(leg.source.classification) +
-      ' <span class="muted">' + esc(leg.source.name) + "</span></li>";
+      ' <span class="muted">' + esc(leg.source.name) + "</span>" +
+      (leg.timing === "approximate" ? '<br><span class="muted small">' + esc(t("journey.timing_approximate")) + "</span>" : "") +
+      "</li>";
   }
 
   function sourcesHtml(data) {
@@ -2400,6 +2403,11 @@
       });
       state.features = map;
       state.version = data.version;
+      var banner = document.getElementById("demoBanner");
+      if (banner) {
+        banner.textContent = data.demo_mode ? t("demo.banner") : "";
+        banner.hidden = !data.demo_mode;
+      }
       var version = document.getElementById("splashVersion");
       if (version) version.textContent = t("more.version", { version: data.version });
     } catch (_) {
@@ -2877,7 +2885,8 @@
       ? t("providers.coverage", { from: formatCalendarDate(f.feed_start_date), to: formatCalendarDate(f.feed_end_date) }) : "";
     return '<li><div><div class="title">' + esc(f.source) + " " + badge(f.classification) + "</div>" +
       '<div class="muted small">' + esc(coverage) + (f.expires_soon ? " · " + esc(t("providers.expires_soon")) : "") + "</div>" +
-      (f.demo ? '<div class="muted small">' + esc(t("providers.demo_feed")) + "</div>" : "") + "</div>" +
+      (f.demo ? '<div class="muted small">' + esc(t("providers.demo_feed")) + "</div>" : "") +
+      (f.community ? '<div class="muted small">' + esc(t("providers.community_feed", { licence: f.license || "" })) + "</div>" : "") + "</div>" +
       '<span class="chip state-' + (FEED_CHIP[f.state] || "no_data") + '">' + esc(t("providers.feed_state." + f.state)) + "</span></li>";
   }
 
@@ -3327,6 +3336,7 @@
     if (savedClass === "OFFICIAL_VERIFIED" || savedClass === "UNVERIFIED_FEED") state.classification = savedClass;
     setLanguage(state.lang);
     syncOnlineState();
+    loadFeatures();
     // The skip link moves focus to the page content without changing the address. Following it as a plain link
     // would change the route, and the visitor would lose the page they were on.
     var skip = document.querySelector(".skip-link");

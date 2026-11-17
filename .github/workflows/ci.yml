@@ -43,19 +43,30 @@ jobs:
       - name: Build the image
         run: docker build -t bengaluru-transit-planner:ci .
       # PORT=10000 is what Render sets for a web service; the app must listen on it.
-      - name: Start the container with the demo feed, on Render's port
-        run: docker run -d --name planner -p 8000:10000 -e PORT=10000 -e SEED_DEMO_FEED=1 bengaluru-transit-planner:ci
-      - name: Health, features, upcoming transport, a bus + Metro plan and the security headers
+      - name: Start a demonstration container (DEMO_MODE=1) on Render's port
+        run: docker run -d --name planner -p 8000:10000 -e PORT=10000 -e DEMO_MODE=1 bengaluru-transit-planner:ci
+      - name: Demonstration mode - health, version, page, upcoming transport, a demo journey, a refused payment, CSP
         run: |
           for i in $(seq 1 45); do curl -sf http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
           curl -sf http://127.0.0.1:8000/api/health
-          curl -sf http://127.0.0.1:8000/api/features | python3 -c "import json,sys; v=json.load(sys.stdin)['version']; assert v.startswith('4.'), v; print('version', v)"
+          curl -sf http://127.0.0.1:8000/api/features | python3 -c "import json,sys; d=json.load(sys.stdin); v=d['version']; assert v.startswith('4.') and d['demo_mode'] is True, d; print('version', v)"
           curl -sf http://127.0.0.1:8000/ | grep -q "<title>Bengaluru Transit Planner</title>"
           curl -sf http://127.0.0.1:8000/api/upcoming | python3 -c "import json,sys; p=json.load(sys.stdin)['projects']; assert p and all(x['in_planner'] is False for x in p), p; print(len(p), 'upcoming entries')"
-          curl -sf http://127.0.0.1:8000/api/data-status | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['demo_only'] and not d['realtime'], d; print(len(d['feeds']), 'demo feeds')"
-          curl -sf "http://127.0.0.1:8000/api/plan?origin=Demo%20Lake%20View&destination=Demo%20Metro%20Hub&classification=UNVERIFIED_FEED&date=2027-01-04" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['options'] and d['realtime'] is False, d; print(len(d['options']), 'journey options')"
+          curl -sf http://127.0.0.1:8000/api/data-status | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['demo_mode'] and not d['realtime'], d; print(len(d['feeds']), 'feeds')"
+          curl -sf "http://127.0.0.1:8000/api/plan?origin=Demo%20Lake%20View&destination=Demo%20Metro%20Hub&classification=UNVERIFIED_FEED&date=2027-01-04" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['options'] and d['realtime'] is False, d; print(len(d['options']), 'demo journey options')"
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/api/integrations/payments/request)" = "503"
           curl -sI http://127.0.0.1:8000/ | grep -i "content-security-policy"
-      - name: Container log
+      - name: Start a real-mode container (the public default) on another port
+        run: docker run -d --name real -p 8001:10000 -e PORT=10000 bengaluru-transit-planner:ci
+      - name: Real mode - no invented data; the community Metro timetable plans a journey with approximate times
+        run: |
+          for i in $(seq 1 45); do curl -sf http://127.0.0.1:8001/api/health > /dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:8001/api/data-status | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['demo_mode'] is False and not any(f['demo'] for f in d['feeds']) and any(f['kind'] == 'COMMUNITY' for f in d['feeds']), d; print([f['source'] for f in d['feeds']])"
+          curl -sf "http://127.0.0.1:8001/api/plan?origin=Demo%20Lake%20View&destination=Demo%20Metro%20Hub&classification=UNVERIFIED_FEED" | python3 -c "import json,sys; d=json.load(sys.stdin); assert not d['options'], d; print('demo stops not served')"
+          curl -sf "http://127.0.0.1:8001/api/plan?origin=Indiranagar&destination=Jayanagar&classification=UNVERIFIED_FEED&modes=metro&date=2026-12-01" | python3 -c "import json,sys; d=json.load(sys.stdin); o=d['options'][0]; r=[l for l in o['legs'] if l['type']=='ride']; assert r[-1]['to']['name']=='Jayanagar' and all(l['timing']=='approximate' for l in r) and o['fare']['code'] in ('NOT_VERIFIED','CHANGES_NOT_PRICED'), o; print([l['route_number'] for l in r])"
+          curl -sf "http://127.0.0.1:8001/api/plan?origin=Indiranagar&destination=Jayanagar&modes=metro&date=2026-12-01" | python3 -c "import json,sys; d=json.load(sys.stdin); assert not d['options'], d; print('officially verified: none, as expected')"
+      - name: Container logs
         if: always()
-        run: docker logs planner
+        run: |
+          docker logs planner
+          docker logs real

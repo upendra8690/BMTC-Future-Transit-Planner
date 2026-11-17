@@ -843,3 +843,17 @@ body:not([data-view="tools"]) .year-picker { display: none; }
 .align-end {
   align-self: end;
 }
+
+/* Shown on every screen of a demonstration server (DEMO_MODE=1). */
+.banner.demo-mode {
+  margin: 0 0 12px;
+  border-left: 6px solid #b45309;
+  background: #fff7ed;
+  color: #7c2d12;
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .banner.demo-mode {
+  background: #431407;
+  color: #ffedd5;
+}

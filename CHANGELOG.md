@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased (branch `v4`) — real Namma Metro data; real mode separated from demonstration mode, 2026-11-18
+- **Real mode is the default.** `DEMO_MODE` is off by default, and the public service never serves the invented
+  SYNTHETIC_DEMO feeds, even if one is loaded. A demonstration server sets `DEMO_MODE=1` and shows a banner on every
+  screen.
+  - Implementation: one per-request switch (`backend/app/demo.py`) filters imports in every timetable query and in
+    the data status.
+  - `render.yaml` sets `DEMO_MODE=0`, and the container seeds demo feeds only in demonstration mode.
+- **Real Namma Metro data.** The community bmrcl-gtfs feed is included: Purple 37, Green 32 and Yellow 16 stations,
+  valid 17 Aug 2026 – 17 Aug 2027, under ODbL, pinned by SHA-256 in `reference_data/namma_metro_community/`.
+  - **Loading.** `scripts/load_community_metro.py` imports it as kind COMMUNITY, so it is always "Unverified feed".
+    The Docker image already contains it, so a cold start needs no import.
+  - **Planner labels.** The planner marks its times `approximate`. It never shows its fares, which the project
+    estimated: fare code `NOT_VERIFIED`. Only official sources, or demo sources on a demonstration server, show fares.
+  - **Station list.** Each station appears once, with its platforms merged.
+  - **Not used.** The BMTC community feed (bmtc-gtfs) is built from the Namma BMTC app's data interface, so it is not
+    used.
+- **Fixed: a typed station name could match a different station.** "Jayanagar" matched "Vijayanagar", so the planner
+  answered with a trip to Vijayanagar. Exact names now win; partial names still find every match.
+  - Applies to `/api/plan` and `/api/journey`.
+  - Two tests fail on the old matching and pass now.
+- The live-information notice now reads: "Live vehicle information is currently unavailable. The information shown is
+  scheduled data, not live tracking."
+- **Tests.** `tests/test_demo_mode.py` (11), `tests/browser/real_mode_check.py` (14 checks), and CI starting a
+  demonstration container and a real-mode container from one image. `scripts/verify_deployment.py` checks either
+  mode.
+
 ## Unreleased (branch `v4`) — separate 4.0 deployment; editable upcoming transport, 2026-11-18
 - **Render.** `render.yaml` now defines only the new service `bengaluru-transit-planner-v4` (branch `v4`, Docker,
   Singapore, health check `/api/health`), so it cannot touch the 3.0 service.

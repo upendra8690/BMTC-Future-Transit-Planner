@@ -31,6 +31,8 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
     base: dict = {
         "database_url": f"sqlite:///{(tmp_path / 'test.db').as_posix()}",
         "admin_api_key": ADMIN_KEY,
+        # The tests below exercise a demonstration server; tests/test_demo_mode.py covers the public (real) mode.
+        "demo_mode": True,
         "max_upload_bytes": 5 * 1024 * 1024,
         "max_uncompressed_bytes": 50 * 1024 * 1024,
         "max_zip_members": 50,

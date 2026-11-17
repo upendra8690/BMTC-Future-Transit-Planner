@@ -3,7 +3,8 @@
 
   python scripts/seed_demo_feed.py
 
-Does nothing if any GTFS import (completed or rejected) is already recorded, so it is safe to run on every start.
+Does nothing if a demonstration import (completed or rejected) is already recorded, so it is safe to run on every
+start. Only a demonstration server (DEMO_MODE=1) serves these feeds; see backend/app/demo.py.
 The feed is invented demonstration data, imported as kind SYNTHETIC_DEMO, and is never official BMTC timetable data.
 Exit codes: 0 seeded or nothing to do, other values come from the importer.
 """
@@ -20,7 +21,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from app.config import Settings  # noqa: E402
 from app.database import Database  # noqa: E402
-from app.models import GtfsImport  # noqa: E402
+from app.models import KIND_SYNTHETIC, DataSource, GtfsImport  # noqa: E402
 from sqlalchemy import func, select  # noqa: E402
 
 
@@ -29,10 +30,14 @@ def main() -> int:
     db = Database(settings.database_url)
     db.create_schema()
     with db.session() as session:
-        existing = session.scalar(select(func.count()).select_from(GtfsImport))
+        existing = session.scalar(
+            select(func.count()).select_from(GtfsImport)
+            .join(DataSource, DataSource.id == GtfsImport.data_source_id)
+            .where(DataSource.kind == KIND_SYNTHETIC)
+        )
     db.dispose()
     if existing:
-        print(f"seed_demo_feed: {existing} import(s) already recorded, nothing to do")
+        print(f"seed_demo_feed: {existing} demonstration import(s) already recorded, nothing to do")
         return 0
 
     import datetime as dt

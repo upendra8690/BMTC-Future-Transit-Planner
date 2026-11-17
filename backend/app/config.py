@@ -92,6 +92,9 @@ class Settings:
     min_transfer_minutes: float = 3.0
     max_transfer_walk_m: int = 300
     walk_speed_kmph: float = 4.8
+    # Demonstration mode serves the invented SYNTHETIC_DEMO feeds. Off by default, so the public service shows only
+    # real information; a demonstration server sets DEMO_MODE=1 (see app/demo.py).
+    demo_mode: bool = False
 
     @classmethod
     def from_env(cls, env_file: Path | None = None) -> Settings:
@@ -130,4 +133,5 @@ class Settings:
             min_transfer_minutes=_get_float("MIN_TRANSFER_MINUTES", 3.0, low=0.0, high=60.0),
             max_transfer_walk_m=_get_int("MAX_TRANSFER_WALK_M", 300, low=0, high=1000),
             walk_speed_kmph=_get_float("WALK_SPEED_KMPH", 4.8, low=1.0, high=10.0),
+            demo_mode=os.environ.get("DEMO_MODE", "").strip().lower() in ("1", "true", "yes", "on"),
         )

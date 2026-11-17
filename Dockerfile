@@ -19,11 +19,13 @@ COPY dashboard ./dashboard
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
 COPY scripts ./scripts
+COPY reference_data ./reference_data
 
 # The service runs as an unprivileged user. Only the data folder (database and backups) is writable.
 RUN groupadd --system --gid 10001 planner \
     && useradd --system --uid 10001 --gid planner --home-dir /app --shell /usr/sbin/nologin planner \
     && mkdir -p /app/data/backups \
+    && DATABASE_URL=sqlite:////app/data/planner.db python scripts/load_community_metro.py \
     && chown -R planner:planner /app/data
 
 ENV DATABASE_URL=sqlite:////app/data/planner.db \

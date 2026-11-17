@@ -40,11 +40,11 @@ Column key:
 ## B. Namma Metro
 | Feature | FE | BE | DB | Data | Status | Evidence and notes |
 |---|---|---|---|---|---|---|
-| Lines | Metro | routes API (Metro type) | GTFS tables | Demo Metro feed | DEMO ONLY | e2e |
-| Stations and station search | Metro | stops API | GTFS tables | Demo Metro feed | DEMO ONLY | e2e forms |
-| Metro-to-Metro interchange | Plan | `/api/plan` | — | Demo Metro feed | PARTIAL | The planner handles transfers, but the demo feed has one Metro line, so a line-to-line change cannot be shown |
-| Metro journey planning | Plan, "Metro only" | `/api/plan?modes=metro` | — | Demo Metro feed | DEMO ONLY | e2e step 5 (Demo Metro Central to Demo Metro Tech Park) |
-| Bus + Metro journeys | Plan | `/api/plan` | — | Both demo feeds | DEMO ONLY | e2e step 6: bus, walk, Metro |
+| Lines | Metro | routes API (Metro type) | GTFS tables | Community Metro feed (real, unverified) | PARTIAL | Real Purple, Green and Yellow lines from an unofficial community reconstruction; not BMRCL-verified; the elevated Pink Line is missing |
+| Stations and station search | Metro | metro stations API | GTFS tables | Community Metro feed (real, unverified) | PARTIAL | 85 real stations; each station is listed once (platforms merged); real-mode browser check |
+| Metro-to-Metro interchange | Plan | `/api/plan` | — | Community Metro feed (real, unverified) | PARTIAL | Real changes at Majestic and RV Road (Whitefield to Electronic City: Purple, Green, Yellow); approximate times |
+| Metro journey planning | Plan, "Metro only" | `/api/plan?modes=metro` | — | Community Metro feed (real, unverified) | PARTIAL | Real journeys with approximate times and no fares (pytest, real-mode browser check, CI real-mode container) |
+| Bus + Metro journeys | Plan | `/api/plan` | — | Demo feeds (demonstration server only) | DEMO ONLY | No real bus data exists in the app; e2e step 6 on a demonstration server |
 | Station facilities | — | — | — | No licensed dataset | NOT IMPLEMENTED | |
 | Ticketing links | Tickets, Metro | — | — | Official BMRCL website link | PASS | Points to official channels; sells nothing |
 
@@ -101,14 +101,14 @@ This application is not, and does not imitate, the official Namma BMTC or Namma 
 | Privacy: "Delete my data" | PASS | e2e: server records, device lists and device key all removed |
 | Administration: GTFS import, validation, verification, backup | PASS | Regression and e2e. Only sources of kind OFFICIAL can be verified; the demo source is refused |
 | Travel assistant | DEMO ONLY | Rule-based, not AI; English questions only; answers come from the timetable API; refuses live, ticket and payment questions |
-| Every control does something | PASS | e2e: 323 of 323 controls on 20 screens produced an effect |
+| Every control does something | PASS | e2e: 869 of 869 controls on 20 screens produced an effect |
 
 ## Totals
 | Status | Count of rows above |
 |---|---|
 | PASS | 20 |
-| DEMO ONLY | 13 |
-| PARTIAL | 9 |
+| DEMO ONLY | 10 |
+| PARTIAL | 12 |
 | AWAITING AUTHORISATION | 7 |
 | BLOCKED | 0 |
 | FAIL | 0 |

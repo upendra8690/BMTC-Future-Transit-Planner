@@ -4,8 +4,13 @@ Checked on 17 November 2026. The live copy is served by the application at `GET 
 `GET /api/integrations`, and appears on its "Data and providers" screen.
 
 **Today no official data is loaded and no provider is connected. No permission has been requested and no credentials
-exist.** The application uses no private or reverse-engineered interface. It does not use community feeds copied from
-the operators' apps: such feeds exist publicly, but their reuse has not been authorised.
+exist.**
+- **Private interfaces.** The application uses no private or reverse-engineered interface.
+- **Real data from a community feed.** One openly licensed community feed is used: the Namma Metro timetable
+  reconstructed by the bmrcl-gtfs project from BMRCL's published timetables and OpenStreetMap (ODbL, row 14). It is
+  labelled unverified, its times are marked approximate, and its fares are never shown.
+- **Feeds not used.** Community feeds built from an operator's app (such as bmtc-gtfs, from the Namma BMTC app's data
+  interface) are not used.
 
 ## Summary
 | # | Organisation | Data or API | Permission | Credentials | Implementation |
@@ -21,8 +26,10 @@ the operators' apps: such feeds exist publicly, but their reuse has not been aut
 | 9 | An issuing bank, with the operator | NCMC card services | Not requested | None | Adapter refuses (503 `NEEDS_BANK_INTEGRATION`) |
 | 10 | OpenStreetMap Foundation | Map tiles | Not needed (public tile policy) | None needed | Connected, with attribution |
 | 11 | Official websites and public numbers | Links only: BMTC, BMRCL, DULT, Indian Railways, airport, traffic police, tourism, ERSS 112 | Not needed for links | — | Connected; all 18 links opened with status 200 on 17 Nov 2026 |
-| 12 | This project | Invented demonstration feeds | Not needed | — | Connected; labelled SYNTHETIC everywhere |
+| 12 | This project | Invented demonstration feeds | Not needed | — | Served only by a demonstration server (DEMO_MODE=1), never by the public service; labelled SYNTHETIC everywhere |
 | 13 | Press and secondary sources | Status of upcoming projects (no timetables) | Not needed (cited, not copied) | — | Connected; each entry links its source and check date |
+| 14 | bmrcl-gtfs community project (unofficial) | Namma Metro Purple, Green, Yellow: stations and reconstructed timetables, valid 17 Aug 2026 to 17 Aug 2027 | Not needed (ODbL 1.0, with attribution) | None needed | Connected as kind COMMUNITY ("Unverified feed"); approximate times; fares never shown; file pinned by SHA-256 (`reference_data/namma_metro_community/`) |
+| 15 | bmtc-gtfs community project | BMTC routes and timetables | ODbL, but built from the Namma BMTC app's data interface | — | **Not used**, by the owner's decision: derived from an operator's app |
 
 ## Details
 ### 1–2. DULT Transport Data Hub: BMTC and BMRCL static GTFS
