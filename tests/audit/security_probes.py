@@ -54,7 +54,11 @@ check("device B cannot see device A's saved routes", c.get("/api/saved-routes", 
 del_b = c.delete(f"/api/saved-routes/{saved.json()['id']}", headers=B)
 check("device B cannot delete device A's saved route", del_b.status_code == 404, del_b.status_code)
 check("device A's route is still there", len(c.get("/api/saved-routes", headers=A).json()["saved"]) == 1, "")
-check("saved routes need a device key", c.get("/api/saved-routes").status_code == 400, c.get("/api/saved-routes").status_code)
+keyless_write = c.post("/api/saved-routes", json={"gtfs_route_id": route["gtfs_route_id"], "classification": "UNVERIFIED_FEED", "label": "x"})
+check("saving a route needs a device key", keyless_write.status_code == 400, keyless_write.status_code)
+keyless_read = c.get("/api/saved-routes")
+check("listing without a device key discloses nothing (finding S6)",
+      keyless_read.status_code == 200 and keyless_read.json()["saved"] == [], keyless_read.text[:80])
 
 # 5. Injection-shaped input is handled as data.
 for q in ("' OR 1=1--", "%' UNION SELECT name FROM sqlite_master--", "\\", "_%_"):

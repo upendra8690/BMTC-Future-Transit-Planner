@@ -7,7 +7,7 @@
  * preferences, and every admin answer, are never kept. A search with typed words (a non-empty q, for a route or stop
  * name) is never kept either. Requests to other origins (map tiles) are left alone.
  */
-var CACHE = "bmtc-planner-shell-v4";
+var CACHE = "bmtc-planner-shell-v5";
 var SHELL_PREFIX = "bmtc-planner-shell-";
 var TIMETABLE_CACHE = "bmtc-planner-timetable-v1";
 var TIMETABLE_PREFIX = "bmtc-planner-timetable-";

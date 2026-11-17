@@ -1,5 +1,23 @@
 # Changelog
 
+## 4.0.0-beta.1 — 2026-11-17 (branch `v4`, public-demo candidate, not merged to `main`)
+
+### Added
+- Journey planner `modes` filter: bus only, Metro only, or both; mixed journeys are labelled "Bus + Metro".
+- Upcoming transport registry (`/api/upcoming`) with sourced, dated statuses and a validator that rejects a future service marked as operating.
+- Provider registry (`/api/providers`), feed freshness (`/api/data-status`) and the "Data and providers" screen.
+- Provider integration adapters (`/api/integrations`) for live data, tickets, passes, Metro QR, payments and NCMC. Each refuses with 503 until an authorised provider exists.
+- Rule-based travel assistant (`/api/assistant`, "Travel assistant" screen). It answers only through the app's own data endpoints.
+- `render.yaml` for a separate 4.0 staging service; a CI container job; CI on pushes to `v4`.
+- `LAUNCH_READINESS.md` and `docs/launch/` (feature matrix, sources, integrations, security, privacy and accessibility, test results, deployment, limitations, release notes, demo guide).
+- `tests/test_launch.py` (43 tests) and `tests/browser/launch_check.py` (264 browser checks).
+
+### Fixed
+- Security probe for keyless saved-route reads now matches documented behaviour (finding S6).
+
+### Tests
+ruff clean; pytest 425 passed, 5 skipped; browser regression 121/121; launch browser checks 264/264; axe 15 screens × 2 themes clean; security probes 34/34; bandit and pip-audit clean; load test 0 errors.
+
 ## 4.0.0-alpha.3 — 2026-11-16 (branch `v4`, not released)
 
 Government-readiness audit: fixes found by testing, and the evaluation documents.

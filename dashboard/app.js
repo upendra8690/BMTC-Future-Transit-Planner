@@ -1158,7 +1158,8 @@
   // The planner: up to two changes, from /api/plan. Every time is scheduled; live positions are never shown.
   var LABEL_KEYS = {
     EARLIEST_ARRIVAL: "journey.label_earliest_arrival",
-    FEWEST_CHANGES: "journey.label_fewest_changes"
+    FEWEST_CHANGES: "journey.label_fewest_changes",
+    BUS_AND_METRO: "journey.label_bus_metro"
   };
 
   function renderJourney() {
@@ -1185,6 +1186,12 @@
       '<label><input type="radio" name="changes" value="1"> ' + esc(t("journey.changes_1")) + "</label>" +
       '<label><input type="radio" name="changes" value="2" checked> ' + esc(t("journey.changes_2")) + "</label>" +
       "</div></fieldset>" +
+      '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.modes_legend")) + "</legend>" +
+      '<div class="checks">' +
+      '<label><input type="radio" name="modes" value="all" checked> ' + esc(t("journey.modes_all")) + "</label>" +
+      '<label><input type="radio" name="modes" value="bus"> ' + esc(t("journey.modes_bus")) + "</label>" +
+      '<label><input type="radio" name="modes" value="metro"> ' + esc(t("journey.modes_metro")) + "</label>" +
+      "</div></fieldset>" +
       '<div class="toolbar"><button type="submit">' + esc(t("journey.submit")) + "</button></div>" +
       "</form>" +
       '<div id="journeyResults" style="margin-top:12px" aria-live="polite"></div></section>'
@@ -1205,7 +1212,8 @@
       origin: origin,
       destination: destination,
       classification: state.classification,
-      max_changes: String(form.elements.changes.value || "2")
+      max_changes: String(form.elements.changes.value || "2"),
+      modes: ["all", "bus", "metro"].indexOf(form.elements.modes.value) !== -1 ? form.elements.modes.value : "all"
     };
     if (when === "date") {
       if (!isIsoDate(form.elements.date.value)) {
@@ -2153,7 +2161,7 @@
   // itself instead of pretending to work.
   var BENGALURU = [12.9716, 77.5946];
   var METRO_TYPES = [1, 400, 401, 402];
-  var NEW_SECTIONS = ["home", "nearby", "live", "tickets", "metro", "favourites", "account", "more"];
+  var NEW_SECTIONS = ["home", "nearby", "live", "tickets", "metro", "favourites", "account", "more", "upcoming", "assistant", "providers"];
 
   // Small line icons, drawn for this app.
   var ICONS = {
@@ -2167,6 +2175,8 @@
     airport: '<path d="M3 14l18-5-2-2-6 1-5-5-2 1 3 5-4 1-2-2-1 1 2 4z"/>',
     sos: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
     more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+    assist: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+    upcoming: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M9 15l2 2 4-4"/>',
   };
 
   function icon(name) {
@@ -2231,6 +2241,8 @@
       tile("#/tickets", "tickets", t("nav.tickets"), "bus_tickets", "orange") +
       tile("#/favourites", "favourites", t("nav.favourites"), "favourites", "pink") +
       tile("#/more/airport", "airport", t("home.airport"), null, "sky") +
+      tile("#/assistant", "assist", t("nav.assistant"), "ai_assistant", "blue") +
+      tile("#/upcoming", "upcoming", t("nav.upcoming"), "upcoming_transport", "violet") +
       tile("#/more/sos", "sos", t("home.sos"), "sos_call", "danger") +
       tile("#/more", "more", t("nav.more"), null, "slate") +
       "</section>"
@@ -2353,10 +2365,15 @@
     await fillPanel(document.getElementById("metroStations"), token, async function () {
       var params = new URLSearchParams({ classification: state.classification, q: query });
       var data = await api("/api/metro/stations?" + params.toString());
-      if (!data.stations.length) {
-        return '<div class="empty">' + esc(query ? t("metro.no_stations_match") : messageFor(data.message_code)) + "</div>";
-      }
-      return '<ul class="list">' + data.stations.map(function (st) {
+      return metroStationsHtml(data, query);
+    }, seq);
+  }
+
+  function metroStationsHtml(data, query) {
+    if (!data.stations.length) {
+      return '<div class="empty">' + esc(query ? t("metro.no_stations_match") : messageFor(data.message_code)) + "</div>";
+    }
+    return '<ul class="list">' + data.stations.map(function (st) {
         var lines = st.lines.map(function (line) {
           var colour = /^[0-9A-Fa-f]{6}$/.test(line.color || "") ? "#" + line.color : "var(--scenario)";
           return '<span class="line-chip" style="border-color:' + colour + '">' + esc(line.route_number) + "</span>";
@@ -2364,7 +2381,6 @@
         return '<li><div><div class="title">' + esc(st.name) + '</div><div class="muted">' + lines + "</div></div>" +
           '<div class="row-actions"><a class="button secondary" href="#/stops/' + esc(encodeURIComponent(st.id)) + '">' + esc(t("stops.departures")) + "</a></div></li>";
       }).join("") + "</ul>";
-    }, seq);
   }
 
   async function renderFavourites(args, token) {
@@ -2443,7 +2459,7 @@
       '<p><a class="button-link danger-link" href="tel:112">' + esc(t("sos.call")) + "</a></p></section>" +
       '<section class="card"><h2>' + esc(t("more.official")) + '</h2><div id="moreLinks"></div></section>' +
       '<section class="card"><h2>' + esc(t("more.tools")) + '</h2><ul class="list">' +
-      [["#/routes", "nav.routes"], ["#/stops", "nav.stops"], ["#/scenarios", "nav.scenarios"], ["#/compare", "nav.compare"], ["#/sources", "nav.sources"], ["#/admin", "nav.admin"]]
+      [["#/assistant", "nav.assistant"], ["#/upcoming", "nav.upcoming"], ["#/providers", "nav.providers"], ["#/routes", "nav.routes"], ["#/stops", "nav.stops"], ["#/scenarios", "nav.scenarios"], ["#/compare", "nav.compare"], ["#/sources", "nav.sources"], ["#/admin", "nav.admin"]]
         .map(function (pair) {
           return '<li><a href="' + pair[0] + '">' + esc(t(pair[1])) + "</a></li>";
         }).join("") + "</ul></section>" +
@@ -2517,6 +2533,171 @@
     }, wait);
   }
 
+  // ---------------------------------------------------------------- upcoming transport (information only)
+  var PROJECT_CHIP = { OPERATING: "available", ANNOUNCED: "planned", UNDER_CONSTRUCTION: "planned", PLANNED: "planned", AWAITING_CONFIRMATION: "no_data", UNAVAILABLE: "unavailable" };
+
+  function projectItem(p) {
+    var chip = PROJECT_CHIP[p.status] || "unavailable";
+    var mode = MODES.indexOf(p.mode) !== -1 ? p.mode : "other";
+    var when = p.status === "OPERATING" && p.opened_on
+      ? t("upcoming.opened", { date: formatCalendarDate(p.opened_on) })
+      : p.expected ? t("upcoming.expected", { text: p.expected }) : "";
+    var links = (p.sources || []).map(function (s) {
+      var href = safeHref(s.url);
+      return href ? '<li><a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + "</a></li>" : "";
+    }).join("");
+    return '<li class="project"><div><div class="title">' + esc(p.name) + "</div>" +
+      '<div class="muted small"><span class="mode-tag">' + esc(t("mode." + mode)) + "</span> " + esc(when) + "</div>" +
+      "<p>" + esc(p.detail || "") + "</p>" +
+      '<div class="muted small">' + esc(t("upcoming.sources")) + '</div><ul class="plain-links">' + links + "</ul>" +
+      '<div class="muted small">' + esc(t("upcoming.verified", { date: formatCalendarDate(p.verified_on), note: p.confidence || "" })) + "</div></div>" +
+      '<span class="chip state-' + chip + '">' + esc(t("upcoming.status." + p.status)) + "</span></li>";
+  }
+
+  async function renderUpcoming(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView('<section class="card"><div class="card-head"><h2>' + esc(t("upcoming.title")) + "</h2>" + featureChip("upcoming_transport") + "</div>" +
+      '<p class="muted">' + esc(t("upcoming.intro")) + '</p><div id="upcomingList"></div></section>');
+    await fillPanel(document.getElementById("upcomingList"), token, async function () {
+      var data = await api("/api/upcoming");
+      return '<p class="notice" role="note">' + esc(t("upcoming.note")) + "</p>" +
+        '<ul class="list project-list">' + data.projects.map(projectItem).join("") + "</ul>" +
+        '<p class="muted small">' + esc(t("more.checked", { date: formatCalendarDate(data.checked) })) + "</p>";
+    });
+  }
+
+  // ---------------------------------------------------------------- travel assistant (rule-based)
+  // The server only says which of the app's own requests answers the question; the answer shown is that request's
+  // result, with its classification and source. Nothing here is written by a language model.
+  var ASSIST_EXAMPLES = ["Demo Central to Demo Junction", "Demo Lake View to Demo Metro Hub", "route DEMO-1", "metro stations", "stops near me", "When will my bus arrive?"];
+
+  async function renderAssistant(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView('<section class="card"><div class="card-head"><h2>' + esc(t("assist.title")) + "</h2>" + featureChip("ai_assistant") + "</div>" +
+      '<p class="muted">' + esc(t("assist.intro")) + "</p>" +
+      '<form id="assistForm" class="toolbar" role="search">' +
+      '<label class="field" style="flex:1 1 280px">' + esc(t("assist.label")) +
+      '<input name="q" type="search" required maxlength="200" autocomplete="off" placeholder="' + esc(t("assist.placeholder")) + '"></label>' +
+      '<button type="submit">' + esc(t("assist.ask")) + "</button></form>" +
+      '<p class="muted small">' + esc(t("assist.english_only")) + "</p>" +
+      '<div class="chips" aria-label="' + esc(t("assist.examples")) + '">' + ASSIST_EXAMPLES.map(function (q) {
+        return '<button type="button" class="chip-button" data-action="assist-example" data-q="' + esc(q) + '">' + esc(q) + "</button>";
+      }).join(" ") + "</div>" +
+      segmentedClassification() +
+      '<div id="assistAnswer" style="margin-top:12px" aria-live="polite"></div></section>');
+  }
+
+  function assistLink(href, key) {
+    return '<p><a class="button-link secondary" href="' + href + '">' + esc(t(key)) + "</a></p>";
+  }
+
+  async function assistAnswer(intent, params) {
+    var cls = state.classification;
+    switch (intent) {
+      case "journey": {
+        var data = await api("/api/plan?" + new URLSearchParams({ origin: params.origin, destination: params.destination, classification: cls, modes: params.modes || "all" }).toString());
+        return "<p>" + esc(t("assist.journey_intro", { from: params.origin, to: params.destination })) + "</p>" + journeyHtml(data);
+      }
+      case "route": {
+        var routes = await api("/api/routes?" + new URLSearchParams({ classification: cls, q: params.q, limit: "20" }).toString());
+        return "<p>" + esc(t("assist.route_intro", { q: params.q })) + "</p>" + routeListHtml(routes);
+      }
+      case "stop": {
+        var stops = await api("/api/stops?" + new URLSearchParams({ classification: cls, q: params.q, limit: "20" }).toString());
+        return "<p>" + esc(t("assist.stop_intro", { q: params.q })) + "</p>" + stopListHtml(stops.results, false);
+      }
+      case "metro": {
+        var stations = await api("/api/metro/stations?" + new URLSearchParams({ classification: cls, q: params.q || "" }).toString());
+        return "<p>" + esc(t("assist.metro_intro")) + "</p>" + metroStationsHtml(stations, params.q || "");
+      }
+      case "nearby":
+        return "<p>" + esc(t("assist.nearby")) + '</p><p><button type="button" data-action="home-nearby">' + esc(t("home.near_me")) + "</button></p>";
+      case "live":
+        return '<p class="notice" role="note">' + esc(t("assist.live")) + "</p>" + assistLink("#/live", "nav.live");
+      case "tickets":
+        return '<p class="notice" role="note">' + esc(t("assist.tickets")) + "</p>" + assistLink("#/tickets", "nav.tickets");
+      case "emergency":
+        return '<p class="notice" role="alert">' + esc(t("assist.emergency")) + '</p><p><a class="button-link danger-link" href="tel:112">' + esc(t("sos.call")) + "</a></p>";
+      default:
+        return "<p>" + esc(t("assist.help")) + "</p>";
+    }
+  }
+
+  async function submitAssist(question, token) {
+    var box = document.getElementById("assistAnswer");
+    if (!box || !question) return;
+    var seq = ++state.searchToken;
+    box.innerHTML = loadingInline();
+    try {
+      var parsed = await api("/api/assistant?" + new URLSearchParams({ q: question }).toString());
+      var html = await assistAnswer(parsed.intent, parsed.params || {});
+      if (seq !== state.searchToken || token !== state.viewToken || !box.isConnected) return;
+      box.innerHTML = '<p class="muted small">' + esc(t("assist.you_asked", { q: question })) + "</p>" + html +
+        '<p class="muted small">' + esc(t("assist.footer")) + "</p>";
+    } catch (err) {
+      if (seq === state.searchToken && token === state.viewToken && box.isConnected) box.innerHTML = panelError(err, "rerender");
+    }
+  }
+
+  // ---------------------------------------------------------------- data and providers
+  var FEED_CHIP = { CURRENT: "available", EXPIRED: "unavailable", NOT_STARTED: "no_data", UNKNOWN_DATES: "no_data" };
+  var INTEGRATION_CHIP = { CONNECTED: "available", NOT_CONNECTED: "no_data", BLOCKED: "unavailable" };
+
+  function feedItem(f) {
+    var coverage = f.feed_start_date && f.feed_end_date
+      ? t("providers.coverage", { from: formatCalendarDate(f.feed_start_date), to: formatCalendarDate(f.feed_end_date) }) : "";
+    return '<li><div><div class="title">' + esc(f.source) + " " + badge(f.classification) + "</div>" +
+      '<div class="muted small">' + esc(coverage) + (f.expires_soon ? " · " + esc(t("providers.expires_soon")) : "") + "</div>" +
+      (f.demo ? '<div class="muted small">' + esc(t("providers.demo_feed")) + "</div>" : "") + "</div>" +
+      '<span class="chip state-' + (FEED_CHIP[f.state] || "no_data") + '">' + esc(t("providers.feed_state." + f.state)) + "</span></li>";
+  }
+
+  function providerItem(p) {
+    var href = safeHref(p.url);
+    var updated = !p.loads_data ? "" : p.last_successful_update ? t("providers.last_update", { date: utcText(p.last_successful_update) }) : t("providers.never");
+    return '<li><div><div class="title">' + esc(p.provider) + "</div>" +
+      '<div class="muted">' + esc(p.dataset) + "</div>" +
+      '<div class="muted small">' + esc(t("providers.licence", { text: p.licence })) + "</div>" +
+      '<div class="muted small">' + esc(t("providers.permission." + p.permission)) + (updated ? " · " + esc(updated) : "") + "</div>" +
+      '<div class="small">' + esc(p.limitations) + "</div>" +
+      (href ? '<div class="small"><a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(t("more.open_site")) + "</a></div>" : "") + "</div>" +
+      '<span class="chip state-' + (INTEGRATION_CHIP[p.integration] || "no_data") + '">' + esc(t("providers.integration." + p.integration)) + "</span></li>";
+  }
+
+  function integrationItem(i) {
+    var href = safeHref(i.official_url);
+    return '<li><div><div class="title">' + esc(t("integ.cap." + i.capability)) + "</div>" +
+      '<div class="muted small">' + esc(t("providers.needs", { text: i.needs })) + "</div>" +
+      (href ? '<div class="small"><a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(t("more.open_site")) + "</a></div>" : "") + "</div>" +
+      '<span class="chip state-unavailable">' + esc(t("providers.awaiting")) + "</span></li>";
+  }
+
+  async function renderProviders(args, token) {
+    setView('<section class="card"><h2>' + esc(t("providers.feeds")) + '</h2><div id="feedStatus"></div></section>' +
+      '<section class="card"><h2>' + esc(t("providers.integrations_title")) + '</h2><div id="integrationList"></div></section>' +
+      '<section class="card"><h2>' + esc(t("providers.list_title")) + '</h2><p class="muted">' + esc(t("providers.intro")) + '</p><div id="providerList"></div></section>');
+    await Promise.all([
+      fillPanel(document.getElementById("feedStatus"), token, async function () {
+        var data = await api("/api/data-status");
+        var html = '<p class="notice" role="note">' + esc(t("providers.no_live")) + "</p>";
+        if (data.demo_only) html += '<div class="banner unverified">' + esc(t("providers.demo_only")) + "</div>";
+        if (!data.feeds.length) return html + '<div class="empty">' + esc(t("providers.no_feeds")) + "</div>";
+        return html + '<ul class="list">' + data.feeds.map(feedItem).join("") + "</ul>";
+      }),
+      fillPanel(document.getElementById("integrationList"), token, async function () {
+        var data = await api("/api/integrations");
+        return '<ul class="list">' + data.integrations.map(integrationItem).join("") + "</ul>";
+      }),
+      fillPanel(document.getElementById("providerList"), token, async function () {
+        var data = await api("/api/providers");
+        return '<ul class="list">' + data.providers.map(providerItem).join("") + "</ul>" +
+          '<p class="muted small">' + esc(t("more.checked", { date: formatCalendarDate(data.checked) })) + "</p>";
+      })
+    ]);
+  }
+
   var ROUTES = {
     home: renderHome,
     nearby: renderNearby,
@@ -2526,6 +2707,9 @@
     favourites: renderFavourites,
     account: renderAccount,
     more: renderMore,
+    upcoming: renderUpcoming,
+    assistant: renderAssistant,
+    providers: renderProviders,
     routes: renderRoutes,
     stops: renderStops,
     journey: renderJourney,
@@ -2751,6 +2935,12 @@
       case "admin-key-clear":
         forgetAdminKey();
         break;
+      case "assist-example": {
+        var assistForm = document.getElementById("assistForm");
+        if (assistForm) assistForm.elements.q.value = node.getAttribute("data-q") || "";
+        submitAssist(node.getAttribute("data-q") || "", token);
+        break;
+      }
       case "home-nearby":
         state.autoNearby = true;
         location.hash = "#/nearby";
@@ -2797,6 +2987,9 @@
         break;
       case "journeyForm":
         submitJourney(form, token);
+        break;
+      case "assistForm":
+        submitAssist(String(form.elements.q.value || "").trim(), token);
         break;
       case "scenarioForm":
         submitScenario(form, token);

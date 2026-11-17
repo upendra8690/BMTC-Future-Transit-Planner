@@ -21,6 +21,7 @@ ALLOWED_UNTRANSLATED = {"app.brand", "clock.line", "common.pdf", "route.col_seq"
 # Keys whose full name is built at run time from a prefix, such as "cls." + classification code.
 DYNAMIC_PREFIXES = (
     "cls.", "day.", "msgcode.", "feature.state.", "feature.reason.", "feature.name.", "svc.cat.", "mode.",
+    "upcoming.status.", "providers.feed_state.", "providers.permission.", "providers.integration.", "integ.cap.",
 )
 # Storage keys the dashboard may write. The admin key must never be one of them.
 STORED_KEYS = {"clientKey", "lang", "classification", "year", "theme", "lowData", "largeText", "favStops", "recent"}
@@ -120,7 +121,7 @@ BACKEND = Path(__file__).resolve().parents[1] / "backend" / "app"
 # this list fails the test, and so does a listed code that the source no longer sets.
 SERVER_MESSAGE_CODES = {
     "DESTINATION_NOT_FOUND", "DESTINATION_NOT_SERVED", "NEED_BOTH_STOPS", "NOT_COVERED", "NO_DEPARTURES",
-    "NO_DIRECT_SERVICE", "NO_METRO_STATIONS",
+    "NO_DIRECT_SERVICE", "NO_JOURNEY_FOR_MODE", "NO_METRO_STATIONS",
     "NO_OFFICIAL_DATA", "NO_PLANNED_JOURNEY", "NO_SERVICE", "NO_TRIPS", "NO_UNVERIFIED_DATA",
     "ORIGIN_NOT_FOUND", "ORIGIN_NOT_SERVED", "SAME_STOP",
 }

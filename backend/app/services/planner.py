@@ -55,6 +55,12 @@ LOOKBACK_DAYS = 2
 MAX_MATCHES = 200
 METRES_PER_DEGREE = 111_320.0
 CACHE_ENTRIES = 4
+# Travel-mode filters a traveller can choose. None means every mode in the loaded feeds.
+TRAVEL_MODES: dict[str, frozenset[str] | None] = {
+    "all": None,
+    "bus": frozenset({"bus"}),
+    "metro": frozenset({"metro"}),
+}
 ONE_DAY = dt.timedelta(days=1)
 PLAN_NOTE = (
     "Scheduled times from the feeds, with up to two changes. Live bus positions, delays and cancellations are not "
@@ -417,8 +423,15 @@ class _Search:
 
 
 def _search(
-    net: _Network, origins: list[int], start: int, horizon_end: int, rounds: int, change_s: int
+    net: _Network,
+    origins: list[int],
+    start: int,
+    horizon_end: int,
+    rounds: int,
+    change_s: int,
+    allowed: list[bool] | None = None,
 ) -> _Search:
+    """Round-based search. When allowed is given, only patterns marked True may be ridden (travel-mode filter)."""
     count = len(net.nodes)
     brd0 = [NEVER] * count
     brd0_par: list[Any] = [None] * count
@@ -444,6 +457,8 @@ def _search(
         scan: dict[int, int] = {}
         for node in marked:
             for pat, pos in net.node_pats[node]:
+                if allowed is not None and not allowed[pat]:
+                    continue
                 current = scan.get(pat)
                 if current is None or pos < current:
                     scan[pat] = pos
@@ -689,7 +704,9 @@ def _format_option(
             })
     if first_feed is None or last_feed is None:
         raise RuntimeError("planner: a journey was traced without any ride")
+    ride_modes = sorted({leg["mode"] for leg in out_legs if leg["type"] == "ride"})
     option = {
+        "modes": ride_modes,
         "rides": len(ride_fares),
         "changes": len(ride_fares) - 1,
         "departs_at": _local_iso(net.feeds[first_feed].zone, begin),
@@ -734,6 +751,9 @@ def _options(
     formatted[earliest][0]["labels"].append("EARLIEST_ARRIVAL")
     if fewest != earliest:
         formatted[fewest][0]["labels"].append("FEWEST_CHANGES")
+    for item in formatted:
+        if "bus" in item[0]["modes"] and "metro" in item[0]["modes"]:
+            item[0]["labels"].append("BUS_AND_METRO")
     order = sorted(range(len(formatted)), key=lambda i: (formatted[i][1], formatted[i][0]["changes"]))[:limit]
     used: list[int] = []
     for i in order:
@@ -777,13 +797,17 @@ def plan_journeys(
     limit: int = 5,
     on_date: dt.date | None = None,
     now: dt.datetime | None = None,
+    travel_modes: str = "all",
 ) -> dict[str, Any]:
     """Options for a journey from a stop matching origin_query to one matching destination_query.
 
-    Give on_date to plan one service date, or now to plan the next three hours from this instant.
+    Give on_date to plan one service date, or now to plan the next three hours from this instant. travel_modes limits
+    the rides to buses or to Metro; walking between stops is always allowed.
     """
     if (on_date is None) == (now is None):
         raise ValueError("Give either on_date or now, not both and not neither.")
+    if travel_modes not in TRAVEL_MODES:
+        raise ValueError(f"travel_modes must be one of {', '.join(TRAVEL_MODES)}.")
     if not 0 <= max_changes <= MAX_CHANGES_LIMIT:
         raise ValueError(f"max_changes must be between 0 and {MAX_CHANGES_LIMIT}.")
     zone, zone_source = sched.service_zone(session, default_zone)
@@ -794,6 +818,7 @@ def plan_journeys(
         "origin_query": origin_query,
         "destination_query": destination_query,
         "max_changes": max_changes,
+        "travel_modes": travel_modes,
         "options": [],
         "sources": [],
         "message": None,
@@ -866,11 +891,19 @@ def plan_journeys(
     if not any(net.node_pats[node] for node in destinations):
         return _with_message(result, "No scheduled trip serves the destination on this date.", "DESTINATION_NOT_SERVED")
 
-    search = _search(net, origins, start, horizon_end, max_changes + 1, plan.min_transfer_seconds)
+    wanted = TRAVEL_MODES[travel_modes]
+    allowed = None if wanted is None else [mode_of(route[4]) in wanted for route in net.pat_route]
+    search = _search(net, origins, start, horizon_end, max_changes + 1, plan.min_transfer_seconds, allowed)
     fares = _fare_map(session, import_ids)
     options, used = _options(net, search, destinations, start, classification, fares, limit, now_mode=on_date is None)
     result["options"] = options
     result["sources"] = _sources(net, used)
+    if not options and wanted is not None:
+        return _with_message(
+            result,
+            "No journey using only the chosen travel mode was found. Try all modes.",
+            "NO_JOURNEY_FOR_MODE",
+        )
     if not options:
         if on_date is not None:
             text = f"No journey with up to {max_changes} change(s) was found in this timetable for that date."

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, v4]
   pull_request:
 
 permissions:
@@ -34,3 +34,26 @@ jobs:
           python scripts/check_database.py
       - name: Tests
         run: python -m pytest -p no:cacheprovider
+
+  container:
+    name: Container image builds and serves the demo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t bengaluru-transit-planner:ci .
+      - name: Start the container with the demo feed
+        run: docker run -d --name planner -p 8000:8000 -e SEED_DEMO_FEED=1 bengaluru-transit-planner:ci
+      - name: Health, features, upcoming transport, a bus + Metro plan and the security headers
+        run: |
+          for i in $(seq 1 45); do curl -sf http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:8000/api/health
+          curl -sf http://127.0.0.1:8000/api/features | python3 -c "import json,sys; print('version', json.load(sys.stdin)['version'])"
+          curl -sf http://127.0.0.1:8000/api/upcoming > /dev/null
+          curl -sf http://127.0.0.1:8000/api/data-status | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['demo_only'] and not d['realtime'], d; print(len(d['feeds']), 'demo feeds')"
+          curl -sf "http://127.0.0.1:8000/api/plan?origin=Demo%20Lake%20View&destination=Demo%20Metro%20Hub&classification=UNVERIFIED_FEED&date=2027-01-04" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['options'] and d['realtime'] is False, d; print(len(d['options']), 'journey options')"
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/api/integrations/payments/request)" = "503"
+          curl -sI http://127.0.0.1:8000/ | grep -i "content-security-policy"
+      - name: Container log
+        if: always()
+        run: docker logs planner

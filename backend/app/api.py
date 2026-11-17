@@ -40,7 +40,7 @@ from .models import (
 )
 from .schemas import PLANNING_YEARS, DataSourceIn, PreferencesIn, SavedRouteIn, ScenarioIn, VerificationIn
 from .security import client_ip, optional_client_hash, require_admin, require_client_key, safe_filename
-from .services import catalogue, planner
+from .services import assistant, catalogue, integrations, planner, registry
 from .services import scenarios as scn
 from .services import schedule as sched
 from .services.audit import record_audit
@@ -50,7 +50,7 @@ from .services.verification import VerificationError, set_verification
 
 router = APIRouter()
 
-APP_VERSION = "4.0.0-alpha.3"
+APP_VERSION = "4.0.0-beta.1"
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
@@ -208,6 +208,55 @@ def features(db: DbSession) -> dict[str, Any]:
 def services() -> dict[str, Any]:
     """Official websites and public helplines, each checked on the stated date. Links only; nothing is booked here."""
     return catalogue.services_directory()
+
+
+@router.get("/upcoming", tags=["system"])
+def upcoming_transport(request: Request, db: DbSession) -> dict[str, Any]:
+    """Transport projects with a status (OPERATING, ANNOUNCED, UNDER_CONSTRUCTION, PLANNED, AWAITING_CONFIRMATION,
+    UNAVAILABLE), each with its sources and the date they were checked. Information only: never used by the planner."""
+    return registry.upcoming(_service_today(request, db))
+
+
+@router.get("/providers", tags=["system"])
+def provider_registry(db: DbSession) -> dict[str, Any]:
+    """Every outside data source or service: licence, permission status, integration status and limitations."""
+    return registry.providers(db)
+
+
+@router.get("/data-status", tags=["system"])
+def data_freshness(request: Request, db: DbSession) -> dict[str, Any]:
+    """Each active feed and whether its calendar covers today (CURRENT, EXPIRED, NOT_STARTED, UNKNOWN_DATES)."""
+    return registry.data_status(db, _service_today(request, db))
+
+
+@router.get("/integrations", tags=["system"])
+def integration_status() -> dict[str, Any]:
+    """Provider integrations (live vehicles, tickets, passes, Metro QR, payments, NCMC) and what each one needs."""
+    return integrations.status()
+
+
+@router.post("/integrations/{capability}/request", tags=["system"])
+def integration_request(capability: str = ApiPath(..., pattern="^[a-z_]{2,40}$")) -> JSONResponse:
+    """The single entry point for provider actions. With no authorised provider it always refuses with 503 and the
+    official channel; it never returns a ticket, QR code, receipt, balance, payment result or vehicle position."""
+    try:
+        integrations.adapter(capability).request()
+    except integrations.IntegrationUnavailableError as err:
+        status_code = 404 if err.code == "UNKNOWN_CAPABILITY" else 503
+        return JSONResponse(
+            status_code=status_code,
+            content={"detail": "This feature needs an authorised provider that is not connected.",
+                     "capability": err.capability, "code": err.code, "official_url": err.official_url},
+        )
+    raise HTTPException(status_code=500, detail="Integration adapter returned without refusing.")
+
+
+@router.get("/assistant", tags=["system"])
+def assistant_interpret(q: str = Query(..., min_length=1, max_length=assistant.MAX_QUESTION)) -> dict[str, Any]:
+    """Which of the app's own data requests answers a typed question. Rule-based; it never writes an answer."""
+    result = assistant.interpret(q)
+    result["engine"] = "rules"
+    return result
 
 
 # ---------------------------------------------------------------- years
@@ -420,6 +469,7 @@ def plan_journey(
     classification: str = Query(CLASS_OFFICIAL),
     max_changes: int = Query(planner.DEFAULT_MAX_CHANGES, ge=0, le=planner.MAX_CHANGES_LIMIT),
     limit: int = Query(5, ge=1, le=10),
+    modes: str = Query("all", pattern="^(all|bus|metro)$", description="all, bus (buses only) or metro (Metro only)."),
 ) -> dict[str, Any]:
     """Journey options with up to two changes, across every feed of one classification.
 
@@ -439,6 +489,7 @@ def plan_journey(
         limit=limit,
         on_date=on_date,
         now=None if on_date is not None else clock.utc_now(),
+        travel_modes=modes,
     )
 
 

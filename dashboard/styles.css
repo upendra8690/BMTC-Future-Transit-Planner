@@ -827,3 +827,11 @@ body:not([data-view="tools"]) .year-picker { display: none; }
   cursor: pointer;
 }
 .link-button { background: none; border: none; color: inherit; text-decoration: underline; cursor: pointer; min-height: 36px; }
+
+/* Launch: upcoming projects and assistant examples */
+.project-list > li { align-items: flex-start; }
+.project-list p { margin: 6px 0; }
+.plain-links { margin: 2px 0 6px; padding-left: 18px; }
+.plain-links a { overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.chips .chip-button { border: 1px solid var(--line); background: var(--neutral-bg); color: var(--text); font-weight: 600; }

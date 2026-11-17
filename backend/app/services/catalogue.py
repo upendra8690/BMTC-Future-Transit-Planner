@@ -68,8 +68,9 @@ def feature_states(db: Session) -> list[dict[str, Any]]:
         ("ncmc_cards", (UNAVAILABLE, "NEEDS_BANK_INTEGRATION")),
         ("accounts", (PLANNED, "IN_DEVELOPMENT")),
         ("notifications", (PLANNED, "IN_DEVELOPMENT")),
-        ("facilities", (PLANNED, "IN_DEVELOPMENT")),
-        ("ai_assistant", (PLANNED, "IN_DEVELOPMENT")),
+        ("upcoming_transport", (AVAILABLE, None)),
+        ("facilities", (PLANNED, "NEEDS_LICENSED_DATA")),
+        ("ai_assistant", (AVAILABLE, None)),
     ]
     return [{"id": key, "state": state, "reason": reason} for key, (state, reason) in rows]
 
