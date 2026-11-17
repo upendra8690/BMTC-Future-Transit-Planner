@@ -70,3 +70,49 @@ jobs:
         run: |
           docker logs planner
           docker logs real
+
+  postgres:
+    name: PostgreSQL - migrations, real data, searches and persistence across a restart
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: planner
+          POSTGRES_PASSWORD: ci-only-throwaway
+          POSTGRES_DB: planner
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U planner" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      # A throwaway database that exists only for this job; the address uses the postgresql:// form hosts give out.
+      DATABASE_URL: postgresql://planner:ci-only-throwaway@localhost:5432/planner
+      ADMIN_API_KEY: ci-only-throwaway-admin-key-0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Migrations (twice, to show the second run changes nothing) and the database check
+        run: |
+          python scripts/migrate_database.py
+          python scripts/migrate_database.py
+          python scripts/check_database.py
+      - name: Import the community Namma Metro timetable (twice; the second run must do nothing)
+        run: |
+          python scripts/load_community_metro.py
+          python scripts/load_community_metro.py | grep "already imported"
+      - name: Data survives a restart; real Metro searches and journeys work on PostgreSQL
+        run: python scripts/check_persistence.py --include-admin-change
+      - name: Real-mode server on PostgreSQL passes the deployment checks (except HTTPS, which needs a public host)
+        run: |
+          RATE_LIMIT_PER_MINUTE=100000 python -m uvicorn app.main:create_app --factory --app-dir backend --port 8000 &
+          for i in $(seq 1 45); do curl -sf http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
+          python scripts/verify_deployment.py http://127.0.0.1:8000 | tee verify.txt
+          test "$(grep -c '^FAIL' verify.txt)" = "2"
+          grep -q "FAIL 4.0 address uses HTTPS" verify.txt
+          grep -q "FAIL 4.0 sends HSTS" verify.txt

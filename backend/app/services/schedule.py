@@ -55,8 +55,8 @@ def contains_pattern(text: str) -> str:
 def fold_column(session: Session, column: Any) -> Any:
     """A case- and form-insensitive view of a text column, for comparing with fold() output.
 
-    SQLite uses the bmtc_fold function registered on each connection. Other databases fall back to lower(), which
-    folds ASCII only; PostgreSQL is not tested in this release.
+    SQLite uses the bmtc_fold function registered on each connection. PostgreSQL uses lower(), which folds letter
+    case (including non-ASCII letters) but not accents; the CI PostgreSQL job checks searches on the real Metro names.
     """
     if session.get_bind().dialect.name == "sqlite":
         return func.bmtc_fold(column)

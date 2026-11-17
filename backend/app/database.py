@@ -15,8 +15,19 @@ class Base(DeclarativeBase):
     pass
 
 
+def normalise_url(url: str) -> str:
+    """Hosting providers give postgres:// or postgresql:// addresses. SQLAlchemy would pick the psycopg2 driver for
+    those, which is not installed; this app uses psycopg (version 3)."""
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
 class Database:
     def __init__(self, url: str) -> None:
+        url = normalise_url(url)
         self.url = url
         parsed = make_url(url)
         self.is_sqlite = parsed.get_backend_name() == "sqlite"
