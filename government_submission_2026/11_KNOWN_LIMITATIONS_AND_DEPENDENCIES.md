@@ -6,7 +6,7 @@
 | 1 | **No official data.** The Namma Metro timetable comes from an unofficial community reconstruction (approximate times, no fares, no Pink Line); there is no real BMTC bus data at all | Metro journeys are indicative only; bus journeys are not possible | A written licence for BMTC and BMRCL GTFS (requests 15–17) |
 | 2 | **No live information.** No vehicle positions, arrival predictions or service alerts | Only scheduled times, always labelled "not live" | A BMTC real-time data agreement (GTFS-Realtime) |
 | 3 | **No tickets, passes, Metro QR, payments, wallet or NCMC** | Passengers are pointed to the official channels | Written agreements with the operator, ONDC, a payment aggregator and a bank |
-| 4 | **No passenger accounts.** Saved items belong to one device | Changing phones loses saved items | Accounts on PostgreSQL (designed, not built) |
+| 4 | **No passenger accounts in use.** They are built and tested, but switched off until a permanent database exists | Saved items belong to one device | PostgreSQL (`DATABASE_URL`), then `ACCOUNTS_ENABLED=1` and the account screens |
 | 5 | **Free hosting.** The server sleeps when idle, taking up to a minute to wake, and its disk is wiped on restart | Slow first load; saved routes on the server can be lost | Paid always-on hosting and PostgreSQL with backups |
 | 6 | **4.0 is not yet publicly deployed.** The 3.0 version is public | Reviewers need a link, or an in-person demonstration | The owner creates the separate service `bengaluru-transit-planner-v4` from `render.yaml` (`docs/launch/DEPLOYMENT_GUIDE.md`) |
 | 7 | **The Android app has not been tested on a phone.** Calls, official links and the back button were fixed in code only | Unknown behaviour on real devices | A phone test of the APK |

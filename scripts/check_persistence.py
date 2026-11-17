@@ -2,6 +2,7 @@
 
     python scripts/check_persistence.py                         # passenger data only; safe on a new production database
     python scripts/check_persistence.py --include-admin-change  # also an administrator change (test databases only)
+    ACCOUNTS_ENABLED=1 python scripts/check_persistence.py --include-account   # also a passenger account (PostgreSQL)
 
 It starts the planner on a free local port and writes data:
 - a saved route, stored under a random device key;
@@ -88,12 +89,15 @@ def community_imports(base: str) -> list[int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check that data survives a server restart.")
     parser.add_argument("--include-admin-change", action="store_true", help="also check an administrator change")
+    parser.add_argument("--include-account", action="store_true",
+                        help="also register an account, save a journey to it, and delete it at the end")
     args = parser.parse_args()
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     device = {"X-Client-Key": secrets.token_urlsafe(24)}
     admin = {"X-Admin-Key": os.environ.get("ADMIN_API_KEY", "")}
     marker = "persistence check " + secrets.token_hex(4)
+    account = {"email": f"persistence-{secrets.token_hex(4)}@example.org", "password": secrets.token_urlsafe(18)}
 
     server = start(port)
     try:
@@ -105,6 +109,15 @@ def main() -> int:
         status, saved = call(base, "POST", "/api/saved-routes", headers=device, body={
             "gtfs_route_id": routes[0]["gtfs_route_id"], "classification": "UNVERIFIED_FEED", "label": marker})
         check("a saved route is written", status == 201, saved)
+        if args.include_account:
+            status, body = call(base, "POST", "/api/account/register", body=account)
+            check("an account is registered", status == 201, body)
+            status, body = call(base, "POST", "/api/account/sign-in", body=account)
+            bearer = {"Authorization": "Bearer " + (body or {}).get("token", "")}
+            status, body = call(base, "POST", "/api/account/journeys", headers=bearer, body={
+                "origin": "Indiranagar", "destination": "Jayanagar", "modes": "metro",
+                "classification": "UNVERIFIED_FEED", "label": marker})
+            check("a journey is saved to the account", status == 201, body)
         if args.include_admin_change:
             status, body = call(base, "PATCH", "/api/admin/upcoming/metro_blue", headers=admin,
                                 body={"note": marker, "reason": "Persistence check (test database)"})
@@ -124,6 +137,16 @@ def main() -> int:
             check("after a restart, the administrator change and its history are still there",
                   blue["note"] == marker and blue["history"][0]["reason"].startswith("Persistence check"),
                   blue["note"])
+        if args.include_account:
+            status, body = call(base, "POST", "/api/account/sign-in", body=account)
+            check("after a restart, the account can sign in", status == 200, body)
+            bearer = {"Authorization": "Bearer " + (body or {}).get("token", "")}
+            saved = call(base, "GET", "/api/account/journeys", headers=bearer)[1] or {}
+            check("after a restart, the account's saved journey is still there",
+                  [j["label"] for j in saved.get("journeys", [])] == [marker], saved)
+            status, _ = call(base, "POST", "/api/account/delete", headers=bearer,
+                             body={"password": account["password"]})
+            check("the test account is deleted again", status == 200)
         status, _ = call(base, "DELETE", "/api/my-data", headers=device)
         check("the test data is erased again", status == 200)
     finally:

@@ -95,14 +95,14 @@ erased on every restart.
 - **No independent penetration test.**
 - **Privacy:** no names, contacts, locations, searches or payment data are stored, and device keys are hashed.
 - **Database:** SQLite on an ephemeral disk. Saved routes and upcoming-transport edits are lost on restart.
-  PostgreSQL is supported (`DATABASE_URL`) but needs the owner's database account.
+  PostgreSQL is supported and proven in CI: migrations, the real data import, and a saved route, an admin change and
+  an account all surviving a restart. Using it needs the owner's database (`docs/launch/POSTGRESQL_PRODUCTION.md`).
 
 ## 10. Not built yet, and why
 | Feature | Why not yet |
 |---|---|
-| Passenger accounts, password recovery, saved items across devices | They need persistent storage: on the current disk every account would be erased on restart. Needs the owner's PostgreSQL account |
-| Named administrator accounts and roles | Depends on accounts |
-| Notifications | Needs push keys and persistent subscriptions |
+| Passenger accounts, recovery codes, account-saved journeys, editor and admin roles | **Built and tested (26 tests; CI persistence on PostgreSQL), switched off.** They start only with `ACCOUNTS_ENABLED=1` on PostgreSQL. The account screens are the next step once the database exists (`docs/launch/ACCOUNTS_AND_ROLES.md`) |
+| Notifications | Preferences are stored; sending needs a delivery service (web push, email or SMS) |
 | Service alerts | No authorised alerts feed. Administrator-managed notices would be the next step |
 | AI (language-model) assistant | Needs an API key and a cost budget from the owner. The current assistant follows fixed rules and uses only the app's data |
 | Hospitals, toilets, water, parking, EV charging, station facilities | No verified, licensed dataset chosen yet |

@@ -153,3 +153,41 @@ class AnnouncementUpdateIn(BaseModel):
     verified_on: str | None = Field(default=None, pattern=FULL_DATE)
     note: str | None = Field(default=None, max_length=300)
     reason: str = Field(min_length=3, max_length=500)
+
+
+# ---------------------------------------------------------------- passenger accounts
+class AccountIn(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordIn(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
+
+
+class RecoverIn(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    recovery_code: str = Field(min_length=1, max_length=40)
+    new_password: str = Field(min_length=1, max_length=128)
+
+
+class AccountJourneyIn(BaseModel):
+    origin: str = Field(min_length=2, max_length=80)
+    destination: str = Field(min_length=2, max_length=80)
+    modes: Literal["all", "bus", "metro"] = "all"
+    classification: Literal["OFFICIAL_VERIFIED", "UNVERIFIED_FEED"]
+    label: str = Field(min_length=1, max_length=100)
+
+
+class NotificationIn(BaseModel):
+    service_notices: bool = False
+    upcoming_changes: bool = False
+
+
+class RoleIn(BaseModel):
+    role: Literal["passenger", "editor", "admin"]

@@ -30,6 +30,7 @@ exist.**
 | 13 | Press and secondary sources | Status of upcoming projects (no timetables) | Not needed (cited, not copied) | — | Connected; each entry links its source and check date |
 | 14 | bmrcl-gtfs community project (unofficial) | Namma Metro Purple, Green, Yellow: stations and reconstructed timetables, valid 17 Aug 2026 to 17 Aug 2027 | Not needed (ODbL 1.0, with attribution) | None needed | Connected as kind COMMUNITY ("Unverified feed"); approximate times; fares never shown; file pinned by SHA-256 (`reference_data/namma_metro_community/`) |
 | 15 | bmtc-gtfs community project | BMTC routes and timetables | ODbL, but built from the Namma BMTC app's data interface | — | **Not used**, by the owner's decision: derived from an operator's app |
+| 16 | OpenCity (data.opencity.in) BMTC stop datasets | Stops with locations, routes and trip counts (no timetables); older 2010–2016 files | One CC BY-SA 2.0 (derived from the same app data); others unlicensed or unconfirmed | — | **Not used.** The site refused automated access, so details come from search summaries; see `docs/launch/DATA_COVERAGE_REPORT.md` |
 
 ## Details
 ### 1–2. DULT Transport Data Hub: BMTC and BMRCL static GTFS

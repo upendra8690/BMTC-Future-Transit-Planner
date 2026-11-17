@@ -41,7 +41,7 @@ Column key:
 | Feature | FE | BE | DB | Data | Status | Evidence and notes |
 |---|---|---|---|---|---|---|
 | Lines | Metro | routes API (Metro type) | GTFS tables | Community Metro feed (real, unverified) | PARTIAL | Real Purple, Green and Yellow lines from an unofficial community reconstruction; not BMRCL-verified; the elevated Pink Line is missing |
-| Stations and station search | Metro | metro stations API | GTFS tables | Community Metro feed (real, unverified) | PARTIAL | 85 real stations; each station is listed once (platforms merged); real-mode browser check |
+| Stations and station search | Metro | metro stations API | GTFS tables | Community Metro feed (real, unverified) | PARTIAL | 83 real stations (85 line-station pairs; Majestic and RV Road serve two lines); each station listed once (platforms merged); real-mode browser check |
 | Metro-to-Metro interchange | Plan | `/api/plan` | — | Community Metro feed (real, unverified) | PARTIAL | Real changes at Majestic and RV Road (Whitefield to Electronic City: Purple, Green, Yellow); approximate times |
 | Metro journey planning | Plan, "Metro only" | `/api/plan?modes=metro` | — | Community Metro feed (real, unverified) | PARTIAL | Real journeys with approximate times and no fares (pytest, real-mode browser check, CI real-mode container) |
 | Bus + Metro journeys | Plan | `/api/plan` | — | Demo feeds (demonstration server only) | DEMO ONLY | No real bus data exists in the app; e2e step 6 on a demonstration server |

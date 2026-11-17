@@ -17,7 +17,8 @@ from typing import Any
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from ..models import GtfsImport, Route
+from .. import demo
+from ..models import STATUS_COMPLETED, GtfsImport, Route
 
 AVAILABLE, NO_DATA, UNAVAILABLE, PLANNED = "AVAILABLE", "NO_DATA", "UNAVAILABLE", "PLANNED"
 
@@ -34,6 +35,8 @@ def _has_routes(db: Session, route_types: tuple[int, ...]) -> bool:
             Route.route_type.in_(route_types),
             Route.import_id == GtfsImport.id,
             GtfsImport.is_active.is_(True),
+            GtfsImport.status == STATUS_COMPLETED,
+            demo.served_imports(),
         )
     )
     return bool(db.scalar(query))
@@ -66,8 +69,10 @@ def feature_states(db: Session) -> list[dict[str, Any]]:
         ("metro_tickets", (UNAVAILABLE, "NEEDS_ONDC_REGISTRATION")),
         ("payments", (UNAVAILABLE, "NEEDS_PAYMENT_GATEWAY")),
         ("ncmc_cards", (UNAVAILABLE, "NEEDS_BANK_INTEGRATION")),
-        ("accounts", (PLANNED, "IN_DEVELOPMENT")),
-        ("notifications", (PLANNED, "IN_DEVELOPMENT")),
+        # Accounts are built but stay off unless the server has a permanent database (ACCOUNTS_ENABLED with
+        # PostgreSQL); notifications also need a delivery service. See docs/launch/ACCOUNTS_AND_ROLES.md.
+        ("accounts", (PLANNED, "NEEDS_PERSISTENT_DATABASE")),
+        ("notifications", (PLANNED, "NEEDS_DELIVERY_SERVICE")),
         ("upcoming_transport", (AVAILABLE, None)),
         ("facilities", (PLANNED, "NEEDS_LICENSED_DATA")),
         ("ai_assistant", (AVAILABLE, None)),

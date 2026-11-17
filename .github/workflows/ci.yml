@@ -106,8 +106,8 @@ jobs:
         run: |
           python scripts/load_community_metro.py
           python scripts/load_community_metro.py | grep "already imported"
-      - name: Data survives a restart; real Metro searches and journeys work on PostgreSQL
-        run: python scripts/check_persistence.py --include-admin-change
+      - name: Data and passenger accounts survive a restart; real Metro searches and journeys work on PostgreSQL
+        run: ACCOUNTS_ENABLED=1 python scripts/check_persistence.py --include-admin-change --include-account
       - name: Real-mode server on PostgreSQL passes the deployment checks (except HTTPS, which needs a public host)
         run: |
           RATE_LIMIT_PER_MINUTE=100000 python -m uvicorn app.main:create_app --factory --app-dir backend --port 8000 &

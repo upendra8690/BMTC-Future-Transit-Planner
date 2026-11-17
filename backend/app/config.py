@@ -69,6 +69,10 @@ def _check_font_file(path: Path) -> None:
         raise ValueError(f"PDF_FONT_PATH is not a readable TrueType (.ttf) font: {path}") from exc
 
 
+def _flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -95,6 +99,10 @@ class Settings:
     # Demonstration mode serves the invented SYNTHETIC_DEMO feeds. Off by default, so the public service shows only
     # real information; a demonstration server sets DEMO_MODE=1 (see app/demo.py).
     demo_mode: bool = False
+    # Passenger accounts run only when switched on AND the database is permanent (PostgreSQL). ACCOUNTS_ALLOW_SQLITE
+    # is for local development and tests only: on a hosting service's temporary disk every account would be lost.
+    accounts_enabled: bool = False
+    accounts_allow_sqlite: bool = False
 
     @classmethod
     def from_env(cls, env_file: Path | None = None) -> Settings:
@@ -133,5 +141,7 @@ class Settings:
             min_transfer_minutes=_get_float("MIN_TRANSFER_MINUTES", 3.0, low=0.0, high=60.0),
             max_transfer_walk_m=_get_int("MAX_TRANSFER_WALK_M", 300, low=0, high=1000),
             walk_speed_kmph=_get_float("WALK_SPEED_KMPH", 4.8, low=1.0, high=10.0),
-            demo_mode=os.environ.get("DEMO_MODE", "").strip().lower() in ("1", "true", "yes", "on"),
+            demo_mode=_flag("DEMO_MODE"),
+            accounts_enabled=_flag("ACCOUNTS_ENABLED"),
+            accounts_allow_sqlite=_flag("ACCOUNTS_ALLOW_SQLITE"),
         )

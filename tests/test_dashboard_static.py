@@ -285,7 +285,8 @@ def test_the_service_worker_saves_only_public_timetable_answers():
         "/api/clock", "/api/meta", "/api/health", "/api/journey", "/api/plan", "/api/stops/nearby",
         "/api/stops/S1/departures", "/api/routes/R1/timetable.csv", "/api/years/2027/status",
         "/api/scenarios", "/api/scenarios/compare", "/api/saved-routes", "/api/preferences", "/api/admin/stats",
-        "/api/features",
+        "/api/features", "/api/account/me", "/api/account/journeys", "/api/account/export",
+        "/api/account/notifications", "/api/admin/users",
     ]
     for path in never_kept:
         assert not allowed.fullmatch(path), f"must never be kept: {path}"

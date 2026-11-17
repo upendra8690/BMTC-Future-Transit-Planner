@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased (branch `v4`) — PostgreSQL proven; accounts and roles built but off; data coverage audit, 2026-11-18
+- **PostgreSQL.** The psycopg 3.2 driver is added, and `postgres://` and `postgresql://` addresses are accepted.
+  - A CI job on PostgreSQL 16 runs the migrations twice, imports the community Metro feed twice (once only in
+    effect) and runs `scripts/check_persistence.py`.
+  - The persistence check: a saved route, an administrator change and a passenger account with a saved journey all
+    survive a server restart.
+  - A PostgreSQL-backed real-mode server passes the deployment checks.
+- **Passenger accounts (migration 0004)**, built and tested but off unless `ACCOUNTS_ENABLED=1` **and** the database
+  is PostgreSQL.
+  - **Accounts:** registration; sign-in with bearer sessions (hashed, 30 days); lockout after eight wrong passwords;
+    password change; one-time recovery codes; export; deletion.
+  - **Saved data:** up to 50 saved journeys per account, and notification preferences (stored only; nothing is sent).
+  - **Roles:** passenger, editor (upcoming transport) and admin. Signed-in staff are named in the audit log as
+    `user:<id>`; the admin key still works.
+  - **Tests:** 26.
+- **Fixed.** The feature list ignored real/demo separation when deciding whether bus or Metro routes exist.
+  Accounts did not recognise `postgres://` addresses.
+- **Feature reasons.** Accounts are now "needs a permanent database" and notifications "needs a delivery service", in
+  four languages.
+- **Documents.**
+  - `docs/launch/DATA_COVERAGE_REPORT.md`: what is real, unverified, missing or restricted; OpenCity datasets
+    (pages refused automated access, so the owner should confirm); the community Metro audit (83 stations, valid to
+    17 Aug 2027, 0 validator errors, Pink Line missing).
+  - `docs/launch/POSTGRESQL_PRODUCTION.md`: recommends Render Postgres Basic-256mb in Singapore.
+  - `docs/launch/ACCOUNTS_AND_ROLES.md` and `FINAL_IMPLEMENTATION_REPORT.md`.
+
 ## Unreleased (branch `v4`) — real Namma Metro data; real mode separated from demonstration mode, 2026-11-18
 - **Real mode is the default.** `DEMO_MODE` is off by default, and the public service never serves the invented
   SYNTHETIC_DEMO feeds, even if one is loaded. A demonstration server sets `DEMO_MODE=1` and shows a banner on every

@@ -389,3 +389,61 @@ class TransportAnnouncementChange(Base):
     changes_json: Mapped[str] = mapped_column(Text)
 
     announcement: Mapped[TransportAnnouncement] = relationship(back_populates="changes")
+
+
+# ---------------------------------------------------------------- passenger accounts (off unless storage is permanent)
+ROLE_PASSENGER, ROLE_EDITOR, ROLE_ADMIN = "passenger", "editor", "admin"
+ROLES = (ROLE_PASSENGER, ROLE_EDITOR, ROLE_ADMIN)
+
+
+class User(Base):
+    """A passenger or staff account. Only a salted scrypt hash of the password is stored, never the password."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(20), default=ROLE_PASSENGER)
+    recovery_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class UserSession(Base):
+    """A signed-in session. The token is given to the browser once; only its SHA-256 hash is stored."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime, index=True)
+
+
+class UserSavedJourney(Base):
+    """A journey saved to an account, so it follows the passenger to another device."""
+
+    __tablename__ = "user_saved_journeys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    origin: Mapped[str] = mapped_column(String(80))
+    destination: Mapped[str] = mapped_column(String(80))
+    modes: Mapped[str] = mapped_column(String(10), default="all")
+    classification: Mapped[str] = mapped_column(String(20))
+    label: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class NotificationPreference(Base):
+    """What a passenger would like to be told about. Stored only: no notification is sent (no delivery service)."""
+
+    __tablename__ = "notification_preferences"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    service_notices: Mapped[bool] = mapped_column(Boolean, default=False)
+    upcoming_changes: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

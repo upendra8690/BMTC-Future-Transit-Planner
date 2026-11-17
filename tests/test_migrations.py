@@ -18,11 +18,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
-# Tables that migrations 0002 and 0003 added. Earlier builds never had them, so a simulated old database leaves them
-# out.
+# Tables that migrations 0002, 0003 and 0004 added. Earlier builds never had them, so a simulated old database
+# leaves them out.
 FARE_TABLES = {"fare_attributes", "fare_rules"}
 ANNOUNCEMENT_TABLES = {"transport_announcements", "transport_announcement_changes"}
-LATER_TABLES = FARE_TABLES | ANNOUNCEMENT_TABLES
+ACCOUNT_TABLES = {"users", "user_sessions", "user_saved_journeys", "notification_preferences"}
+LATER_TABLES = FARE_TABLES | ANNOUNCEMENT_TABLES | ACCOUNT_TABLES
 
 
 def _url(path: Path) -> str:
@@ -55,7 +56,7 @@ def test_new_database_reaches_head_and_matches_the_models(tmp_path):
     db = Database(_url(path))
     try:
         assert db.create_schema() == head_revision()
-        assert current_revision(db.engine) == head_revision() == "0003"
+        assert current_revision(db.engine) == head_revision() == "0004"
         with db.engine.connect() as connection:
             differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
     finally:
@@ -127,7 +128,7 @@ def test_a_version_two_database_gains_the_fare_tables_and_keeps_every_row(tmp_pa
 
     db = Database(url)
     try:
-        assert db.create_schema() == head_revision() == "0003"
+        assert db.create_schema() == head_revision() == "0004"
     finally:
         db.dispose()
     assert _table_names(path) >= LATER_TABLES

@@ -36,15 +36,40 @@ def optional_client_hash(request: Request) -> str | None:
     return client_hash(key) if CLIENT_KEY_RE.fullmatch(key) else None
 
 
-def require_admin(request: Request) -> str:
-    """Fail closed: administrative routes are disabled unless ADMIN_API_KEY is configured."""
-    expected = request.app.state.settings.admin_api_key
-    if not expected:
-        raise HTTPException(status_code=503, detail="Administrative functions are disabled: ADMIN_API_KEY is not set.")
-    supplied = request.headers.get("x-admin-key", "")
-    if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
-        raise HTTPException(status_code=401, detail="Invalid or missing admin key.")
-    return "admin"
+def bearer_token(request: Request) -> str:
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
+
+
+def require_admin(request: Request, roles: tuple[str, ...] = ("admin",)) -> str:
+    """Fail closed. Returns who acted, and keeps it in request.state.admin_actor for the audit log.
+
+    With passenger accounts running, a signed-in account whose role is in ``roles`` is accepted and recorded as
+    "user:<id>". Otherwise the ADMIN_API_KEY holder is accepted and recorded as "admin"; without that key configured,
+    administrative routes are disabled.
+    """
+    token = bearer_token(request)
+    if token and getattr(request.app.state, "accounts_reason", "off") is None:
+        from .services import accounts  # imported here: the account service is optional
+
+        with request.app.state.db.session() as session:
+            user = accounts.user_for_token(session, token)
+            if user is None:
+                raise HTTPException(status_code=401, detail="Your session has ended. Sign in again.")
+            if user.role not in roles:
+                raise HTTPException(status_code=403, detail="Your account does not have permission for this action.")
+            actor = f"user:{user.id}"
+    else:
+        expected = request.app.state.settings.admin_api_key
+        if not expected:
+            raise HTTPException(status_code=503,
+                                detail="Administrative functions are disabled: ADMIN_API_KEY is not set.")
+        supplied = request.headers.get("x-admin-key", "")
+        if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
+            raise HTTPException(status_code=401, detail="Invalid or missing admin key.")
+        actor = "admin"
+    request.state.admin_actor = actor
+    return actor
 
 
 def safe_filename(name: str | None) -> str:

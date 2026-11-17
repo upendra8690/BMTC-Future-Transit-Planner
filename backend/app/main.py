@@ -18,6 +18,7 @@ from .api import router
 from .config import DASHBOARD_DIR, Settings
 from .database import Database
 from .security import RateLimiter, client_ip
+from .services import accounts as accounts_service
 
 LOG = logging.getLogger("bmtc_planner")
 
@@ -99,6 +100,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.db = db
+    app.state.accounts_reason = accounts_service.availability(
+        settings.accounts_enabled, settings.accounts_allow_sqlite, settings.database_url)
+    if settings.accounts_enabled and app.state.accounts_reason:
+        LOG.warning("ACCOUNTS_ENABLED is set but accounts stay off: they need a PostgreSQL database (DATABASE_URL).")
     limiter = RateLimiter(settings.rate_limit_per_minute)
     if settings.admin_api_key and len(settings.admin_api_key) < MIN_ADMIN_KEY_LENGTH:
         # A short key still works, so existing deployments keep running. The warning tells the owner to replace it.
@@ -112,7 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=list(settings.cors_origins),
             allow_methods=["GET", "POST", "PUT", "DELETE"],
-            allow_headers=["Content-Type", "X-Client-Key", "X-Admin-Key"],
+            allow_headers=["Content-Type", "X-Client-Key", "X-Admin-Key", "Authorization"],
         )
 
     @app.middleware("http")

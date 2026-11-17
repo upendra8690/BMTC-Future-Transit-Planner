@@ -26,6 +26,9 @@ from .models import (
     CLASS_SCENARIO,
     CLASS_UNVERIFIED,
     DATA_CLASSIFICATIONS,
+    ROLE_ADMIN,
+    ROLE_EDITOR,
+    ROLES,
     STATUS_COMPLETED,
     WEEKDAY_CODES,
     AuditLog,
@@ -35,21 +38,36 @@ from .models import (
     SavedRoute,
     Scenario,
     Stop,
+    User,
     UserPreference,
     utcnow,
 )
 from .schemas import (
     PLANNING_YEARS,
+    AccountIn,
+    AccountJourneyIn,
     AnnouncementIn,
     AnnouncementUpdateIn,
     DataSourceIn,
+    NotificationIn,
+    PasswordChangeIn,
+    PasswordIn,
     PreferencesIn,
+    RecoverIn,
+    RoleIn,
     SavedRouteIn,
     ScenarioIn,
     VerificationIn,
 )
-from .security import client_ip, optional_client_hash, require_admin, require_client_key, safe_filename
-from .services import announcements, assistant, catalogue, integrations, planner, registry
+from .security import (
+    bearer_token,
+    client_ip,
+    optional_client_hash,
+    require_admin,
+    require_client_key,
+    safe_filename,
+)
+from .services import accounts, announcements, assistant, catalogue, integrations, planner, registry
 from .services import scenarios as scn
 from .services import schedule as sched
 from .services.audit import record_audit
@@ -231,10 +249,11 @@ _REQUIRED_WHEN_SENT = ("name", "transport_type", "status", "source_kind", "sourc
 
 @router.post("/admin/upcoming", status_code=201, tags=["admin"])
 def admin_create_upcoming(data: AnnouncementIn, request: Request, db: DbSession) -> dict[str, Any]:
-    require_admin(request)
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
     values = data.model_dump(exclude={"id", "reason"})
     try:
-        return announcements.create(db, data.id, values, reason=data.reason, actor="admin", ip=client_ip(request),
+        return announcements.create(db, data.id, values, reason=data.reason, actor=request.state.admin_actor,
+                                    ip=client_ip(request),
                                     today=_service_today(request, db))
     except announcements.AnnouncementError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
@@ -245,7 +264,7 @@ def admin_update_upcoming(
     key: Annotated[str, ApiPath(pattern=r"^[a-z0-9_]{2,60}$")], data: AnnouncementUpdateIn, request: Request,
     db: DbSession,
 ) -> dict[str, Any]:
-    require_admin(request)
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
     changes: dict[str, Any] = {}
     for field in sorted(data.model_fields_set - {"reason"}):
         value = getattr(data, field)
@@ -255,7 +274,8 @@ def admin_update_upcoming(
             value = [source.model_dump() for source in data.sources or []]
         changes[field] = "" if value is None and field in ("location", "announcement", "note") else value
     try:
-        return announcements.update(db, key, changes, reason=data.reason, actor="admin", ip=client_ip(request),
+        return announcements.update(db, key, changes, reason=data.reason, actor=request.state.admin_actor,
+                                    ip=client_ip(request),
                                     today=_service_today(request, db))
     except announcements.AnnouncementError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
@@ -785,7 +805,8 @@ def admin_create_source(data: DataSourceIn, request: Request, db: DbSession) -> 
                         verified=False)
     db.add(source)
     db.flush()
-    record_audit(db, actor="admin", action="data_source.create", entity="data_source", entity_id=source.id,
+    record_audit(db, actor=request.state.admin_actor, action="data_source.create", entity="data_source",
+                 entity_id=source.id,
                  detail={"name": source.name, "kind": source.kind}, ip=client_ip(request))
     db.commit()
     return _public_source(db, source)
@@ -798,7 +819,7 @@ def admin_verify_source(source_id: int, data: VerificationIn, request: Request, 
     if source is None:
         raise HTTPException(status_code=404, detail="Data source not found.")
     try:
-        changed = set_verification(db, source, verified=data.verified, note=data.note, actor="admin",
+        changed = set_verification(db, source, verified=data.verified, note=data.note, actor=request.state.admin_actor,
                                    ip=client_ip(request))
     except VerificationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -848,7 +869,8 @@ async def admin_upload_import(
             source = session.get(DataSource, data_source_id)
             if source is None:
                 raise HTTPException(status_code=404, detail="Data source not found.")
-            imp = import_feed(session, data, filename=name, source=source, settings=settings, actor="admin", ip=ip)
+            imp = import_feed(session, data, filename=name, source=source, settings=settings,
+                              actor=request.state.admin_actor, ip=ip)
             fares = fare_counts(session, [imp.id]).get(imp.id, 0)
             return (201 if imp.status == STATUS_COMPLETED else 422), import_summary(imp, fares)
         finally:
@@ -864,7 +886,7 @@ def admin_delete_import(import_id: int, request: Request, db: DbSession) -> Resp
     imp = db.get(GtfsImport, import_id)
     if imp is None:
         raise HTTPException(status_code=404, detail="Import not found.")
-    record_audit(db, actor="admin", action="gtfs.delete", entity="gtfs_import", entity_id=import_id,
+    record_audit(db, actor=request.state.admin_actor, action="gtfs.delete", entity="gtfs_import", entity_id=import_id,
                  detail={"filename": imp.filename, "classification": imp.classification}, ip=client_ip(request))
     db.delete(imp)
     db.commit()
@@ -899,7 +921,8 @@ def admin_backup(request: Request, db: DbSession) -> dict[str, Any]:
         report = backup_and_verify(source, settings.backup_dir)
     except MaintenanceError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    record_audit(db, actor="admin", action="database.backup", entity="database", entity_id=report["file"],
+    record_audit(db, actor=request.state.admin_actor, action="database.backup", entity="database",
+                 entity_id=report["file"],
                  detail={"bytes": report["bytes"], "revision": report["revision"]}, ip=client_ip(request))
     db.commit()
     return {"file": report["file"], "bytes": report["bytes"], "directory": report["directory"],
@@ -916,3 +939,137 @@ def admin_audit_logs(request: Request, db: DbSession, limit: int = Query(100, ge
         for r in rows
     ]}
 
+
+
+
+# ---------------------------------------------------------------- passenger accounts (off unless storage is permanent)
+
+def _accounts_on(request: Request) -> None:
+    reason = request.app.state.accounts_reason
+    if reason == accounts.DISABLED:
+        raise HTTPException(status_code=503, detail="Passenger accounts are switched off on this server.")
+    if reason:
+        raise HTTPException(status_code=503, detail="Passenger accounts are not available on this server: they need "
+                                                    "a permanent database.")
+
+
+def _signed_in(request: Request, db: Session) -> Any:
+    _accounts_on(request)
+    user = accounts.user_for_token(db, bearer_token(request))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sign in first.")
+    return user
+
+
+def _account_call(call: Any) -> Any:
+    try:
+        return call()
+    except accounts.AccountError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.get("/account/status", tags=["account"])
+def account_status(request: Request) -> dict[str, Any]:
+    reason = request.app.state.accounts_reason
+    return {"available": reason is None, "reason": reason, "notification_delivery": "NOT_AVAILABLE",
+            "roles": list(ROLES)}
+
+
+@router.post("/account/register", status_code=201, tags=["account"])
+def account_register(data: AccountIn, request: Request, db: DbSession) -> dict[str, Any]:
+    _accounts_on(request)
+    user, code = _account_call(lambda: accounts.register(db, data.email, data.password))
+    return {"user": accounts.public_user(user), "recovery_code": code,
+            "recovery_note": "Keep this code safe. It is shown only once and is the only way to reset the password."}
+
+
+@router.post("/account/sign-in", tags=["account"])
+def account_sign_in(data: AccountIn, request: Request, db: DbSession) -> dict[str, Any]:
+    _accounts_on(request)
+    user, token, expires = _account_call(lambda: accounts.sign_in(db, data.email, data.password))
+    return {"user": accounts.public_user(user), "token": token,
+            "expires_at": expires.isoformat(timespec="seconds") + "Z"}
+
+
+@router.post("/account/sign-out", tags=["account"])
+def account_sign_out(request: Request, db: DbSession) -> dict[str, Any]:
+    _signed_in(request, db)
+    accounts.sign_out(db, bearer_token(request))
+    return {"signed_out": True}
+
+
+@router.get("/account/me", tags=["account"])
+def account_me(request: Request, db: DbSession) -> dict[str, Any]:
+    return {"user": accounts.public_user(_signed_in(request, db))}
+
+
+@router.post("/account/password", tags=["account"])
+def account_password(data: PasswordChangeIn, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    _account_call(lambda: accounts.change_password(db, user, data.current_password, data.new_password))
+    return {"changed": True, "note": "Every session was signed out. Sign in again."}
+
+
+@router.post("/account/recover", tags=["account"])
+def account_recover(data: RecoverIn, request: Request, db: DbSession) -> dict[str, Any]:
+    _accounts_on(request)
+    code = _account_call(lambda: accounts.recover(db, data.email, data.recovery_code, data.new_password))
+    return {"recovery_code": code, "recovery_note": "The old code no longer works. Keep this new one safe."}
+
+
+@router.get("/account/export", tags=["account"])
+def account_export(request: Request, db: DbSession) -> dict[str, Any]:
+    return accounts.export(db, _signed_in(request, db))
+
+
+@router.post("/account/delete", tags=["account"])
+def account_delete(data: PasswordIn, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    _account_call(lambda: accounts.delete_account(db, user, data.password))
+    return {"deleted": True}
+
+
+@router.get("/account/journeys", tags=["account"])
+def account_journeys(request: Request, db: DbSession) -> dict[str, Any]:
+    return {"journeys": accounts.journeys(db, _signed_in(request, db))}
+
+
+@router.post("/account/journeys", status_code=201, tags=["account"])
+def account_add_journey(data: AccountJourneyIn, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    return _account_call(lambda: accounts.add_journey(db, user, data.model_dump()))
+
+
+@router.delete("/account/journeys/{journey_id}", tags=["account"])
+def account_remove_journey(journey_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    _account_call(lambda: accounts.remove_journey(db, user, journey_id))
+    return {"removed": True}
+
+
+@router.get("/account/notifications", tags=["account"])
+def account_notifications(request: Request, db: DbSession) -> dict[str, Any]:
+    return accounts.preferences(db, _signed_in(request, db))
+
+
+@router.put("/account/notifications", tags=["account"])
+def account_set_notifications(data: NotificationIn, request: Request, db: DbSession) -> dict[str, Any]:
+    return accounts.set_preferences(db, _signed_in(request, db), data.model_dump())
+
+
+@router.get("/admin/users", tags=["admin"])
+def admin_users(request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request)
+    _accounts_on(request)
+    return {"users": [accounts.public_user(u) for u in db.scalars(select(User).order_by(User.id))]}
+
+
+@router.put("/admin/users/{user_id}/role", tags=["admin"])
+def admin_set_role(user_id: int, data: RoleIn, request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request)
+    _accounts_on(request)
+    user = _account_call(lambda: accounts.set_role(db, user_id, data.role))
+    record_audit(db, actor=request.state.admin_actor, action="user.role", entity="user", entity_id=user_id,
+                 detail={"role": data.role}, ip=client_ip(request))
+    db.commit()
+    return {"user": accounts.public_user(user)}
