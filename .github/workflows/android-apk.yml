@@ -1,10 +1,12 @@
 name: Android APK
 
 # Builds the Flutter WebView wrapper in android/flutter_app.
-#   main -> the released app (opens the live 3.x site), published on the "app-latest" release.
-#   v4   -> a 4.0 preview (opens the 4.0 preview site), published as the "app-v4-preview" pre-release.
-#           Skipped until the repository variable V4_PLANNER_URL names a deployed 4.0 site, because the APK only
-#           shows the website it points at.
+#   main -> the released app (opens the live 3.x site), published on the "app-latest" release. Unchanged.
+#   v4   -> a push is a COMPILE CHECK ONLY: the shell is analysed and built, then thrown away. Nothing is published
+#           and no APK file is kept, whatever the repository variables say.
+#           The "app-v4-preview" pre-release is published only by a manual run (Actions -> Android APK -> Run
+#           workflow -> branch v4) with "publish_v4_preview" ticked AND the variable V4_PLANNER_URL set to the
+#           deployed 4.0 site. A push can never publish it.
 on:
   push:
     branches: [main, v4]
@@ -14,19 +16,26 @@ on:
       - "assets/app-icon.svg"
       - ".github/workflows/android-apk.yml"
   workflow_dispatch:
+    inputs:
+      publish_v4_preview:
+        description: "v4 only: publish the app-v4-preview pre-release (also needs the V4_PLANNER_URL variable)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 env:
   IS_V4: ${{ github.ref_name == 'v4' }}
-  PLANNER_URL: ${{ github.ref_name == 'v4' && vars.V4_PLANNER_URL || 'https://bmtc-future-transit-planner-3-0.onrender.com/' }}
+  # A v4 compile check without V4_PLANNER_URL uses a reserved, unreachable address; that APK is never kept.
+  PLANNER_URL: ${{ github.ref_name == 'v4' && (vars.V4_PLANNER_URL || 'https://example.invalid/') || 'https://bmtc-future-transit-planner-3-0.onrender.com/' }}
   APP_LABEL: ${{ github.ref_name == 'v4' && 'Bengaluru Transit' || 'BMTC Planner' }}
   RELEASE_TAG: ${{ github.ref_name == 'v4' && 'app-v4-preview' || 'app-latest' }}
+  # 'true' only for main, or for a manual v4 run that asked to publish and has a deployed 4.0 address.
+  PUBLISH: ${{ github.ref_name == 'main' || (github.ref_name == 'v4' && github.event_name == 'workflow_dispatch' && inputs.publish_v4_preview && vars.V4_PLANNER_URL != '') }}
 
 jobs:
   apk:
-    if: github.ref_name != 'v4' || vars.V4_PLANNER_URL != ''
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -110,12 +119,19 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/BMTC-Planner.apk"
           ls -la "$GITHUB_WORKSPACE/BMTC-Planner.apk"
 
+      - name: Record what this run did
+        run: |
+          if [ "$PUBLISH" = "true" ]; then echo "APK built and published as $RELEASE_TAG." >> "$GITHUB_STEP_SUMMARY"
+          else echo "Compile check only: the APK built successfully and was NOT published or kept." >> "$GITHUB_STEP_SUMMARY"; fi
+
       - uses: actions/upload-artifact@v4
+        if: env.PUBLISH == 'true'
         with:
           name: BMTC-Planner-apk
           path: BMTC-Planner.apk
 
       - name: Publish the APK (app-latest for main, app-v4-preview pre-release for v4)
+        if: env.PUBLISH == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}

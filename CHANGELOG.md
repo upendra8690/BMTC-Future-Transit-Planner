@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased (branch `v4`) — government submission package, 2026-11-18
+- `government_submission_2026/`: 19 documents for a technical review by Karnataka transport authorities. They cover
+  the proposal, the feature matrix by area, architecture, security, privacy, accessibility, the data, licence and
+  integration register, test evidence, limitations, the demonstration script, the pilot, costs, three requests, a
+  cover letter and a checklist.
+- Contacts verified on the official websites on 17 Nov 2026:
+  - DULT contact page;
+  - BMRCL project office, distinguished from passenger travel help;
+  - BMTC central offices, distinguished from the complaints channel.
+- The DULT Transport Data Hub address reported in the press did not resolve; the requests ask for it.
+- Android workflow: a push to `v4` is now a compile check only and can never publish. The `app-v4-preview`
+  pre-release needs a manual run with `publish_v4_preview` and `V4_PLANNER_URL`. `main` behaviour is unchanged.
+  Guarded by `tests/test_release_guard.py` (4 tests).
+- `FINAL_SUBMISSION_READINESS.md`: commit, CI, deployment, Android, data, permissions, test results, blockers and
+  suitability.
+- Found: the repository has no licence file, so the earlier draft letters' "open source" wording was inaccurate. The
+  new package says "publicly available" until the owner chooses a licence.
+
 ## Unreleased (branch `v4`) — end-to-end functional verification, 2026-11-17
 
 ### Added

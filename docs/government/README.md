@@ -1,3 +1,5 @@
+> **Superseded for sending** by `government_submission_2026/` (18 Nov 2026), which has contacts verified on the official websites. These drafts call the code "open source", which is not accurate while no licence is chosen.
+
 # Government evaluation package — Bengaluru Transit Planner 4.0
 
 Prepared 16 November 2026 on branch `v4` (version 4.0.0-alpha.3). **Nothing in this folder has been sent to any

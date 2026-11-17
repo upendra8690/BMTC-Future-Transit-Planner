@@ -1,3 +1,5 @@
+> **Superseded for sending** by `government_submission_2026/` (18 Nov 2026), which has contacts verified on the official websites. These drafts call the code "open source", which is not accurate while no licence is chosen.
+
 > DRAFT — not sent. Confirm the addressee's name and office by telephone before posting or emailing.
 
 [Date]
