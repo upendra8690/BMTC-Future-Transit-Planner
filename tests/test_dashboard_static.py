@@ -24,7 +24,9 @@ DYNAMIC_PREFIXES = (
     "upcoming.status.", "providers.feed_state.", "providers.permission.", "providers.integration.", "integ.cap.",
 )
 # Storage keys the dashboard may write. The admin key must never be one of them.
-STORED_KEYS = {"clientKey", "lang", "classification", "year", "theme", "lowData", "largeText", "favStops", "recent"}
+STORED_KEYS = {
+    "clientKey", "lang", "classification", "year", "theme", "lowData", "largeText", "favStops", "favJourneys", "recent",
+}
 DYNAMIC_CODE = (
     r"\beval\s*\(",
     r"new\s+Function\s*\(",

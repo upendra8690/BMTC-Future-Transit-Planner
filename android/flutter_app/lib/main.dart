@@ -1,12 +1,21 @@
-// Starter Flutter wrapper for the BMTC Future Transit Planner web app.
+// Android wrapper for the Bengaluru Transit Planner web app (an independent, unofficial app).
 //
-// STATUS: NOT COMPILED. The build environment for this project had no Flutter SDK, so this file has been checked
-// for syntax only. Build it on a developer machine as described in android/README.md.
+// STATUS: built only by the GitHub "Android APK" workflow. This machine has no Flutter SDK, so changes here are
+// checked for syntax only (python android/check_starter.py) until the workflow compiles them.
 //
 // The app shows the planner web page in a WebView. The planner's address is given at build time:
 //   flutter run --dart-define=PLANNER_URL=https://your-planner.example.org/
+//
+// Links:
+//   - pages on the planner's own host open inside the app;
+//   - phone links (tel:, used by the SOS and helpline buttons) open the phone's dialler;
+//   - other https links (official BMTC, BMRCL and government sites, map credits) open in the phone's browser.
+//   Nothing else is followed.
+// Back button: goes back one page inside the app while there is a page to go back to; otherwise Android closes it.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 const String plannerUrl = String.fromEnvironment('PLANNER_URL');
@@ -21,7 +30,7 @@ class PlannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'BMTC Future Transit Planner',
+      title: 'Bengaluru Transit Planner',
       theme: ThemeData(colorSchemeSeed: const Color(0xFF1F5C99), useMaterial3: true),
       home: const PlannerPage(),
     );
@@ -40,6 +49,15 @@ class _PlannerPageState extends State<PlannerPage> {
   double _progress = 0;
   String? _problem;
 
+  /// Opens a phone or web link outside the app. Returns quietly if the phone has no app for it.
+  Future<void> _openOutside(Uri target) async {
+    try {
+      await launchUrl(target, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // No dialler or browser is available; the page stays as it is.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -55,10 +73,17 @@ class _PlannerPageState extends State<PlannerPage> {
         NavigationDelegate(
           onProgress: (progress) => setState(() => _progress = progress / 100),
           onNavigationRequest: (request) {
-            // Only pages on the planner's own host open inside the app. Other links are not followed.
             final target = Uri.tryParse(request.url);
-            final sameHost = target != null && target.host == address.host;
-            return sameHost ? NavigationDecision.navigate : NavigationDecision.prevent;
+            if (target == null) {
+              return NavigationDecision.prevent;
+            }
+            if (target.host == address.host && (target.scheme == 'https' || target.scheme == 'http')) {
+              return NavigationDecision.navigate;
+            }
+            if (target.scheme == 'tel' || target.scheme == 'https') {
+              _openOutside(target);
+            }
+            return NavigationDecision.prevent;
           },
           onWebResourceError: (error) {
             if (error.isForMainFrame == true) {
@@ -73,21 +98,36 @@ class _PlannerPageState extends State<PlannerPage> {
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    return Scaffold(
-      appBar: AppBar(title: const Text('BMTC Future Transit Planner')),
-      body: controller == null || _problem != null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(_problem ?? 'The planner is not available.', textAlign: TextAlign.center),
-              ),
-            )
-          : Column(
-              children: [
-                if (_progress < 1) LinearProgressIndicator(value: _progress),
-                Expanded(child: WebViewWidget(controller: controller)),
-              ],
-            ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) {
+          return;
+        }
+        if (controller != null && await controller.canGoBack()) {
+          await controller.goBack();
+          return;
+        }
+        // No page to go back to: close the app, as the back button does in other Android apps.
+        await SystemNavigator.pop();
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: controller == null || _problem != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(_problem ?? 'The planner is not available.', textAlign: TextAlign.center),
+                  ),
+                )
+              : Column(
+                  children: [
+                    if (_progress < 1) LinearProgressIndicator(value: _progress),
+                    Expanded(child: WebViewWidget(controller: controller)),
+                  ],
+                ),
+        ),
+      ),
     );
   }
 }

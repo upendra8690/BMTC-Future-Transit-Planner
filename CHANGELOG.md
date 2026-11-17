@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased (branch `v4`) — end-to-end functional verification, 2026-11-17
+
+### Added
+- Saved journeys on the device: "Save this journey", a Saved journeys list with Plan again and Remove, cleared by Delete my data.
+- `tests/browser/e2e_check.py`: opens every screen fresh for each control, verifies each of 321 controls has an effect, then runs the full user journey, the unhappy paths, PWA installability and data-labelling checks.
+- `V4_COMPLETE_FEATURE_MATRIX.md`, `V4_END_TO_END_TEST_REPORT.md`, `V4_BUGS_AND_FIXES.md`, `V4_SECURITY_REPORT.md`, `V4_DATA_VERIFICATION_REPORT.md`, `V4_RELEASE_READINESS.md`.
+
+### Fixed
+- Route pages link each stop to its stop page.
+- The admin screen no longer scrolls sideways on phones (screen-reader text inside scrolled tables is now contained).
+- Map credits: the OpenStreetMap credit links to its copyright page in a new tab; Leaflet is named without a link that would leave the app.
+- Android shell (not yet compiled): `tel:` links (SOS, helplines) open the dialler and official sites open in the browser, where before they were silently blocked; the back button goes back a page; the app is titled Bengaluru Transit Planner.
+
+### Tests
+ruff clean; pytest 425 passed, 5 skipped; browser regression 121/121; launch 264/264; end-to-end 486/486 (321 controls, 0 decorative); axe 15 screens × 2 themes clean; security probes 34/34; bandit and pip-audit clean; load 0 errors; Android static check passed (not compiled).
+
 ## 4.0.0-beta.1 — 2026-11-17 (branch `v4`, public-demo candidate, not merged to `main`)
 
 ### Added

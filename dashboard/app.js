@@ -667,8 +667,11 @@
     var map = L.map(element, { scrollWheelZoom: false }).setView([20, 0], 2);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
     }).addTo(map);
+    // Credits never replace the app: the map data credit opens in a new tab, and the library is named without a link
+    // (Leaflet's own default links away in the same tab, which in the installed app would leave the app).
+    if (map.attributionControl) map.attributionControl.setPrefix("Leaflet");
     state.map = map;
     state.markers = L.layerGroup().addTo(map);
     return map;
@@ -774,7 +777,9 @@
       : t("route.direction", { n: direction.direction_id });
     if (direction.headsign) heading += " " + t("route.towards", { headsign: direction.headsign });
     var rows = (direction.stops || []).map(function (s) {
-      return '<tr><td class="num">' + esc(s.sequence) + "</td><td>" + esc(s.name) + "</td><td>" + esc(s.arrival || "") + "</td><td>" + esc(s.departure || "") + "</td></tr>";
+      var stopName = s.stop_id !== null && s.stop_id !== undefined
+        ? '<a href="#/stops/' + esc(encodeURIComponent(s.stop_id)) + '">' + esc(s.name) + "</a>" : esc(s.name);
+      return '<tr><td class="num">' + esc(s.sequence) + "</td><td>" + stopName + "</td><td>" + esc(s.arrival || "") + "</td><td>" + esc(s.departure || "") + "</td></tr>";
     }).join("");
     return "<h3>" + esc(heading) + '</h3><div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: heading })) + '"><table><thead><tr>' +
       '<th class="num">' + esc(t("route.col_seq")) + "</th><th>" + esc(t("route.col_stop")) + "</th><th>" + esc(t("route.col_arrival")) + "</th><th>" + esc(t("route.col_departure")) + "</th>" +
@@ -1162,7 +1167,7 @@
     BUS_AND_METRO: "journey.label_bus_metro"
   };
 
-  function renderJourney() {
+  function renderJourney(args, token) {
     setView(
       '<section class="card"><h2>' + esc(t("journey.title")) + "</h2>" +
       '<p class="muted">' + esc(t("journey.intro")) + "</p>" +
@@ -1196,6 +1201,16 @@
       "</form>" +
       '<div id="journeyResults" style="margin-top:12px" aria-live="polite"></div></section>'
     );
+    var pending = state.pendingJourney;
+    state.pendingJourney = null;
+    var form = document.getElementById("journeyForm");
+    if (pending && form) {
+      form.elements.origin.value = pending.from;
+      form.elements.destination.value = pending.to;
+      var mode = form.querySelector('input[name="modes"][value="' + (JOURNEY_MODES.indexOf(pending.modes) !== -1 ? pending.modes : "all") + '"]');
+      if (mode) mode.checked = true;
+      submitJourney(form, token);
+    }
   }
 
   async function submitJourney(form, token) {
@@ -1248,6 +1263,7 @@
     }
     html += '<ol class="options" aria-label="' + esc(t("journey.options_label")) + '">' +
       data.options.map(function (option, index) { return optionHtml(option, index + 1); }).join("") + "</ol>";
+    html += saveJourneyButton(data);
     html += sourcesHtml(data);
     html += '<p class="muted small">' + esc(t("journey.assumptions", {
       speed: fmtNum(assumptions.walk_speed_kmph),
@@ -1255,6 +1271,79 @@
       metres: fmtNum(assumptions.max_walk_m)
     })) + "</p>";
     return html;
+  }
+
+  // ---------------------------------------------------------------- saved journeys (on this device only)
+  var JOURNEY_MODES = ["all", "bus", "metro"];
+  var JOURNEY_MODE_KEYS = { all: "journey.modes_all", bus: "journey.modes_bus", metro: "journey.modes_metro" };
+
+  function savedJourneys() {
+    return readList("favJourneys").filter(function (j) {
+      return j && typeof j.from === "string" && j.from && typeof j.to === "string" && j.to &&
+        JOURNEY_MODES.indexOf(j.modes) !== -1 && (j.cls === "OFFICIAL_VERIFIED" || j.cls === "UNVERIFIED_FEED");
+    });
+  }
+
+  function sameJourney(a, b) {
+    return a.from.toLowerCase() === b.from.toLowerCase() && a.to.toLowerCase() === b.to.toLowerCase() &&
+      a.modes === b.modes && a.cls === b.cls;
+  }
+
+  function saveJourneyButton(data) {
+    var journey = { from: String(data.origin_query || ""), to: String(data.destination_query || ""), modes: data.travel_modes || "all", cls: data.classification };
+    var saved = savedJourneys().some(function (j) { return sameJourney(j, journey); });
+    return '<div class="toolbar"><button type="button" class="secondary" data-action="save-journey"' +
+      ' data-from="' + esc(journey.from) + '" data-to="' + esc(journey.to) + '" data-modes="' + esc(journey.modes) + '" data-cls="' + esc(journey.cls) + '"' +
+      (saved ? " disabled" : "") + ">" + esc(t(saved ? "journey.saved" : "journey.save")) + "</button></div>";
+  }
+
+  function journeyFromNode(node) {
+    return {
+      from: String(node.getAttribute("data-from") || "").trim().slice(0, 80),
+      to: String(node.getAttribute("data-to") || "").trim().slice(0, 80),
+      modes: node.getAttribute("data-modes") || "all",
+      cls: node.getAttribute("data-cls") || ""
+    };
+  }
+
+  function setSavedJourney(node, on) {
+    var journey = journeyFromNode(node);
+    if (journey.from.length < 2 || journey.to.length < 2 || JOURNEY_MODES.indexOf(journey.modes) === -1 ||
+        (journey.cls !== "OFFICIAL_VERIFIED" && journey.cls !== "UNVERIFIED_FEED")) return;
+    var list = savedJourneys().filter(function (j) { return !sameJourney(j, journey); });
+    if (on) list.unshift(journey);
+    storage.set(PREFIX + "favJourneys", JSON.stringify(list.slice(0, 20)));
+    toast(t(on ? "journey.saved" : "journey.unsaved"));
+    if (on) {
+      node.disabled = true;
+      node.textContent = t("journey.saved");
+    } else {
+      render();
+    }
+  }
+
+  function planSavedJourney(node) {
+    var journey = journeyFromNode(node);
+    state.pendingJourney = journey;
+    if (journey.cls === "OFFICIAL_VERIFIED" || journey.cls === "UNVERIFIED_FEED") {
+      state.classification = journey.cls;
+      storage.set(PREFIX + "classification", journey.cls);
+    }
+    if (location.hash === "#/journey") render();
+    else location.hash = "#/journey";
+  }
+
+  function savedJourneysHtml() {
+    var list = savedJourneys();
+    if (!list.length) return '<div class="empty">' + esc(t("fav.journeys_none")) + "</div>";
+    return '<ul class="list">' + list.map(function (j) {
+      var attrs = ' data-from="' + esc(j.from) + '" data-to="' + esc(j.to) + '" data-modes="' + esc(j.modes) + '" data-cls="' + esc(j.cls) + '"';
+      return '<li><div><div class="title">' + esc(t("fav.journey_name", { from: j.from, to: j.to })) + "</div>" +
+        '<div class="muted">' + esc(t(JOURNEY_MODE_KEYS[j.modes])) + "</div></div>" +
+        '<div class="row-actions">' + badge(j.cls) +
+        '<button type="button" class="secondary" data-action="plan-fav-journey"' + attrs + ">" + esc(t("fav.plan_again")) + "</button>" +
+        '<button type="button" class="danger" data-action="unfav-journey"' + attrs + ">" + esc(t("common.remove")) + "</button></div></li>";
+    }).join("") + "</ul>";
   }
 
   function optionHtml(option, number) {
@@ -2387,6 +2476,7 @@
     setView(
       '<section class="card"><h2>' + esc(t("fav.title")) + '</h2><p class="muted">' + esc(t("fav.intro")) + "</p>" +
       "<h3>" + esc(t("routes.saved_title")) + '</h3><div id="savedRoutes"></div>' +
+      "<h3>" + esc(t("fav.journeys_title")) + "</h3>" + savedJourneysHtml() +
       "<h3>" + esc(t("fav.stops_title")) + "</h3>" + favouriteStopsHtml() + "</section>"
     );
     await loadSaved(document.getElementById("savedRoutes"), token);
@@ -2444,6 +2534,7 @@
       return;
     }
     storage.set(PREFIX + "favStops", "[]");
+    storage.set(PREFIX + "favJourneys", "[]");
     storage.set(PREFIX + "recent", "[]");
     storage.set(PREFIX + "clientKey", "");
     memoryClientKey = "";
@@ -2941,6 +3032,15 @@
         submitAssist(node.getAttribute("data-q") || "", token);
         break;
       }
+      case "save-journey":
+        setSavedJourney(node, true);
+        break;
+      case "unfav-journey":
+        setSavedJourney(node, false);
+        break;
+      case "plan-fav-journey":
+        planSavedJourney(node);
+        break;
       case "home-nearby":
         state.autoNearby = true;
         location.hash = "#/nearby";

@@ -599,6 +599,13 @@
     "integ.cap.metro_qr_tickets": "Metro QR tickets",
     "integ.cap.payments": "Payments (UPI, cards, wallet)",
     "integ.cap.ncmc": "NCMC card",
+    "journey.save": "Save this journey",
+    "journey.saved": "Journey saved",
+    "journey.unsaved": "Journey removed",
+    "fav.journeys_title": "Saved journeys",
+    "fav.journeys_none": "No saved journeys yet. Plan a journey and choose Save this journey.",
+    "fav.plan_again": "Plan again",
+    "fav.journey_name": "{from} to {to}",
     // end: en
   };
 
@@ -1192,6 +1199,13 @@
     "integ.cap.metro_qr_tickets": "ಮೆಟ್ರೋ QR ಟಿಕೆಟ್‌ಗಳು",
     "integ.cap.payments": "ಪಾವತಿಗಳು (UPI, ಕಾರ್ಡ್, ವಾಲೆಟ್)",
     "integ.cap.ncmc": "NCMC ಕಾರ್ಡ್",
+    "journey.save": "ಈ ಪ್ರಯಾಣವನ್ನು ಉಳಿಸಿ",
+    "journey.saved": "ಪ್ರಯಾಣ ಉಳಿಸಲಾಗಿದೆ",
+    "journey.unsaved": "ಪ್ರಯಾಣ ತೆಗೆದುಹಾಕಲಾಗಿದೆ",
+    "fav.journeys_title": "ಉಳಿಸಿದ ಪ್ರಯಾಣಗಳು",
+    "fav.journeys_none": "ಇನ್ನೂ ಯಾವುದೇ ಪ್ರಯಾಣ ಉಳಿಸಿಲ್ಲ. ಪ್ರಯಾಣ ಯೋಜಿಸಿ ಮತ್ತು ಈ ಪ್ರಯಾಣವನ್ನು ಉಳಿಸಿ ಆಯ್ಕೆಮಾಡಿ.",
+    "fav.plan_again": "ಮತ್ತೆ ಯೋಜಿಸಿ",
+    "fav.journey_name": "{from} ಇಂದ {to} ಗೆ",
     // end: kn
   };
 
@@ -1785,6 +1799,13 @@
     "integ.cap.metro_qr_tickets": "मेट्रो QR टिकट",
     "integ.cap.payments": "भुगतान (UPI, कार्ड, वॉलेट)",
     "integ.cap.ncmc": "NCMC कार्ड",
+    "journey.save": "यह यात्रा सहेजें",
+    "journey.saved": "यात्रा सहेजी गई",
+    "journey.unsaved": "यात्रा हटाई गई",
+    "fav.journeys_title": "सहेजी गई यात्राएँ",
+    "fav.journeys_none": "अभी कोई यात्रा सहेजी नहीं गई। यात्रा की योजना बनाएँ और यह यात्रा सहेजें चुनें।",
+    "fav.plan_again": "फिर से योजना बनाएँ",
+    "fav.journey_name": "{from} से {to} तक",
     // end: hi
   };
 
@@ -2363,6 +2384,13 @@
     "integ.cap.metro_qr_tickets": "మెట్రో QR టికెట్లు",
     "integ.cap.payments": "చెల్లింపులు (UPI, కార్డులు, వాలెట్)",
     "integ.cap.ncmc": "NCMC కార్డు",
+    "journey.save": "ఈ ప్రయాణాన్ని సేవ్ చేయండి",
+    "journey.saved": "ప్రయాణం సేవ్ అయింది",
+    "journey.unsaved": "ప్రయాణం తీసివేయబడింది",
+    "fav.journeys_title": "సేవ్ చేసిన ప్రయాణాలు",
+    "fav.journeys_none": "ఇంకా సేవ్ చేసిన ప్రయాణాలు లేవు. ప్రయాణం ప్లాన్ చేసి ఈ ప్రయాణాన్ని సేవ్ చేయండి ఎంచుకోండి.",
+    "fav.plan_again": "మళ్లీ ప్లాన్ చేయండి",
+    "fav.journey_name": "{from} నుంచి {to} కు",
     // end: te
   };
 

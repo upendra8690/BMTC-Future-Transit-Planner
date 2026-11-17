@@ -16,10 +16,18 @@
 `flutter_app/lib/main.dart` opens the planner web page in a full-screen WebView. The page address is set at build
 time with `--dart-define=PLANNER_URL=...`. The app:
 
-- loads only pages on the planner's own host, and sends every other link outside the app
+- loads only pages on the planner's own host inside the app
+- opens phone links (`tel:`, used by SOS and the helplines) in the phone's dialler, and other `https` links (official
+  sites) in the phone's browser, through `url_launcher`; nothing else is followed
+- goes back one page when the Android back button is pressed, and closes the app when there is no page to go back to
 - shows the planner's own message if the page cannot be loaded, or if no address was given at build time
 
-It does not store data, does not request location permission itself, and does not handle the Android back button.
+It does not store data and does not request location permission itself. Inside the WebView, "Stops near me" therefore
+reports that location was not given and offers search by stop name. Asking for location in the shell is a later step.
+
+**Change on branch `v4` (17 November 2026):** the link handling and back button above were added after code review
+found that the earlier starter silently blocked official-site and `tel:` links (including SOS) and had no back-button
+handling. The change passed `python android/check_starter.py` and has not been compiled or run on a phone yet.
 
 ## Build it on a developer machine
 

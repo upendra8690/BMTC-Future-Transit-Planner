@@ -25,6 +25,10 @@ REQUIRED_IN_MAIN = {
     "reports load errors for the main frame only": "isForMainFrame",
     "loads the planner address": "loadRequest(",
     "imports webview_flutter": "package:webview_flutter/webview_flutter.dart",
+    "opens phone and official-site links outside the app": "launchUrl(target, mode: LaunchMode.externalApplication)",
+    "sends tel: links (SOS and helplines) to the dialler": "target.scheme == 'tel'",
+    "handles the Android back button inside the WebView": "onPopInvokedWithResult",
+    "goes back a page when there is one": "controller.canGoBack()",
 }
 
 

@@ -475,6 +475,9 @@ legend { padding: 0 6px; font-weight: 600; }
 }
 
 .table-wrap {
+  /* A containing block, so absolutely positioned screen-reader text inside a scrolled table is clipped with it
+     instead of widening the page. */
+  position: relative;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--line);
