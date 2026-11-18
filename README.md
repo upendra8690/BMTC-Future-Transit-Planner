@@ -38,7 +38,7 @@ English · ಕನ್ನಡ · తెలుగు · हिन्दी · phone,
 - [Version 3.0 and 4.0](#-version-30-and-40)
 - [Screenshots](#-screenshots)
 - [What works today](#-what-works-today)
-- [Real data, honest labels](#-real-data-honest-labels)
+- [Real data, honest labels](#%EF%B8%8F-real-data-honest-labels)
 - [Architecture](#%EF%B8%8F-architecture)
 - [Run it yourself](#-run-it-yourself)
 - [Configuration](#%EF%B8%8F-configuration)
