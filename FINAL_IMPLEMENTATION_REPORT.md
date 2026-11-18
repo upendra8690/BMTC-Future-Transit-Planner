@@ -58,4 +58,4 @@ The app keeps each one switched off, with the official channel shown.
 
 ## 5. Test results on this round's final code
 See the chat report and `government_submission_2026/10_TEST_AND_PERFORMANCE_EVIDENCE.md`. Previous round, for
-reference: public site real-mode browser check 14/14; deployment checks 13/13. No test was removed or weakened.
+reference: public site real-mode browser check 14/14; deployment checks 12/12. No test was removed or weakened.

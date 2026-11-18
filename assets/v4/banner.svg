@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">Bengaluru Transit Planner 4.0</title>
+  <desc id="desc">Independent, unofficial Bengaluru transport planner. Public preview with real Namma Metro journeys from an unofficial community feed.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071a3d"/>
+      <stop offset="0.55" stop-color="#0b2f6b"/>
+      <stop offset="1" stop-color="#0a4aa8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.18" r="0.6">
+      <stop offset="0" stop-color="#5eb3ff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#5eb3ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="360" rx="24" fill="url(#bg)"/>
+  <rect width="1280" height="360" rx="24" fill="url(#glow)"/>
+
+  <!-- Stylised Metro lines: Purple and Green cross (Majestic); Yellow leaves Green at its own interchange (RV Road);
+       Pink is dashed because it opened after the community feed's last update. Not a map. -->
+  <g fill="none" stroke-linecap="round" stroke-width="10" opacity="0.95">
+    <path d="M760 70 C 880 120, 960 150, 1220 150" stroke="#8c2877"/>
+    <path d="M820 290 C 900 230, 980 190, 1040 150 S 1150 70, 1220 60" stroke="#00a651"/>
+    <path d="M968 196 C 1010 240, 1100 270, 1220 305" stroke="#ffd400"/>
+    <path d="M900 330 C 960 300, 1010 280, 1070 250" stroke="#f472b6" stroke-dasharray="4 18"/>
+  </g>
+  <g fill="#ffffff" stroke="#071a3d" stroke-width="5">
+    <circle cx="1040" cy="150" r="13"/>
+    <circle cx="880" cy="118" r="9"/>
+    <circle cx="1150" cy="150" r="9"/>
+    <circle cx="968" cy="196" r="12"/>
+    <circle cx="1110" cy="268" r="9"/>
+  </g>
+
+  <g font-family="'Segoe UI', 'Noto Sans', Roboto, Helvetica, Arial, sans-serif" fill="#ffffff">
+    <text x="64" y="92" font-size="20" font-weight="600" letter-spacing="3" fill="#9cc9ff">INDEPENDENT · UNOFFICIAL · PUBLIC PREVIEW</text>
+    <text x="64" y="160" font-size="60" font-weight="800">Bengaluru Transit</text>
+    <text x="64" y="226" font-size="60" font-weight="800">Planner <tspan fill="#ffd400">4.0</tspan></text>
+    <text x="64" y="276" font-size="24" fill="#d6e6ff">Real Namma Metro journeys · honest labels · no invented data</text>
+    <text x="64" y="316" font-size="22" fill="#9cc9ff">English · ಕನ್ನಡ · తెలుగు · हिन्दी · installable web app</text>
+  </g>
+</svg>
