@@ -25,7 +25,7 @@ vulnerabilities. Evidence is in [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) and [0
 | Transport security | MET | HTTPS from the host; HSTS and security headers present on the public service (checked 18 Nov 2026) |
 | Security headers | PARTIAL | CSP, HSTS, X-Frame-Options DENY, Permissions-Policy, Referrer-Policy, COOP, nosniff all present. The CSP still allows inline styles (S4) |
 | File upload (GTFS import, administrators only) | MET | Size, member count, decompressed size and compression ratio checked before reading |
-| Rate limiting | **OPEN** | Finding R1 (section 4) |
+| Rate limiting | MET | 120 requests a minute per visitor, counted by the address the hosting edge reports (R1 fixed and verified on the public service, 18 Nov 2026) |
 | Error handling and logging | PARTIAL | No access log, so searches and locations are not recorded. Administrative actions are in an audit log. See section 6 for the government logging question |
 | Dependencies | MET | pip-audit: no known vulnerabilities; versions pinned in `requirements-verified.txt` |
 | Static analysis | MET | ruff clean; bandit: no medium- or high-severity issues |
@@ -37,7 +37,7 @@ vulnerabilities. Evidence is in [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) and [0
 | API1 Object-level authorisation | MET | Device and account scoping tested |
 | API2 Authentication | PARTIAL | See S5 |
 | API3 Property-level authorisation | MET | Response models list the fields returned; no provider field can appear |
-| API4 Resource consumption | **OPEN** | R1; request sizes and query lengths are limited |
+| API4 Resource consumption | MET | Per-visitor limit (R1 fixed); request sizes and query lengths are limited |
 | API5 Function-level authorisation | MET | Every administrative route requires the key or an admin role |
 | API6 Sensitive business flows | N/A | No tickets or payments |
 | API7 Server-side request forgery | MET | The server fetches no address supplied by a user |
@@ -62,7 +62,7 @@ vulnerabilities. Evidence is in [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) and [0
 ## 4. Open findings register
 | ID | Finding | Severity | Affects | Status |
 |---|---|---|---|---|
-| R1 | The per-visitor request limit does not identify visitors reliably behind the hosting provider's proxy. It can be bypassed, and a flood of requests could make the server refuse new visitors for about a minute. Confirmed with a small, controlled test on the public service on 18 Nov 2026 | Medium (availability; no data exposure) | Public service, all `/api/` routes | Fix designed; code change awaits the applicant's approval |
+| R1 | **Fixed and verified (18 Nov 2026, commit `5ef03ed`).** The per-visitor request limit trusted the first X-Forwarded-For entry, which a visitor can write, so it could be bypassed and its client table filled. It now counts visitors by CF-Connecting-IP, which Render's Cloudflare edge sets. Live test: 120 requests with a forged X-Forwarded-For used up the sender's own budget; a forged CF-Connecting-IP is refused by the edge (HTTP 403) | Was medium | Public service, all `/api/` routes | Closed |
 | S5 | One shared administrator key | Medium | Administration | Per-person admin accounts, once a permanent database exists |
 | H1 | Free hosting: no permanent database, no backups; the disk is erased on restart | Medium for a pilot | Saved routes on the server; upcoming-transport edits | Paid hosting and PostgreSQL with daily backups before any pilot |
 | A1 | Android wrapper not tested on a phone or emulator | Medium | Android | Emulator test, then a phone test |
@@ -72,14 +72,14 @@ vulnerabilities. Evidence is in [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) and [0
 | S4 | CSP allows inline styles | Low | Web app | Move inline styles into the stylesheet |
 | — | No independent penetration test | — | All | Before any production use; the authority's security team is welcome to review |
 
-**Accuracy of labels** (trust findings, also confirmed on 18 Nov 2026):
+**Accuracy of labels** (trust findings, confirmed on 18 Nov 2026 and **fixed the same day in commit `5ef03ed`**):
 
-| ID | Finding | Effect |
+| ID | Finding | Fix |
 |---|---|---|
-| D1 | Metro rides say "Wait N min for the first bus" | Wrong word for a train |
-| D2 | The feature list reports "Fares from the timetable feed" as available, although the public service never shows a fare | Overstates a feature |
-| D3 | Saved routes kept on the server (not the journeys saved on the phone) are lost when the free server restarts or wakes, yet the feature is listed as available | Passengers can lose saved routes |
-| D4 | The app description and opening screen mention bus routes and timetables, although the public service has no bus data | Overstates coverage |
+| D1 | Metro rides said "Wait N min for the first bus" | The wording follows the mode of the first ride (Metro train, bus, other), in all four languages. Browser check: no "first bus" on a Metro journey |
+| D2 | The feature list reported fares as available, although the public service never shows a fare | Fares are reported available only when a fare will be shown; otherwise "No verified fares" |
+| D3 | Saved routes kept on the server are lost when the free server restarts or wakes | The server reports that its storage is temporary, and the saved-routes panel says so and points to what stays on the phone. A permanent database (H1) removes the cause |
+| D4 | The description and opening screen mentioned bus routes and timetables | The description, install text and opening tagline now describe Metro journeys and transport information only |
 
 ## 5. Privacy (DPDP Act, 2023 and DPDP Rules, 2025)
 The DPDP Rules were notified in November 2025. Most obligations of data fiduciaries apply 18 months later (May 2027).
@@ -116,7 +116,8 @@ decide; none is claimed as met.**
 | Keyboard use, visible focus, skip link | MET (browser checks) |
 | Large text, dark mode, reduced motion | MET |
 | Every screen at 390 px without sideways scrolling | MET |
-| Narrower phones (320 px and 360 px) and tablets | OPEN: planned |
+| Phones from 320 px to 430 px, a tablet and desktops (10 widths, 11 screens each) | MET: no sideways scrolling (`tests/browser/responsive_check.py`, 22 of 22, 18 Nov 2026) |
+| Notches and rounded corners (iPhone landscape) | Safe-area padding added; not yet seen on a real iPhone |
 | Screen readers (TalkBack, NVDA, VoiceOver) | OPEN: not tested |
 | Kannada, Telugu and Hindi reviewed by native speakers | OPEN: first drafts only; 629 texts in each language |
 

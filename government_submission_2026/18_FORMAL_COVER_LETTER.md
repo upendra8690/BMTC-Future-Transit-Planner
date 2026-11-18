@@ -27,7 +27,7 @@ I wish to state clearly:
 - **No personal data.** It collects no names, phone numbers, email addresses, locations or payment details.
 
 The enclosed package documents the application with evidence, including its open findings and limitations:
-- 501 automated tests pass on the current code (18 November 2026);
+- 512 automated tests pass on the current code (18 November 2026);
 - all 869 on-screen controls were exercised in a browser;
 - the automated accessibility scan (WCAG 2.1 AA) found no violations;
 - the security self-assessment lists its open findings. None is rated high severity. There has been no independent

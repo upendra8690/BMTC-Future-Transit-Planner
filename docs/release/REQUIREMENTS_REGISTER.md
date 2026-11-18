@@ -24,21 +24,21 @@ sources below. When an authority supplies its own requirements, they replace the
 | **EXT** | Requires an external provider (payment, SMS, app store, auditor) |
 | **DEC** | Requires a decision by the government or the owner |
 
-## Summary (101 requirements, counted from the tables below)
+## Summary (101 requirements, counted from the tables below; updated after the Stage 1 fixes of 18 Nov 2026)
 | Class | Count | Share |
 |---|---|---|
-| IV Implemented and verified | 27 | 27 % |
-| INV Implemented, not verified on the target platform | 6 | 6 % |
-| P Partially implemented | 16 | 16 % |
-| M Missing, buildable without permission | 8 | 8 % |
+| IV Implemented and verified | 32 | 32 % |
+| INV Implemented, not verified on the target platform | 7 | 7 % |
+| P Partially implemented | 13 | 13 % |
+| M Missing, buildable without permission | 5 | 5 % |
 | GOV Needs government data, API or permission | 28 | 28 % |
 | EXT Needs an external provider | 10 | 10 % |
 | DEC Needs a government or owner decision | 6 | 6 % |
 
 **What the figures mean:**
-- **Verified coverage is 27 %.** 49 % of requirements exist in some form (IV, INV and P together).
+- **Verified coverage is 32 %.** 51 % of requirements exist in some form (IV, INV and P together).
 - **44 %** cannot be completed by engineering alone (GOV, EXT and DEC).
-- **8 %** are missing but can be built now.
+- **5 %** are missing but can be built now.
 
 Bus information, live transport, ticketing and payments make up most of the blocked share. None of them can become real
 without written permission and official data.
@@ -97,7 +97,7 @@ Security: an official feed's credentials stay in the hosting environment; the fe
 | D-08 | Accessible (step-free) journey options | OB | None | Station and stop accessibility data | — | GOV |
 | D-09 | Travel-time information | OB | Duration per option and ride; Metro times approximate | — | pytest; public check | IV |
 | D-10 | Leave now or choose a date and time | OB | Plan screen | — | e2e | IV |
-| D-11 | Correct wording per mode | STD | Metro rides say "first bus" (D1) | — | Found 18 Nov 2026 | P |
+| D-11 | Correct wording per mode | STD | The wait names the mode of the first ride (Metro train, bus, other) | — | Browser check: no "first bus" on a Metro journey (18 Nov 2026) | IV |
 
 ## E. Ticketing, passes and notices
 Security: no ticket, QR code, receipt or balance is ever produced without a provider; tests enforce this.
@@ -134,7 +134,7 @@ Security: never store card numbers or UPI PINs; verify webhooks; idempotent requ
 | G-10 | Offline use | OB | Service worker: shell and saved timetables | — | e2e offline steps | IV |
 | G-11 | Upcoming transport with status labels | OB | Register with sources and history | — | pytest 17; browser 17 | IV |
 | G-12 | Rule-based travel assistant | OB | Fixed rules, app data only | — | pytest | IV |
-| G-13 | Feature list states only what is true | OB | Lists fares and saved routes as available (D2, D3) | — | Found 18 Nov 2026 | P |
+| G-13 | Feature list states only what is true | OB | Fares reported only when shown; temporary server storage reported | — | pytest (`tests/test_client_ip_and_labels.py`) | IV |
 
 ## H. Namma Metro
 | ID | Requirement | Source | Built today | Dependency or blocker | Evidence | Class |
@@ -175,13 +175,13 @@ Security: never store card numbers or UPI PINs; verify webhooks; idempotent requ
 | ID | Requirement | Source | Built today | Dependency or blocker | Evidence | Class |
 |---|---|---|---|---|---|---|
 | K-01 | Responsive web at 390 px and desktop | OB | Yes | — | Launch check 268/268 | IV |
-| K-02 | Responsive web at 320, 360, 375, 412, 430 px and tablet | OB | Likely; not measured | — | — | INV |
+| K-02 | Responsive web at 320, 360, 375, 412, 430 px, tablet and desktop | OB | Yes | — | `tests/browser/responsive_check.py` 22/22 (11 screens at 10 widths) | IV |
 | K-03 | Installable PWA with offline shell | OB | Manifest, icons, service worker | Device install not tested | e2e (Edge) | INV |
 | K-04 | Firefox and Safari | OB | Standard web code | Not tested | — | INV |
 | K-05 | Android debug APK | OB | Built by CI (compile check) | Not run on a device or emulator | CI `ab94f8a` | INV |
-| K-06 | Android signed release APK and AAB | OB | Debug-signed only; no AAB | Owner's release key; Google Play account | — | DEC |
-| K-07 | Android location for "near me" | OB | None in the wrapper | — | Code review | M |
-| K-08 | Android load-error retry and downloads | OB | Static error message; downloads not handled | — | Code review | M |
+| K-06 | Android signed release APK and AAB | OB | AAB and APK build in CI; release signing switches on when the owner's key is in GitHub secrets | Owner's release key; Google Play account | CI (`d72e5c9`) | DEC |
+| K-07 | Android location for "near me" | OB | Asked only when the page asks; never retained | Not run on a device | CI compile and analyze (`d72e5c9`) | INV |
+| K-08 | Android load-error retry and downloads | OB | Try again; downloads to the share sheet | Not run on a device | CI compile and analyze (`d72e5c9`) | INV |
 | K-09 | Android deep links | OB | None | Domain verification file | — | M |
 | K-10 | iPhone and iPad (Safari PWA) | OB | Standard web code; bottom safe area only | Not tested on a device | — | INV |
 | K-11 | iOS app project and signing | OB | None | A Mac or a macOS CI runner; Apple Developer Program | — | EXT |
@@ -190,10 +190,10 @@ Security: never store card numbers or UPI PINs; verify webhooks; idempotent requ
 | ID | Requirement | Source | Built today | Dependency or blocker | Evidence | Class |
 |---|---|---|---|---|---|---|
 | L-01 | OWASP self-assessment with a findings register | STD | Document 20 | — | 18 Nov 2026 | IV |
-| L-02 | Reliable per-visitor rate limiting | STD | Limiter can be bypassed behind the proxy (R1) | — | Live test 18 Nov 2026 | P |
+| L-02 | Reliable per-visitor rate limiting | STD | Counted by the hosting edge's visitor address (R1 fixed) | — | Live test 18 Nov 2026; pytest | IV |
 | L-03 | CSP without inline styles | STD | Inline styles allowed (S4) | — | Code review | P |
 | L-04 | Secrets only in the hosting environment | STD | Yes | — | Commit scan | IV |
-| L-05 | Dependency and static scans in CI on every push | STD | Run by hand only | — | — | M |
+| L-05 | Dependency and static scans in CI on every push | STD | bandit and pip-audit in the CI test jobs | — | CI `5ef03ed` | IV |
 | L-06 | Browser and accessibility tests in CI | STD | Run by hand only | — | — | M |
 | L-07 | Permanent database with backups | OB | Proven in CI; not used by the public service | Owner's database | CI PostgreSQL job | DEC |
 | L-08 | Incident response procedure | LAW | None | — | — | M |

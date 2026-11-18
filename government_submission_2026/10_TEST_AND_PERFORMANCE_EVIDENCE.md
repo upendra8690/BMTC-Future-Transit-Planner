@@ -27,6 +27,18 @@ Every result below comes from a real run. Each row states the code it was run on
 | 16 | Load, local server | `python tests/audit/load_audit.py` | 1 user: 90 requests, 0 errors, 95th percentile 47 ms. 20 concurrent users: 900 requests, 0 errors | `d34f347` (planner unchanged since) |
 | 17 | Android wrapper | GitHub Actions compile check; `python android/check_starter.py` | Compiles (`ab94f8a`); static check 10 of 10. **Not run on a phone or emulator** | `ab94f8a` |
 
+**Fixes later on 18 Nov 2026 (commits `5ef03ed` and `d72e5c9`).**
+
+| Suite | Result | Run on |
+|---|---|---|
+| pytest | 512 passed, 5 skipped, 0 failed (11 new tests for R1, D2, D3 and the wording) | `5ef03ed` |
+| Real-mode screens (`real_mode_check.py`, local real-mode server) | 14 of 14 | `5ef03ed` |
+| Screen widths 320 to 1920 px, 11 screens each (`responsive_check.py`) | 22 of 22 | `5ef03ed` |
+| R1 on the public service | Forged X-Forwarded-For counted against the sender; forged CF-Connecting-IP refused by the edge (403) | Public service |
+| GitHub Actions CI (now including bandit and pip-audit) | 4 of 4 jobs passed | `5ef03ed` |
+| Android build in CI: analyze, APK, target API 36 check, AAB | All passed; nothing kept or published. Not run on a device | `d72e5c9` |
+| Public deployment check | All 14 checks passed (after waking the free 3.0 service) | Public services |
+
 **Commits after `fb8d2a2`.** Commits `ab725e6` and `aafdc4f` changed database and account code. Accounts stay switched
 off on the public service. Rows 1 to 8 cover the final code. The browser suites (rows 9 to 13 and 15) were not
 repeated after those two commits.

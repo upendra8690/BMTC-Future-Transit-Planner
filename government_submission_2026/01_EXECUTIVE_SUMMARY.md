@@ -19,8 +19,8 @@ collects no names, phone numbers, email addresses or payment details.
 | Area | Position |
 |---|---|
 | Transport data | **No official data.** The public preview shows real Namma Metro Purple, Green and Yellow line journeys from an *unofficial community reconstruction* of BMRCL's published timetables (ODbL licence). It is labelled "Unverified feed" with "Approximate times", and its fares are never shown. **There is no real BMTC bus data.** Invented demonstration data appears only on a separate demonstration server |
-| Software quality | 501 automated tests pass on the current code. In browser tests, all 869 on-screen controls worked. The automated accessibility scan (WCAG 2.1 AA) found no violations. See [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) |
-| Security | Self-assessment, not an independent test. Open findings are listed, none of high severity; the main one is a rate-limit weakness (R1), with a fix planned. See [20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md) |
+| Software quality | 512 automated tests pass on the current code. In browser tests, all 869 on-screen controls worked. The automated accessibility scan (WCAG 2.1 AA) found no violations. See [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) |
+| Security | Self-assessment, not an independent test. Open findings are listed, none of high severity. A rate-limit weakness (R1) found on 18 Nov 2026 was fixed and verified on the public service the same day. See [20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md) |
 | Live tracking, tickets, passes, Metro QR, payments, NCMC | **Not available.** Each needs written authorisation; until then the app says it is unavailable and points to the official channel |
 | Public availability | https://bengaluru-transit-planner-v4.onrender.com, in real mode; every deployment check passed on 18 Nov 2026 |
 | Android | A WebView wrapper that compiles in CI. Not yet tested on a phone; no release-signed build |

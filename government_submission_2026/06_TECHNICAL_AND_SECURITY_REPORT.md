@@ -14,7 +14,7 @@ repository: `V4_SECURITY_REPORT.md` and `docs/launch/SECURITY_AUDIT.md`.
 | Cross-site scripting | PASS | All values are escaped; the content security policy allows scripts only from the app itself; a stored-XSS probe ran in a real browser |
 | CSRF | Not applicable | No cookies or ambient credentials; keys travel in headers that a browser never adds on its own |
 | Transport security | PASS | HSTS and security headers on every response (pytest); hosting supplies HTTPS |
-| Rate limiting | OPEN (R1) | Per-client limit, default 120 requests per minute, with 429 and `Retry-After` (pytest). On the public service, a controlled test on 18 Nov 2026 showed that the limit does not identify visitors reliably behind the hosting proxy |
+| Rate limiting | PASS (R1 fixed) | Per-client limit, default 120 requests per minute, with 429 and `Retry-After` (pytest). On the public service, finding R1 (the limit could be bypassed behind the hosting proxy) was fixed and verified on 18 Nov 2026 |
 | Input validation | PASS | Lengths, ranges and patterns on every input (pytest 422 cases; e2e forms) |
 | Secrets | PASS | Taken from the environment only; `.env` and data folders are not in Git; Render generates the admin key; a secret scan of the commits found nothing |
 | Location permission | PASS | Asked only on "Stops near me". A refusal gets a message and nothing is sent; the location is never stored |
@@ -41,7 +41,7 @@ The full register, including the Android and label findings found on 18 Nov 2026
 
 | ID | Finding | Severity | Planned action |
 |---|---|---|---|
-| R1 | Rate limit can be bypassed behind the hosting proxy | Medium (availability) | Fix designed; awaits the applicant's approval of the code change |
+| R1 | Rate limit could be bypassed behind the hosting proxy | Was medium | **Fixed and verified** on the public service, 18 Nov 2026 |
 | S5 | One shared administrator key, so actions cannot be traced to a person | Medium | Separate administrator accounts once passenger accounts exist |
 | H1 | Free hosting has no persistent database and no backups | Medium for a pilot | Paid hosting and PostgreSQL with daily backups before any pilot |
 | A1 | Android shell not tested on a phone | Medium | Test calls, links and the back button on a real phone |

@@ -26,9 +26,9 @@ Details are in [03](03_PROBLEM_AND_PUBLIC_BENEFIT.md).
 | Namma Metro | Real Purple, Green and Yellow line journeys from an unofficial community reconstruction of BMRCL's published timetables (ODbL). Labelled "Unverified feed", approximate times, no fares. Pink Line missing |
 | BMTC buses | **No real data.** Bus planning is built and tested on invented demonstration data only, which runs on a separate demonstration server |
 | Live tracking, tickets, passes, payments | Not available; each stays off until written authorisation exists |
-| Quality | 501 automated tests pass; browser, accessibility and security checks recorded in [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) |
-| Open findings | Listed openly in [20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md); none rated high severity |
-| Requirements | 101 requirements tracked; 27 % implemented and verified; 44 % need permission, a provider or a decision (`docs/release/REQUIREMENTS_REGISTER.md`) |
+| Quality | 512 automated tests pass; browser, accessibility and security checks recorded in [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) |
+| Open findings | Listed openly in [20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md); none rated high severity. Findings R1 and D1 to D4 found on 18 Nov 2026 were fixed and verified the same day |
+| Requirements | 101 requirements tracked; 32 % implemented and verified; 44 % need permission, a provider or a decision (`docs/release/REQUIREMENTS_REGISTER.md`) |
 
 ## 4. What official data would change
 With a data licence and the official GTFS files:

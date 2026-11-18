@@ -8,7 +8,7 @@ action or approval.
 |---|---|---|---|
 | 1 | Run `python scripts/verify_deployment.py https://bengaluru-transit-planner-v4.onrender.com --v3 https://bmtc-future-transit-planner-3-0.onrender.com` on the day. Every line must say PASS. Print the result | Owner | ☐ |
 | 2 | Walk through the demonstration ([12](12_DEMONSTRATION_GUIDE.md)) on a phone, on the public address | Owner | ☐ |
-| 3 | Decide whether to fix findings R1 and D1 to D4 before sending ([20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md)). Recommended: yes | Owner | ☐ |
+| 3 | Findings R1 and D1 to D4 were fixed and verified on 18 Nov 2026 ([20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md)). Re-read document 20 for anything new before sending | Owner | ☐ |
 | 4 | Decide on a code licence. Until then, say "publicly available", never "open source" | Owner | ☐ |
 | 5 | Fill in name, email, mobile number, date and signature in 15, 16, 17 and 18 | Owner | ☐ |
 | 6 | Telephone each office to confirm the addressee's designation and the postal address (section B) | Owner | ☐ |

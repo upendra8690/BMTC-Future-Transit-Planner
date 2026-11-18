@@ -115,3 +115,15 @@ target API 36 from 31 August 2026.
 3. Release signing: create an upload key yourself and store it only in GitHub encrypted secrets. Never share it in chat.
 4. The permanent database, accounts and paid hosting (Stage 2).
 5. iOS: PWA only for now, or a wrapper project as well.
+
+## 8. Stage 1 progress (18 November 2026, approved by the owner)
+| Item | Commit | Evidence |
+|---|---|---|
+| R1 rate limit behind the hosting proxy | `5ef03ed` | Live: a forged X-Forwarded-For used the sender's own budget; a forged CF-Connecting-IP is refused by the edge (403). pytest |
+| D1 to D4 labels | `5ef03ed` | Live: Metro journeys say "first Metro train"; fares reported as NO_VERIFIED_FARES; storage reported as temporary. pytest |
+| Safe areas, Apple title, install screenshots | `5ef03ed` | Responsive check 22/22 at 10 widths from 320 px |
+| bandit and pip-audit in CI | `5ef03ed` | CI 4/4 jobs passed |
+| Android: location on request, Try again, downloads, backup off, API 36, AAB, optional release signing | `5ef03ed`, `d72e5c9` | CI: analyze, APK, API-level check and AAB all passed. **Not run on a device** |
+
+Still open in Stage 1: running the Android app on an emulator or phone, inline styles (S4), administrator service
+notices (E-03) and the iOS decision.
