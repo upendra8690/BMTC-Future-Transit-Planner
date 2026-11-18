@@ -164,7 +164,13 @@ jobs:
           echo "Release key configured: release builds are signed with the owner's key." | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Analyze
-        run: flutter analyze --no-fatal-infos
+        run: |
+          set -o pipefail
+          if ! flutter analyze --no-fatal-infos 2>&1 | tee analyze.log; then
+            # Surface the analyzer's findings as annotations, which are readable without signing in.
+            grep -E "^ *(error|warning) " analyze.log | head -20 | sed 's/^ */::error title=flutter analyze::/'
+            exit 1
+          fi
 
       - name: Build release APK
         run: |

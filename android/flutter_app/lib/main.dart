@@ -77,10 +77,10 @@ class _PlannerPageState extends State<PlannerPage> {
 
   /// Asked only when the planner page requests the location, and only for the planner's own address.
   Future<GeolocationPermissionsResponse> _locationPrompt(GeolocationPermissionsRequestParams request) async {
-    final origin = Uri.tryParse(request.origin ?? '');
+    final origin = Uri.tryParse('${request.origin}');
     final address = _address;
     if (origin == null || address == null || origin.host != address.host) {
-      return const GeolocationPermissionsResponse(allow: false, retain: false);
+      return GeolocationPermissionsResponse(allow: false, retain: false);
     }
     final status = await Permission.locationWhenInUse.request();
     return GeolocationPermissionsResponse(allow: status.isGranted, retain: false);
