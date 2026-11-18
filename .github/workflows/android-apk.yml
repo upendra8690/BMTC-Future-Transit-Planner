@@ -70,7 +70,26 @@ jobs:
           grep -q 'android.permission.INTERNET' "$manifest" || \
             sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <application|' "$manifest"
           sed -i "s|android:label=\"[^\"]*\"|android:label=\"$APP_LABEL\"|" "$manifest"
-          grep -n 'INTERNET\|android:label' "$manifest"
+          # Location is declared so the app can ask for it when the planner page asks ("Stops near me");
+          # Android shows the question only at that moment (lib/main.dart).
+          for permission in ACCESS_COARSE_LOCATION ACCESS_FINE_LOCATION; do
+            grep -q "android.permission.$permission" "$manifest" || \
+              sed -i "s|<application|<uses-permission android:name=\"android.permission.$permission\" />\n    <application|" "$manifest"
+          done
+          # Web data (the device key, saved journeys) stays on the phone: no cloud backup or device-to-device copy.
+          grep -q 'android:allowBackup' "$manifest" || \
+            sed -i 's|<application|<application android:allowBackup="false" android:fullBackupContent="false"|' "$manifest"
+          grep -n 'permission\|android:label\|allowBackup' "$manifest"
+          # Google Play requires new apps and updates to target API 36 (from 31 Aug 2026). Use at least 36 for both
+          # the target and the compile level, keeping Flutter's own value if it is higher.
+          gradle_file=android/app/build.gradle.kts
+          if [ -f "$gradle_file" ]; then
+            sed -i -E 's/(compileSdk|targetSdk) = flutter\.(compileSdkVersion|targetSdkVersion)/\1 = maxOf(flutter.\2, 36)/' "$gradle_file"
+          else
+            gradle_file=android/app/build.gradle
+            sed -i -E 's/(compileSdk|targetSdk)(Version)? *=? *flutter\.(compileSdkVersion|targetSdkVersion)/\1\2 Math.max(flutter.\3, 36)/' "$gradle_file"
+          fi
+          grep -nE 'compileSdk|targetSdk' "$gradle_file"
 
       - name: App icon and launch screen (assets/app-icon.svg, rendered into assets/icon/)
         run: |
@@ -97,6 +116,53 @@ jobs:
           dart run flutter_launcher_icons
           dart run flutter_native_splash:create
 
+      # The owner's release key, only if the four secrets exist (Settings > Secrets and variables > Actions). The key
+      # is decoded into the runner for this job only; it is never stored in Git. Without it, Flutter's debug key is used.
+      - name: Use the owner's release key, if configured
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "No release key configured: builds are signed with Flutter's debug key and are not for Google Play." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          {
+            echo "storeFile=upload-keystore.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > android/key.properties
+          cat >> android/app/build.gradle.kts <<'EOF'
+
+          // Added by the workflow when the owner's release key is configured (never stored in Git).
+          val releaseKey = java.util.Properties().apply {
+              val keyFile = rootProject.file("key.properties")
+              if (keyFile.exists()) keyFile.inputStream().use { load(it) }
+          }
+          if (!releaseKey.isEmpty) {
+              android {
+                  signingConfigs {
+                      create("upload") {
+                          storeFile = file(releaseKey.getProperty("storeFile"))
+                          storePassword = releaseKey.getProperty("storePassword")
+                          keyAlias = releaseKey.getProperty("keyAlias")
+                          keyPassword = releaseKey.getProperty("keyPassword")
+                      }
+                  }
+                  buildTypes {
+                      getByName("release") {
+                          signingConfig = signingConfigs.getByName("upload")
+                      }
+                  }
+              }
+          }
+          EOF
+          echo "Release key configured: release builds are signed with the owner's key." | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos
 
@@ -105,7 +171,7 @@ jobs:
           set -o pipefail
           ok=0
           for attempt in 1 2 3; do
-            if flutter build apk --release --dart-define=PLANNER_URL="$PLANNER_URL" 2>&1 | tee build.log; then ok=1; break; fi
+            if flutter build apk --release --build-number="${{ github.run_number }}" --dart-define=PLANNER_URL="$PLANNER_URL" 2>&1 | tee build.log; then ok=1; break; fi
             # Retry only when a download was rate-limited or failed; real build errors fail straight away.
             grep -qE '429|Too Many Requests|Could not GET|Could not resolve' build.log || break
             echo "Download problem on attempt $attempt; waiting before retrying"; sleep $((attempt * 90))
@@ -118,6 +184,21 @@ jobs:
           fi
           cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/BMTC-Planner.apk"
           ls -la "$GITHUB_WORKSPACE/BMTC-Planner.apk"
+
+      - name: Check the API level, version code and permissions of the APK
+        run: |
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2"
+          "$aapt2" dump badging "$GITHUB_WORKSPACE/BMTC-Planner.apk" > badging.txt
+          grep -E "^package:|targetSdkVersion|uses-permission" badging.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          target=$(grep -oE "targetSdkVersion:'[0-9]+'" badging.txt | grep -oE "[0-9]+")
+          if [ "${target:-0}" -lt 36 ]; then echo "::error::targetSdkVersion is $target; Google Play needs 36"; exit 1; fi
+
+      # A Play bundle is built on every run as a check only; it is not kept or published. It is signed with Flutter's
+      # debug key until the owner adds a release key (android/README.md), so it cannot be uploaded to Google Play yet.
+      - name: Build Play bundle (AAB) as a check
+        run: |
+          flutter build appbundle --release --build-number="${{ github.run_number }}" --dart-define=PLANNER_URL="$PLANNER_URL"
+          ls -la build/app/outputs/bundle/release/app-release.aab
 
       - name: Record what this run did
         run: |

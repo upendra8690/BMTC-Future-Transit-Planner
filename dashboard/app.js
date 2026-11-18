@@ -409,6 +409,22 @@
       if (!response.ok) throw httpError(response, await readJson(response));
       var blob = await response.blob();
       var match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
+      // Inside the Android app a WebView cannot save a blob link, so the file goes to the app, which opens the
+      // phone's share sheet. Only the file's name, type and contents are sent.
+      if (window.PlannerAndroid && typeof window.PlannerAndroid.postMessage === "function") {
+        var encoded = await new Promise(function (resolve, reject) {
+          var reader = new FileReader();
+          reader.onload = function () { resolve(String(reader.result).split(",")[1] || ""); };
+          reader.onerror = function () { reject(reader.error); };
+          reader.readAsDataURL(blob);
+        });
+        window.PlannerAndroid.postMessage(JSON.stringify({
+          name: match ? match[1] : fallbackName,
+          type: (blob.type || "").split(";")[0],
+          data: encoded
+        }));
+        return;
+      }
       var url = URL.createObjectURL(blob);
       var link = document.createElement("a");
       link.href = url;
@@ -756,8 +772,11 @@
   async function loadSaved(panel, token) {
     await fillPanel(panel, token, async function () {
       var data = await api("/api/saved-routes");
-      if (!data.saved.length) return '<div class="empty">' + esc(t("routes.saved_none")) + "</div>";
-      return '<ul class="list">' + data.saved.map(function (s) {
+      // On free hosting the server's disk is erased on restart; say so where the passenger saves things.
+      var note = state.serverStoragePersistent === false
+        ? '<div class="notice"><p>' + esc(t("routes.saved_temporary")) + "</p></div>" : "";
+      if (!data.saved.length) return note + '<div class="empty">' + esc(t("routes.saved_none")) + "</div>";
+      return note + '<ul class="list">' + data.saved.map(function (s) {
         return '<li><div><div class="title">' + esc(s.label) + '</div><div class="muted">' + esc(s.gtfs_route_id) + "</div></div>" +
           '<div class="row-actions">' + badge(s.classification) +
           '<button type="button" class="secondary" data-action="open-saved" data-gtfs="' + esc(s.gtfs_route_id) + '" data-cls="' + esc(s.classification) + '">' + esc(t("common.open")) + "</button>" +
@@ -1369,8 +1388,12 @@
     var changes = option.changes === 0 ? t("journey.changes_none")
       : option.changes === 1 ? t("journey.changes_one")
       : t("journey.changes_many", { n: fmtNum(option.changes) });
+    // The wait is for the first ride, so its wording follows that ride's mode: a Metro train is not a bus.
+    var firstRide = (option.legs || []).filter(function (leg) { return leg.type === "ride"; })[0];
+    var firstMode = firstRide ? firstRide.mode : "bus";
+    var waitKey = firstMode === "metro" ? "journey.wait_metro" : firstMode === "bus" ? "journey.wait" : "journey.wait_other";
     var wait = option.wait_minutes > 0
-      ? "<li>" + esc(t("journey.wait", { n: fmtNum(option.wait_minutes) })) + "</li>" : "";
+      ? "<li>" + esc(t(waitKey, { n: fmtNum(option.wait_minutes) })) + "</li>" : "";
     return '<li class="option">' +
       '<h3 class="option-title">' + esc(t("journey.option", { n: fmtNum(number) })) + " " + labels + "</h3>" +
       '<p class="option-summary">' + esc(t("journey.summary", {
@@ -2403,6 +2426,7 @@
       });
       state.features = map;
       state.version = data.version;
+      state.serverStoragePersistent = data.server_storage_persistent !== false;
       var banner = document.getElementById("demoBanner");
       if (banner) {
         banner.textContent = data.demo_mode ? t("demo.banner") : "";

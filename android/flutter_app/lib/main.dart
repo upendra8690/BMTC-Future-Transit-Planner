@@ -12,13 +12,29 @@
 //   - other https links (official BMTC, BMRCL and government sites, map credits) open in the phone's browser.
 //   Nothing else is followed.
 // Back button: goes back one page inside the app while there is a page to go back to; otherwise Android closes it.
+// Location: asked from Android only when the planner page asks for it ("Stops near me"), and only for the
+//   planner's own address. It is never stored by the app and never retained by the WebView.
+// Downloads: the page sends a timetable CSV or PDF through the PlannerAndroid channel. The file is written to the
+//   app's temporary folder and handed to Android's share sheet, so the passenger chooses where to keep it.
+// Errors: if the planner cannot be loaded, the app says so and offers "Try again".
+
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 const String plannerUrl = String.fromEnvironment('PLANNER_URL');
+
+/// Files the page may hand over, and the largest size accepted (base64 text, so about 7.5 MB of file).
+const Set<String> allowedDownloadTypes = {'text/csv', 'application/pdf', 'application/json'};
+const int maxDownloadChars = 10 * 1024 * 1024;
 
 void main() {
   runApp(const PlannerApp());
@@ -46,6 +62,7 @@ class PlannerPage extends StatefulWidget {
 
 class _PlannerPageState extends State<PlannerPage> {
   WebViewController? _controller;
+  Uri? _address;
   double _progress = 0;
   String? _problem;
 
@@ -58,6 +75,62 @@ class _PlannerPageState extends State<PlannerPage> {
     }
   }
 
+  /// Asked only when the planner page requests the location, and only for the planner's own address.
+  Future<GeolocationPermissionsResponse> _locationPrompt(GeolocationPermissionsRequestParams request) async {
+    final origin = Uri.tryParse(request.origin ?? '');
+    final address = _address;
+    if (origin == null || address == null || origin.host != address.host) {
+      return const GeolocationPermissionsResponse(allow: false, retain: false);
+    }
+    final status = await Permission.locationWhenInUse.request();
+    return GeolocationPermissionsResponse(allow: status.isGranted, retain: false);
+  }
+
+  /// Saves a file sent by the page and opens the share sheet. Anything unexpected is ignored.
+  Future<void> _saveDownload(String message) async {
+    try {
+      if (message.length > maxDownloadChars) {
+        return;
+      }
+      final data = jsonDecode(message);
+      if (data is! Map) {
+        return;
+      }
+      final type = data['type'];
+      final encoded = data['data'];
+      if (type is! String || encoded is! String || !allowedDownloadTypes.contains(type)) {
+        return;
+      }
+      final rawName = data['name'] is String ? data['name'] as String : 'download';
+      var name = rawName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+      if (name.isEmpty || name.startsWith('.')) {
+        name = 'download';
+      }
+      if (name.length > 120) {
+        name = name.substring(0, 120);
+      }
+      final folder = await getTemporaryDirectory();
+      final file = File('${folder.path}/$name');
+      await file.writeAsBytes(base64Decode(encoded), flush: true);
+      await Share.shareXFiles([XFile(file.path, mimeType: type)], subject: name);
+    } catch (_) {
+      // A malformed message or a cancelled share leaves the page as it is.
+    }
+  }
+
+  void _load() {
+    final controller = _controller;
+    final address = _address;
+    if (controller == null || address == null) {
+      return;
+    }
+    setState(() {
+      _problem = null;
+      _progress = 0;
+    });
+    controller.loadRequest(address);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -66,9 +139,11 @@ class _PlannerPageState extends State<PlannerPage> {
       _problem = 'This build has no planner address. Rebuild it with --dart-define=PLANNER_URL=https://...';
       return;
     }
+    _address = address;
 
-    _controller = WebViewController()
+    final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel('PlannerAndroid', onMessageReceived: (message) => _saveDownload(message.message))
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) => setState(() => _progress = progress / 100),
@@ -87,12 +162,18 @@ class _PlannerPageState extends State<PlannerPage> {
           },
           onWebResourceError: (error) {
             if (error.isForMainFrame == true) {
-              setState(() => _problem = 'The planner could not be loaded: ${error.description}');
+              setState(() => _problem = 'The planner could not be loaded. Check the internet connection. '
+                  '(${error.description})');
             }
           },
         ),
-      )
-      ..loadRequest(address);
+      );
+    final platform = controller.platform;
+    if (platform is AndroidWebViewController) {
+      platform.setGeolocationPermissionsPromptCallbacks(onShowPrompt: _locationPrompt);
+    }
+    _controller = controller;
+    controller.loadRequest(address);
   }
 
   @override
@@ -117,7 +198,16 @@ class _PlannerPageState extends State<PlannerPage> {
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(_problem ?? 'The planner is not available.', textAlign: TextAlign.center),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_problem ?? 'The planner is not available.', textAlign: TextAlign.center),
+                        if (controller != null) ...[
+                          const SizedBox(height: 16),
+                          FilledButton(onPressed: _load, child: const Text('Try again')),
+                        ],
+                      ],
+                    ),
                   ),
                 )
               : Column(

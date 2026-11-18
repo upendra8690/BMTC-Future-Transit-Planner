@@ -1,7 +1,7 @@
 {
   "name": "Bengaluru Transit Planner",
   "short_name": "BLR Transit",
-  "description": "Independent app for Bengaluru bus and Namma Metro routes, stops, timetables and journeys. Not an official BMTC or BMRCL app.",
+  "description": "Independent journey planner for Bengaluru: Namma Metro journeys from an unofficial community timetable, with approximate times, and transport information in four languages. Not an official BMTC or BMRCL app.",
   "id": "/",
   "lang": "en",
   "dir": "ltr",
@@ -16,5 +16,9 @@
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "/screenshots/metro.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Namma Metro lines and stations, labelled as unverified community data" },
+    { "src": "/screenshots/upcoming.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Upcoming transport projects with their status and sources" }
   ]
 }

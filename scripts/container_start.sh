@@ -7,12 +7,24 @@
 #                          if the database does not have it. The image already holds it, so this is instant there.
 #
 # On Render only Render's own proxy can reach the container, so when FORWARDED_ALLOW_IPS is still the image default
-# it is widened to "*". uvicorn then reads each visitor's address from X-Forwarded-For, and the per-client rate limit
-# applies per visitor instead of to the proxy. Everywhere else (Docker Compose with Caddy) the configured value is kept.
+# it is widened to "*". uvicorn then trusts X-Forwarded-Proto (so HTTPS is recognised and HSTS is sent).
+# Render does not remove an X-Forwarded-For header sent by the visitor, so its first entry can be forged. The rate
+# limit therefore counts visitors by CF-Connecting-IP on Render, which Render's Cloudflare edge sets and a visitor
+# cannot (CLIENT_IP_HEADER; see backend/app/security.py). Everywhere else (Docker Compose with Caddy) the configured
+# values are kept.
+# Render's free disk is erased on every restart, so with SQLite the app is told its storage is temporary
+# (EPHEMERAL_STORAGE) and says so to passengers.
 set -eu
 
-if [ "${RENDER:-}" = "true" ] && [ "${FORWARDED_ALLOW_IPS:-127.0.0.1}" = "127.0.0.1" ]; then
-  FORWARDED_ALLOW_IPS="*"
+if [ "${RENDER:-}" = "true" ]; then
+  if [ "${FORWARDED_ALLOW_IPS:-127.0.0.1}" = "127.0.0.1" ]; then
+    FORWARDED_ALLOW_IPS="*"
+  fi
+  export CLIENT_IP_HEADER="${CLIENT_IP_HEADER:-CF-Connecting-IP}"
+  case "${DATABASE_URL:-}" in
+    postgres*) ;;
+    *) export EPHEMERAL_STORAGE="${EPHEMERAL_STORAGE:-1}" ;;
+  esac
 fi
 
 demo="${DEMO_MODE:-0}"

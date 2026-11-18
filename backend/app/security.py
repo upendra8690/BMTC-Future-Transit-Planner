@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import re
 import threading
 import time
@@ -20,6 +21,21 @@ def client_hash(client_key: str) -> str:
 
 
 def client_ip(request: Request) -> str:
+    """The visitor's address, used only to count requests for the rate limit.
+
+    With CLIENT_IP_HEADER set (for example CF-Connecting-IP on Render, whose Cloudflare edge overwrites that header),
+    the address comes from it. Otherwise, or if the header is missing or is not an IP address, the address uvicorn
+    reports is used: the peer, or the X-Forwarded-For entry chosen under FORWARDED_ALLOW_IPS.
+    """
+    settings = getattr(request.app.state, "settings", None)
+    header = getattr(settings, "client_ip_header", "")
+    if header:
+        value = request.headers.get(header, "").strip()
+        if value:
+            try:
+                return str(ipaddress.ip_address(value))
+            except ValueError:
+                pass
     return request.client.host if request.client else "unknown"
 
 

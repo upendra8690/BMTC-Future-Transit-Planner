@@ -29,6 +29,11 @@ REQUIRED_IN_MAIN = {
     "sends tel: links (SOS and helplines) to the dialler": "target.scheme == 'tel'",
     "handles the Android back button inside the WebView": "onPopInvokedWithResult",
     "goes back a page when there is one": "controller.canGoBack()",
+    "asks Android for location only when the page asks": "setGeolocationPermissionsPromptCallbacks",
+    "never lets the WebView keep a location grant": "retain: false",
+    "offers Try again after a failed load": "'Try again'",
+    "receives downloads through one named channel": "addJavaScriptChannel('PlannerAndroid'",
+    "accepts only expected download types": "allowedDownloadTypes.contains(type)",
 }
 
 

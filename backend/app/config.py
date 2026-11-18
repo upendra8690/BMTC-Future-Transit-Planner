@@ -20,6 +20,15 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_DIR / "data"
 DASHBOARD_DIR = PROJECT_DIR / "dashboard"
 _WHOLE_NUMBER = re.compile(r"[0-9]{1,12}")
+_HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+def _header_name(name: str) -> str:
+    """An HTTP header name, or empty. A malformed value stops the start-up instead of being ignored silently."""
+    raw = os.environ.get(name, "").strip()
+    if raw and not _HEADER_NAME.fullmatch(raw):
+        raise ValueError(f"{name} must be an HTTP header name such as CF-Connecting-IP. Found '{raw}'.")
+    return raw.lower()
 
 
 def _read_dotenv(path: Path) -> None:
@@ -103,6 +112,13 @@ class Settings:
     # is for local development and tests only: on a hosting service's temporary disk every account would be lost.
     accounts_enabled: bool = False
     accounts_allow_sqlite: bool = False
+    # A header that the hosting provider's edge sets to the visitor's address and that a visitor cannot set, such as
+    # CF-Connecting-IP behind Cloudflare. Empty: the address uvicorn reports is used. It counts visitors for the rate
+    # limit; X-Forwarded-For is not used for that, because its first entry can be written by the visitor.
+    client_ip_header: str = ""
+    # True on hosting whose disk is erased on every restart (Render's free plan with SQLite). The app then tells
+    # passengers that items saved on the server can be lost, and points them to what is kept on their own device.
+    ephemeral_storage: bool = False
 
     @classmethod
     def from_env(cls, env_file: Path | None = None) -> Settings:
@@ -144,4 +160,6 @@ class Settings:
             demo_mode=_flag("DEMO_MODE"),
             accounts_enabled=_flag("ACCOUNTS_ENABLED"),
             accounts_allow_sqlite=_flag("ACCOUNTS_ALLOW_SQLITE"),
+            client_ip_header=_header_name("CLIENT_IP_HEADER"),
+            ephemeral_storage=_flag("EPHEMERAL_STORAGE"),
         )

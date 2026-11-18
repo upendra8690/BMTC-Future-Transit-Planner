@@ -227,8 +227,14 @@ def meta(request: Request) -> dict[str, Any]:
 
 @router.get("/features", tags=["system"])
 def features(request: Request, db: DbSession) -> dict[str, Any]:
-    """What works right now. States: AVAILABLE, NO_DATA, UNAVAILABLE (needs an authorisation), PLANNED."""
-    return {"version": APP_VERSION, "demo_mode": request.app.state.settings.demo_mode,
+    """What works right now. States: AVAILABLE, NO_DATA, UNAVAILABLE (needs an authorisation), PLANNED.
+
+    `server_storage_persistent` is false when items saved on the server are lost on restart (free hosting), so the
+    app can say so next to them.
+    """
+    settings = request.app.state.settings
+    return {"version": APP_VERSION, "demo_mode": settings.demo_mode,
+            "server_storage_persistent": not settings.ephemeral_storage,
             "features": catalogue.feature_states(db)}
 
 

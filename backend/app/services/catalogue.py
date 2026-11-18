@@ -18,7 +18,8 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from .. import demo
-from ..models import STATUS_COMPLETED, GtfsImport, Route
+from ..models import STATUS_COMPLETED, DataSource, FareAttribute, GtfsImport, Route
+from .planner import FARE_SOURCE_KINDS
 
 AVAILABLE, NO_DATA, UNAVAILABLE, PLANNED = "AVAILABLE", "NO_DATA", "UNAVAILABLE", "PLANNED"
 
@@ -42,6 +43,22 @@ def _has_routes(db: Session, route_types: tuple[int, ...]) -> bool:
     return bool(db.scalar(query))
 
 
+def _has_shown_fares(db: Session) -> bool:
+    """True only if a served feed has fares the planner will show: those of an OFFICIAL source (or, on a
+    demonstration server, the invented demo source). Community fares are estimates and are never shown."""
+    query = select(
+        exists().where(
+            FareAttribute.import_id == GtfsImport.id,
+            GtfsImport.is_active.is_(True),
+            GtfsImport.status == STATUS_COMPLETED,
+            GtfsImport.data_source_id == DataSource.id,
+            DataSource.kind.in_(FARE_SOURCE_KINDS),
+            demo.served_imports(),
+        )
+    )
+    return bool(db.scalar(query))
+
+
 def feature_states(db: Session) -> list[dict[str, Any]]:
     """Each feature with its state and a reason code. Reason codes are translated by the app."""
     bus = _has_routes(db, BUS_ROUTE_TYPES)
@@ -58,7 +75,8 @@ def feature_states(db: Session) -> list[dict[str, Any]]:
         ("journey_planner", data_state(any_data)),
         ("metro", data_state(metro)),
         ("bus_metro_journeys", (AVAILABLE, None) if bus and metro else (NO_DATA, "NEEDS_BUS_AND_METRO_FEEDS")),
-        ("fares", data_state(any_data)),
+        ("fares", (AVAILABLE, None) if _has_shown_fares(db)
+         else (NO_DATA, "NO_VERIFIED_FARES") if any_data else (NO_DATA, "NO_FEED_LOADED")),
         ("favourites", (AVAILABLE, None)),
         ("offline", (AVAILABLE, None)),
         ("sos_call", (AVAILABLE, None)),
