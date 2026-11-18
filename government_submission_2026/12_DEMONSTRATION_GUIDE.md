@@ -1,75 +1,51 @@
-# 12 Demonstration guide and presentation script
+# 12 Demonstration checklist and script
 
-The demonstration takes about 15 minutes, followed by questions. It uses only the demonstration data and says so
-throughout.
+About 10 minutes of demonstration inside a 20-minute meeting (slides: [21](21_PRESENTATION_OUTLINE.md)). It uses the
+**public address in real mode**, which shows no invented data. An optional appendix uses a separate demonstration
+server to show bus planning on invented data.
 
-## Before the meeting
-- Open the 4.0 address on a phone and on a laptop 5 minutes before the meeting. On the free hosting plan a
-  sleeping server can take up to a minute to wake.
-- **Two servers.**
-  - The **public 4.0 address runs in real mode.** It has the community Namma Metro timetable but no invented data, so
-    use it for step 0.
-  - **Steps 2–6 use the invented demo stops, so they need a demonstration server.** On the laptop, run
-    `DEMO_MODE=1 sh scripts/container_start.sh` (or with Docker,
-    `docker run -p 8000:8000 -e DEMO_MODE=1 <image>`) and open http://127.0.0.1:8000/. Every screen then shows the
-    demonstration banner. Setup steps are in `docs/INSTALL_WINDOWS.md`.
-- For step 12, sign in to Administration before the meeting. **Never show the admin key on screen.**
-- In the Plan screen, choose **"Unverified feed"**. The default, "Officially verified", is correctly empty.
+## Checklist before the meeting
+| # | Check | Done |
+|---|---|---|
+| 1 | Run `scripts/verify_deployment.py` on the day; all checks pass; print the result | ☐ |
+| 2 | Open https://bengaluru-transit-planner-v4.onrender.com on the phone and the laptop 5 minutes early (a sleeping server can take up to a minute to wake) | ☐ |
+| 3 | In Plan, choose **"Unverified feed"**. The default, "Officially verified", is correctly empty | ☐ |
+| 4 | Phone charged; screen brightness up; notifications silenced | ☐ |
+| 5 | If administration is shown, sign in before the meeting. **Never show the admin key on screen** | ☐ |
+| 6 | If defect D1 is not yet fixed, be ready to say that Metro rides still read "first bus" and that this is being corrected | ☐ |
+| 7 | Printed copies: 01, 04, 09, 12, 20 and the matching request with its annex | ☐ |
 
-## Steps
+## Steps (public address)
 | # | Show | Do | Say |
 |---|---|---|---|
-| 0 | Real Namma Metro (public address) | Choose "Unverified feed"; plan **Indiranagar** to **Jayanagar**, Metro only | "Real stations and a real change at Majestic, from an unofficial community reconstruction of BMRCL's published timetable. Times are approximate and no fare is shown. Nothing here is official." |
-| 1 | Home (demonstration server) | Show the banner, search box, map and tiles | "From here on I use a demonstration server: the banner says so, and every invented place is named Demo." |
-| 2 | Route and stop search | Routes: type `DEMO`; Stops: type `Demo` | "Search by number or name. Every result is labelled with its source." |
-| 3 | Bus journey | Plan from **Demo Central** to **Demo Junction**, **Bus only** | "Scheduled times, never live. Each ride shows 'Unverified feed'." |
-| 4 | Metro journey | **Demo Metro Central** to **Demo Metro Tech Park**, **Metro only** | "The same planner, Metro only." |
-| 5 | Combined journey | **Demo Lake View** to **Demo Metro Hub**, **Bus and Metro** | "A bus ride, a walk to the station and a Metro ride, in one plan." |
-| 6 | Saved journey | Tap "Save this journey"; open Favourites; tap "Plan again" | "Saved on the phone itself; no account and no personal data." |
-| 7 | Upcoming transport | Scroll; open one entry's "Update history" | "Each project has a status, where that status comes from, sources and the date checked. A planned service is never shown as running, and only an official announcement can give an expected start date." |
-| 8 | Languages | Switch to ಕನ್ನಡ, then తెలుగు and हिन्दी, then back | "The whole interface is in four languages; native-speaker review is still pending." |
-| 9 | Accessibility | Turn on large text and dark mode | "No automated WCAG 2.1 AA violations; screen-reader testing is the next step." |
-| 10 | Data source labels | Open "Data and providers" | "The demo-only banner, and every source with its licence and permission status." |
-| 11 | Unavailable live features | Open Live tracking, then Tickets | "Unavailable until an authorised feed or agreement exists. Nothing is imitated; links go to the official channels." |
-| 12 | Admin and data status | Administration: the data sources and feeds, then "Upcoming transport entries" | "Imports are validated. Only an OFFICIAL source can be verified; here the demo source is refused. Upcoming-transport entries are updated here with a reason, with no code change." |
+| 1 | Home | Point out the "unofficial" line and the language menu | "Independent and unofficial. No logos, no tickets, no payments." |
+| 2 | A real Metro journey | Plan **Majestic** to **Indiranagar** | "A Purple Line journey from a community reconstruction of BMRCL's published timetable. Times are approximate and labelled so; no fare is shown." |
+| 3 | A journey with a change | Plan **Indiranagar** to **Jayanagar** | "A change at Majestic, from Purple to Green." |
+| 4 | Three lines | Plan **Whitefield** to **Electronic City** | "Purple, Green and Yellow, with changes at Majestic and RV Road." |
+| 5 | What is missing | Open the feature list or "Data and providers" | "No bus data, because there is no authorised source. The Pink Line is missing from the community file." |
+| 6 | Upcoming transport | Open one entry and its update history | "Each project has a status and dated sources. A planned service is never shown as running." |
+| 7 | Languages | Switch to ಕನ್ನಡ, then తెలుగు and हिन्दी, then back | "Every text exists in four languages; a native-speaker review is still needed." |
+| 8 | Accessibility | Large text and dark mode | "No automated WCAG 2.1 AA violations; screen-reader testing is next." |
+| 9 | Unavailable features | Open Live tracking, then Tickets | "Unavailable until an authorised feed or agreement exists. Nothing is imitated; links go to the official channels." |
+| 10 | Offline | Airplane mode on, reopen the app | "The app and timetables already opened still work, marked as saved copies." |
 
-## Presentation script (about 4 minutes)
-> Good morning. Thank you for your time.
->
-> I am Mopuru Upendra Reddy, an independent developer in Bengaluru. I have built Bengaluru Transit Planner, a free web
-> and Android application that plans journeys combining BMTC buses, Namma Metro and walking, in English, Kannada,
-> Telugu and Hindi.
->
-> I want to be clear at the start. This is not an official application. It is not approved by or affiliated with BMTC,
-> BMRCL, DULT or the Government. Everything you will see today runs on demonstration data that I invented, and the
-> application labels it that way on every screen.
->
-> *[Steps 1 to 6]* The planner searches bus and Metro timetables together, adds walking transfers, and lets a
-> passenger choose bus, Metro or both. Every ride shows where its data came from.
->
-> *[Steps 7 to 9]* It shows which new lines and routes are running and which are only planned, with sources. It works
-> in four languages, and the automated accessibility checks find no violations.
->
-> *[Steps 10 to 12]* Live tracking, tickets and payments are deliberately switched off. The application refuses rather
-> than imitate them. A demonstration feed can never be marked as official; only an official source, verified against
-> the publisher, can be.
->
-> The evidence is in the package: 470 automated tests, a browser test of all 869 controls, security and privacy
-> reports, and a list of known limitations.
->
-> We are asking for four things. First, your technical feedback. Second, guidance on the official source and licence
-> for BMTC and BMRCL schedule data. Third, written permission to use that data. Fourth, a discussion with your
-> technical team. If you find it useful, we would also ask you to consider a small, time-limited pilot on one corridor.
-> We are not asking for endorsement, funding or procurement.
->
-> Thank you. I am happy to answer questions.
+## Appendix: bus planning on a demonstration server (optional)
+Run `DEMO_MODE=1 sh scripts/container_start.sh` on the laptop and open http://127.0.0.1:8000/. Every screen then shows
+the demonstration banner, and every invented place is named "Demo …".
+
+| Show | Do |
+|---|---|
+| Bus journey | **Demo Central** to **Demo Junction**, Bus only |
+| Bus + Metro journey | **Demo Lake View** to **Demo Metro Hub**, Bus and Metro |
+| Verification refused | Administration: try to verify the demo source; it is refused, because only OFFICIAL sources can be verified |
 
 ## Questions to expect
 | Question | Answer |
 |---|---|
-| Is any of this official data? | No. All of it is invented and labelled. Official data would be loaded only under your licence and verified against your source. |
-| Can it show live buses? | Not without an authorised feed. The adapter and screens are ready, and the feature stays off until then. |
+| Is any of this official data? | No. The Metro timetable is an unofficial community reconstruction, labelled as such. Official data would be loaded only under your licence and verified against your source. |
+| Why show unofficial Metro data at all? | It is real, openly licensed and clearly labelled. If BMRCL objects, it will be removed promptly. |
+| Can it show live buses? | Not without an authorised feed. The screens are ready; the feature stays off until then. |
 | Does it sell tickets or take payments? | No, and it will not without written agreements. It never stores card or UPI details. |
 | Where is passenger data stored? | Only a hashed device key and the items a person saves. No names, phone numbers, searches or locations. |
-| Who maintains it? | The applicant. The code and test reports are public on GitHub. |
-| What happens if permission is withdrawn? | The data is removed and the app returns to demonstration mode. |
+| Is it secure? | A self-assessment with open findings listed in document 20. There has been no independent penetration test, and we welcome one. |
+| What happens if permission is withdrawn? | The data is removed, and the app says the information is unavailable. |

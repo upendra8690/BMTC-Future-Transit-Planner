@@ -1,7 +1,8 @@
 # 04 Complete feature matrix
 
 Version 4.0.0-beta.1 on branch `v4`, checked 17 to 18 November 2026. Nothing has been added to this matrix to make it
-look complete. Features that do not exist are marked NOT IMPLEMENTED.
+look complete. Features that do not exist are marked NOT IMPLEMENTED. A fuller register of 101 requirements, with
+their blockers, is in `docs/release/REQUIREMENTS_REGISTER.md`.
 
 | Status | Meaning |
 |---|---|
@@ -34,7 +35,7 @@ Column key:
 | Maps | All map views | — | — | OpenStreetMap tiles | PASS | e2e: zoom works; credit to OpenStreetMap |
 | Airport services | Home and More: official airport site | — | — | Official link | PARTIAL | Link works. Airport bus (Vayu Vajra) timetables need BMTC data |
 | Service alerts | — | — | — | No authorised alerts feed | NOT IMPLEMENTED | No screen; would need GTFS-Realtime alerts from BMTC |
-| Saved routes | Favourites | saved-routes API | Server, under a hashed device key | User | PASS | e2e: stored and listed after refresh; another device cannot read them |
+| Saved routes | Favourites | saved-routes API | Server, under a hashed device key | User | PARTIAL | e2e: stored and listed after refresh; another device cannot read them. On the free public service they are lost when the server restarts or wakes (finding D3) |
 | Saved journeys | Favourites | — | On the device | User | PASS | e2e steps 7, 9, 10: save, plan again, refresh, offline |
 
 ## B. Namma Metro

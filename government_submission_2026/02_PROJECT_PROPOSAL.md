@@ -1,106 +1,81 @@
 # 02 Project proposal
 
 **Applicant:** Mopuru Upendra Reddy, independent developer, Bengaluru.
-**Status:** an unofficial prototype on demonstration data. Nothing here is an official government project.
+**Status:** an independent, unofficial application. **Nothing here is an approved or official government project.**
+The addressed versions of this proposal are the requests to BMTC ([15](15_BMTC_DATA_ACCESS_REQUEST.md)), BMRCL
+([16](16_BMRCL_DATA_ACCESS_REQUEST.md)) and DULT ([17](17_DULT_TECHNICAL_REVIEW_REQUEST.md)).
 
 ## 1. The problem
-A passenger in Bengaluru who combines a BMTC bus with Namma Metro has to piece the journey together from separate
-sources. Information is mostly in English. Passengers find it hard to tell what is running today from what is only
-planned. Details are in [03](03_PROBLEM_AND_PUBLIC_BENEFIT.md).
+A passenger who combines a BMTC bus with Namma Metro has to piece the journey together from separate sources.
+- Information is mostly in English.
+- It is hard to tell what runs today from what is only planned.
 
-## 2. How the application helps passengers
-- Plans one journey across bus, Metro and walking, from scheduled timetables, with up to two changes.
-- Lets the passenger choose bus only, Metro only, or both.
-- Works in English, Kannada, Telugu and Hindi, with large text, dark mode and a low-data mode.
-- Shows where every piece of information comes from and how reliable it is: official and verified, or unverified.
-- Shows emergency numbers (112, 108, 101, 1098) and links to the official websites of each operator.
-- Shows a status for each upcoming transport project (operating, under construction, planned), with its sources. It
-  never presents a planned service as running.
+Details are in [03](03_PROBLEM_AND_PUBLIC_BENEFIT.md).
 
-## 3. BMTC and Metro journey integration
-Both operators' schedules are loaded in the international GTFS format. The planner searches across them together and
-inserts a walking transfer between a bus stop and a Metro station. Any publisher's GTFS file can be imported, checked
-and classified through the administration screen without changing the code. Today only invented demonstration feeds
-are loaded. See [05](05_SYSTEM_ARCHITECTURE.md).
+## 2. What the application offers
+- One journey across bus, Metro and walking, from scheduled timetables, with up to two changes.
+- A choice of bus only, Metro only, or both.
+- English, Kannada, Telugu and Hindi, with large text, dark mode and a low-data mode.
+- The source and reliability of every piece of information: officially verified, or unverified.
+- Emergency numbers (112, 108, 101, 1098) and links to each operator's official website.
+- A status for each upcoming transport project, with sources. A planned service is never shown as running.
 
-## 4. Accessibility and languages
-The automated WCAG 2.1 AA scan found no violations on 15 screens, in both light and dark themes. Every screen fits a
-390-pixel phone screen without sideways scrolling. Every text in the interface exists in all four languages, and a test
-enforces this. The translations have not yet been reviewed by native speakers, and the app has not been tested with a
-screen reader. See [08](08_ACCESSIBILITY_AND_LANGUAGE_SUPPORT.md).
-
-## 5. Ready for future transport
-- New routes, lines and stations arrive as data, not code. A new GTFS feed is imported and verified.
-- Live tracking, tickets, passes, Metro QR, payments and NCMC each have an adapter with a fixed interface. Today each
-  adapter refuses every request. A provider can be connected after a written agreement without rewriting the screens.
-  See [09](09_DATA_SOURCE_AND_LICENCE_REGISTER.md).
-
-## 6. Data security and privacy
-- No accounts. A random key identifies each device, and the server stores only its SHA-256 hash.
-- No location or search history is stored, and there is no analytics or access log.
-- "Delete my data" removes everything held about a device.
-- Administration uses a secret key with constant-time comparison. Inputs are validated, requests are rate limited and
-  a strict content security policy applies.
-
-See [06](06_TECHNICAL_AND_SECURITY_REPORT.md) and [07](07_PRIVACY_AND_DATA_PROTECTION.md).
-
-## 7. Architecture
-- **Server:** Python FastAPI with SQLAlchemy and Alembic; SQLite for development, PostgreSQL for hosting.
-- **App:** a progressive web app written in plain JavaScript, with maps from OpenStreetMap.
-- **Packaging:** a Docker container. Testing runs automatically on GitHub Actions.
-- **Android:** a Flutter WebView wrapper.
-
-See [05](05_SYSTEM_ARCHITECTURE.md).
-
-## 8. What has been demonstrated
-On demonstration data, the following were tested end to end:
-- route and stop search, timetables and fares;
-- bus, Metro and combined journeys;
-- saved journeys;
-- the four languages and the offline shell;
-- data-source labels and the refusal of every provider action.
-
-The evidence is in [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md).
-
-## 9. Limitations
-The main ones:
-- no official data;
-- no live information;
-- no accounts;
-- free hosting, which has no persistent database;
-- the Android app has not been tested on a phone;
-- no independent security test.
-
-The full list is in [11](11_KNOWN_LIMITATIONS_AND_DEPENDENCIES.md).
-
-## 10. Government support requested
-1. Technical review and feedback.
-2. Guidance on the official source and licence for BMTC and BMRCL GTFS. Press reports from 2024 describe a DULT
-   Transport Data Hub.
-3. Permission, in writing, to use that data in a free public application.
-4. A meeting with the relevant technical team.
-5. Consideration of a limited pilot, subject to approval.
-
-## 11. Proposed limited pilot
-One corridor, official data for that corridor only, 30 to 50 adult volunteers, six weeks, guest mode only. The pilot
-stops at once if permission is withdrawn or any data is shown wrongly as official. See
-[13](13_PILOT_PROPOSAL.md).
-
-## 12. Maintenance and sustainability
-Today the project costs ₹0 to run: it uses free hosting and has no advertising or data sales. For a pilot it needs
-always-on paid hosting and a database with backups, at a modest monthly cost borne by the applicant; see
-[14](14_IMPLEMENTATION_AND_MAINTENANCE_COSTS.md).
-- **Data:** updates are imported through the administration screen whenever the publisher releases a new feed.
-- **Code:** maintained by the applicant, with automated tests on every change.
-- **Sustainability:** the application needs no fee from the authority.
-
-## 13. Measurable pilot success indicators
-| Indicator | Target |
+## 3. Where it stands (18 November 2026)
+| Area | Position |
 |---|---|
-| Sampled departures match the published schedule | ≥ 98 % |
-| Requests where service exists return a valid journey | ≥ 95 % |
-| Availability (checked every 5 minutes) | ≥ 99 % |
-| Automated WCAG 2.1 AA violations | 0 |
-| Data wrongly shown as official | 0 (any case stops the pilot) |
-| Personal data collected beyond optional feedback | None |
-| Participant usefulness rating | Reported as measured, with no target set in advance |
+| Namma Metro | Real Purple, Green and Yellow line journeys from an unofficial community reconstruction of BMRCL's published timetables (ODbL). Labelled "Unverified feed", approximate times, no fares. Pink Line missing |
+| BMTC buses | **No real data.** Bus planning is built and tested on invented demonstration data only, which runs on a separate demonstration server |
+| Live tracking, tickets, passes, payments | Not available; each stays off until written authorisation exists |
+| Quality | 501 automated tests pass; browser, accessibility and security checks recorded in [10](10_TEST_AND_PERFORMANCE_EVIDENCE.md) |
+| Open findings | Listed openly in [20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md); none rated high severity |
+| Requirements | 101 requirements tracked; 27 % implemented and verified; 44 % need permission, a provider or a decision (`docs/release/REQUIREMENTS_REGISTER.md`) |
+
+## 4. What official data would change
+With a data licence and the official GTFS files:
+- bus route, stop and timetable search in four languages;
+- bus journeys and combined bus and Metro journeys;
+- Metro times without approximation, and the Pink Line;
+- fares, where the operator permits.
+
+The import, validation and verification path already exists, so no code changes are needed for this ([05](05_SYSTEM_ARCHITECTURE.md),
+section 6).
+
+## 5. Support requested from the authorities
+1. Technical review and feedback.
+2. The official source and licence for BMTC and BMRCL GTFS. Press reports from 2024 describe a DULT Transport Data Hub.
+3. Permission, in writing, to use that data in a free public application.
+4. A meeting with the relevant technical team, with a 20-minute demonstration ([21](21_PRESENTATION_OUTLINE.md)).
+5. Later, consideration of a limited pilot, subject to approval ([13](13_PILOT_PROPOSAL.md)).
+
+**Not requested:** endorsement, funding, procurement, branding rights or any blanket approval.
+
+## 6. Security, privacy and accessibility
+- **No personal data in use.** No accounts are in use; a random device key is stored only as a hash; no location or
+  search history is stored; there is no analytics.
+- **Security.** A self-assessment against OWASP, with open findings listed and fixes planned. No independent test yet
+  ([06](06_TECHNICAL_AND_SECURITY_REPORT.md), [20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md)).
+- **Data protection.** Designed for the DPDP Act, 2023 and Rules, 2025; legal review before any pilot
+  ([07](07_PRIVACY_AND_DATA_PROTECTION.md)).
+- **Accessibility.** No automated WCAG 2.1 AA violations on 15 screens in two themes. Screen-reader and native-language
+  reviews are pending ([08](08_ACCESSIBILITY_AND_LANGUAGE_SUPPORT.md)).
+
+## 7. Commitments
+- Official data is labelled official only after verification against the publisher's own source.
+- Data is never altered, is used only under the publisher's terms, and is removed on request.
+- No logos, and no claim of approval, partnership or endorsement.
+- No imitation of live tracking, tickets, QR codes or payments.
+- Every number shown to the authority comes from a recorded test run with its date.
+
+## 8. Costs
+₹0 today. A minimum pilot costs about US$13 a month, borne by the applicant. Assurance items such as a security audit
+are quoted separately ([14](14_IMPLEMENTATION_AND_MAINTENANCE_COSTS.md)).
+
+## 9. Next steps and gates
+| Gate | Event | Follows |
+|---|---|---|
+| G1 | Written data route and licence | Official data imported and verified |
+| G2 | Written pilot permission and hosting decision | Pilot preparation |
+| G3 | Security and privacy sign-off, if required | Pilot start (8 weeks) |
+| G4 onwards | Real-time, ticketing and payment agreements | Separate projects, only if the authority wishes |
+
+Details are in [22](22_APPROVALS_AGREEMENTS_AND_CREDENTIALS.md).

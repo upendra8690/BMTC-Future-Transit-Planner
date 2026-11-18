@@ -1,8 +1,14 @@
 # 07 Privacy and data protection
 
-The application is designed to collect as little personal data as possible. **No legal review has been done**
-against the Digital Personal Data Protection Act, 2023 and its Rules. One is planned before any pilot. The draft
-privacy policy, terms and retention policy are in `docs/government/`.
+The application is designed to collect as little personal data as possible.
+- **No legal review has been done** against the Digital Personal Data Protection Act, 2023 and the DPDP Rules, 2025.
+  One is planned before any pilot.
+- The Rules were notified in November 2025, and most data-fiduciary obligations apply from May 2027.
+- The draft privacy policy, terms and retention policy are in `docs/government/`.
+- A checklist is in [20](20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md), section 5.
+
+**Passenger accounts** are built but switched off. If they are enabled, they hold a username or email, a password hash
+and the journeys the passenger saves. Export and deletion are built in.
 
 ## What is collected
 | Data | Where | Why | Kept for |

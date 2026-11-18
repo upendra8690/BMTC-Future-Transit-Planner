@@ -7,30 +7,31 @@ To
 [Designation of the officer]
 [Organisation and office address, from document 19]
 
-**Subject: Submission of an independent Bengaluru bus and Metro journey planner for technical review**
+**Subject: Submission of an independent Bengaluru journey planner for technical review**
 
 Respected Sir/Madam,
 
 I am an independent developer from Bengaluru. I submit Bengaluru Transit Planner, version 4.0, for your technical
-review. It is a free web and Android application that helps passengers:
-- find bus routes and stops;
-- see scheduled departures;
-- plan journeys combining BMTC buses, Namma Metro and walking.
-
-It works in English, Kannada, Telugu and Hindi.
+review. It is a free web application, with an Android wrapper in preparation, that plans public-transport journeys in
+English, Kannada, Telugu and Hindi.
 
 I wish to state clearly:
-- **It is unofficial.** The application is not approved by, endorsed by or affiliated with BMTC, BMRCL, DULT or the
-  Government of Karnataka. It uses no government logo.
-- **No official data is used.** It runs today on demonstration data that I created. Every screen labels that data.
-- **No tickets, payments or live information.** It sells no tickets, takes no payments and shows no live
-  information. Each of these stays disabled until written authorisation exists.
+- **It is unofficial.** It is not approved by, endorsed by or affiliated with BMTC, BMRCL, DULT or the Government of
+  Karnataka, and it uses no government logo.
+- **No official data is used.**
+  - The public preview shows real Namma Metro journeys from an unofficial community reconstruction of BMRCL's
+    published timetables. They are labelled "Unverified feed", with approximate times and no fares.
+  - It has no BMTC bus data.
+  - Invented demonstration data runs only on a separate demonstration server.
+- **No tickets, payments or live information.** Each stays switched off until written authorisation exists.
 - **No personal data.** It collects no names, phone numbers, email addresses, locations or payment details.
 
-The enclosed package documents the application with test evidence, including its limitations:
-- 470 automated tests pass;
-- every one of 869 on-screen controls was exercised in a browser;
-- automated accessibility (WCAG 2.1 AA) and security checks found no violations or high-severity issues.
+The enclosed package documents the application with evidence, including its open findings and limitations:
+- 501 automated tests pass on the current code (18 November 2026);
+- all 869 on-screen controls were exercised in a browser;
+- the automated accessibility scan (WCAG 2.1 AA) found no violations;
+- the security self-assessment lists its open findings. None is rated high severity. There has been no independent
+  penetration test.
 
 **I respectfully request:**
 1. technical feedback on the application;
@@ -50,7 +51,7 @@ Mopuru Upendra Reddy
 Independent developer, Bengaluru
 [Email address] · [Mobile number]
 
-Enclosures: Bengaluru Transit Planner submission package, documents 01 to 17.
-Source code and test reports: https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0 (branch `v4`, folder
+Enclosures: as listed in document 19, section C.
+Source code and evidence: https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0 (branch `v4`, folder
 `government_submission_2026/`)
-Demonstration: https://bengaluru-transit-planner-v4.onrender.com (check it with scripts/verify_deployment.py on the day of sending)
+Public preview: https://bengaluru-transit-planner-v4.onrender.com (check it with scripts/verify_deployment.py on the day of sending)

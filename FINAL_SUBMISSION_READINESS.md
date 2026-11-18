@@ -1,5 +1,10 @@
 # Final submission readiness: 18 November 2026
 
+> **Later update on 18 November 2026.** Current figures are in `government_submission_2026/10_TEST_AND_PERFORMANCE_EVIDENCE.md`
+> (pytest 501 passed on `a97beae`; all 14 deployment checks passed). Open findings found after this report, including
+> R1 and D1 to D4, are in `government_submission_2026/20_CYBERSECURITY_AND_PRIVACY_CHECKLIST.md`. The audit and
+> roadmap are in `docs/release/PHASE1_BASELINE_AND_ROADMAP.md`. Where this file differs, the newer files apply.
+
 ## Recommendation: **READY FOR GOVERNMENT TECHNICAL REVIEW**
 This means ready to be **reviewed**, as an unofficial prototype. It does **not** mean government-approved, ready for
 a pilot, or ready for production.
