@@ -868,3 +868,9 @@ body:not([data-view="tools"]) .year-picker { display: none; }
 .small-print { font-size: 0.85rem; margin-top: 8px; }
 .journey-tools { margin-top: 10px; gap: 8px; flex-wrap: wrap; }
 #homeQuickChips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* accounts */
+.grow { flex: 1 1 260px; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.recovery-code { font-size: 1.15rem; letter-spacing: 0.06em; user-select: all; }

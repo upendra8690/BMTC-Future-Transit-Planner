@@ -22,11 +22,13 @@ ALLOWED_UNTRANSLATED = {"app.brand", "clock.line", "common.pdf", "route.col_seq"
 DYNAMIC_PREFIXES = (
     "cls.", "day.", "msgcode.", "feature.state.", "feature.reason.", "feature.name.", "svc.cat.", "mode.",
     "upcoming.status.", "upcoming.type.", "upcoming.kind.", "providers.feed_state.", "providers.permission.",
-    "providers.integration.", "integ.cap.", "notices.kind.", "notices.mode.", "notices.status.",
+    "providers.integration.", "integ.cap.", "notices.kind.", "notices.mode.", "notices.status.", "account.reason.",
+    "account.role.",
 )
 # Storage keys the dashboard may write. The admin key must never be one of them.
 STORED_KEYS = {
     "clientKey", "lang", "classification", "year", "theme", "lowData", "largeText", "favStops", "favJourneys", "recent",
+    "session",
 }
 DYNAMIC_CODE = (
     r"\beval\s*\(",

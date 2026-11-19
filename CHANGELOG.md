@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased (branch `v4`): administrator accounts and account screens, 2026-11-19
+- **Individual administrator accounts replace the shared key wherever accounts run.** With a permanent database and
+  `ACCOUNTS_ENABLED=1`, administration uses each person's account and records it as `user:<id>`. The shared
+  `ADMIN_API_KEY` then only lists accounts and assigns roles, so it can create the first administrator and nothing
+  else. Without accounts (the public service today) the key works as before.
+- **Staff sessions:** editors and administrators are signed out after 12 hours and on every reload (the token stays in
+  the page's memory); passengers stay signed in for 30 days. Changing a role signs that account out. The last
+  administrator cannot lose the role. Staff sign-ins are written to the audit log.
+- **`scripts/create_admin.py`** gives an existing account a role from the server's shell (audited as `cli`).
+- **Account screens:** sign in, register (one-time recovery code), recover, saved journeys in the account (with "copy
+  journeys saved on this device"), notification choices (stored, nothing sent), data download, password change and
+  account deletion, in all four languages. Without accounts the screen says why.
+- **Administration screen:** "Accounts and roles" panel; editors see only notices and upcoming transport.
+- **Tests:** pytest 544 passed, 5 skipped; new `tests/browser/accounts_check.py` 24/24. `tests/browser/serve_at.py`
+  runs a local server at a chosen moment so journey checks give the same result at any hour.
+
 ## Unreleased (branch `v4`): audit and Phase 2 commuter features, 2026-11-19
 - **Service notices (migration 0005).** Administrators post short notices that repeat an official source: a gov.in or
   nic.in site, bmrc.co.in, or the official BMTC or BMRCL account on X. Each needs a reason, ends within 31 days, is

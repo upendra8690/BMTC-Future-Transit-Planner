@@ -59,8 +59,11 @@ def _has_shown_fares(db: Session) -> bool:
     return bool(db.scalar(query))
 
 
-def feature_states(db: Session) -> list[dict[str, Any]]:
-    """Each feature with its state and a reason code. Reason codes are translated by the app."""
+def feature_states(db: Session, accounts_running: bool = False) -> list[dict[str, Any]]:
+    """Each feature with its state and a reason code. Reason codes are translated by the app.
+
+    ``accounts_running`` is true when the server keeps accounts (ACCOUNTS_ENABLED with a permanent database).
+    """
     bus = _has_routes(db, BUS_ROUTE_TYPES)
     metro = _has_routes(db, METRO_ROUTE_TYPES)
     any_data = bus or metro
@@ -89,7 +92,7 @@ def feature_states(db: Session) -> list[dict[str, Any]]:
         ("ncmc_cards", (UNAVAILABLE, "NEEDS_BANK_INTEGRATION")),
         # Accounts are built but stay off unless the server has a permanent database (ACCOUNTS_ENABLED with
         # PostgreSQL); notifications also need a delivery service. See docs/launch/ACCOUNTS_AND_ROLES.md.
-        ("accounts", (PLANNED, "NEEDS_PERSISTENT_DATABASE")),
+        ("accounts", (AVAILABLE, None) if accounts_running else (PLANNED, "NEEDS_PERSISTENT_DATABASE")),
         ("notifications", (PLANNED, "NEEDS_DELIVERY_SERVICE")),
         ("upcoming_transport", (AVAILABLE, None)),
         ("facilities", (PLANNED, "NEEDS_LICENSED_DATA")),

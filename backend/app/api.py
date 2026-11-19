@@ -237,7 +237,7 @@ def features(request: Request, db: DbSession) -> dict[str, Any]:
     settings = request.app.state.settings
     return {"version": APP_VERSION, "demo_mode": settings.demo_mode,
             "server_storage_persistent": not settings.ephemeral_storage,
-            "features": catalogue.feature_states(db)}
+            "features": catalogue.feature_states(db, accounts_running=request.app.state.accounts_reason is None)}
 
 
 @router.get("/services", tags=["system"])
@@ -1022,7 +1022,8 @@ def _account_call(call: Any) -> Any:
 def account_status(request: Request) -> dict[str, Any]:
     reason = request.app.state.accounts_reason
     return {"available": reason is None, "reason": reason, "notification_delivery": "NOT_AVAILABLE",
-            "roles": list(ROLES)}
+            "roles": list(ROLES), "staff_session_hours": accounts.STAFF_SESSION_HOURS,
+            "passenger_session_days": accounts.SESSION_DAYS}
 
 
 @router.post("/account/register", status_code=201, tags=["account"])
@@ -1037,6 +1038,10 @@ def account_register(data: AccountIn, request: Request, db: DbSession) -> dict[s
 def account_sign_in(data: AccountIn, request: Request, db: DbSession) -> dict[str, Any]:
     _accounts_on(request)
     user, token, expires = _account_call(lambda: accounts.sign_in(db, data.email, data.password))
+    if user.role in accounts.STAFF_ROLES:
+        record_audit(db, actor=f"user:{user.id}", action="account.sign_in", entity="user", entity_id=user.id,
+                     detail={"role": user.role}, ip=client_ip(request))
+        db.commit()
     return {"user": accounts.public_user(user), "token": token,
             "expires_at": expires.isoformat(timespec="seconds") + "Z"}
 
@@ -1109,14 +1114,14 @@ def account_set_notifications(data: NotificationIn, request: Request, db: DbSess
 
 @router.get("/admin/users", tags=["admin"])
 def admin_users(request: Request, db: DbSession) -> dict[str, Any]:
-    require_admin(request)
+    require_admin(request, bootstrap=True)
     _accounts_on(request)
     return {"users": [accounts.public_user(u) for u in db.scalars(select(User).order_by(User.id))]}
 
 
 @router.put("/admin/users/{user_id}/role", tags=["admin"])
 def admin_set_role(user_id: int, data: RoleIn, request: Request, db: DbSession) -> dict[str, Any]:
-    require_admin(request)
+    require_admin(request, bootstrap=True)
     _accounts_on(request)
     user = _account_call(lambda: accounts.set_role(db, user_id, data.role))
     record_audit(db, actor=request.state.admin_actor, action="user.role", entity="user", entity_id=user_id,

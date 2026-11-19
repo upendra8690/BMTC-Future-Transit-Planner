@@ -7,13 +7,15 @@ exists only for local development and tests.
 Security:
 - **Passwords.** Stored only as salted scrypt hashes; 10 to 128 characters.
 - **Sessions.** A random token is given to the browser once and travels in the "Authorization: Bearer" header, never
-  in a cookie, so cross-site requests cannot use it. Only its SHA-256 hash is stored; it expires after 30 days.
+  in a cookie, so cross-site requests cannot use it. Only its SHA-256 hash is stored. A passenger session lasts 30
+  days; an editor or administrator session lasts 12 hours. Changing an account's role signs it out everywhere.
 - **Lockout.** Eight wrong passwords lock the account for 15 minutes. Sign-in errors never say whether an email
   address exists.
 - **Recovery.** No email service is connected, so recovery uses a one-time code shown at registration and stored
   only as a hash. Recovering signs out every session and issues a new code.
-- **Roles.** passenger (default), editor (may update upcoming-transport entries) and admin. Only an admin, or the
-  ADMIN_API_KEY holder, can change a role.
+- **Roles.** passenger (default), editor (may post service notices and update upcoming-transport entries) and admin.
+  Only an admin, or the ADMIN_API_KEY holder, can change a role. The last administrator account cannot lose its role,
+  so the server is never left without one.
 - **Notifications.** Preferences are stored, but nothing is sent: no delivery service is connected.
 """
 
@@ -32,6 +34,8 @@ from sqlalchemy.orm import Session
 
 from ..database import normalise_url
 from ..models import (
+    ROLE_ADMIN,
+    ROLE_EDITOR,
     ROLE_PASSENGER,
     ROLES,
     NotificationPreference,
@@ -42,6 +46,8 @@ from ..models import (
 )
 
 SESSION_DAYS = 30
+STAFF_SESSION_HOURS = 12
+STAFF_ROLES = (ROLE_ADMIN, ROLE_EDITOR)
 MAX_FAILED_LOGINS = 8
 LOCK_MINUTES = 15
 MIN_PASSWORD, MAX_PASSWORD = 10, 128
@@ -139,7 +145,8 @@ def register(db: Session, email: str, password: str) -> tuple[User, str]:
 
 def _start_session(db: Session, user: User, now: dt.datetime) -> tuple[str, dt.datetime]:
     token = secrets.token_urlsafe(32)
-    expires = now + dt.timedelta(days=SESSION_DAYS)
+    lifetime = dt.timedelta(hours=STAFF_SESSION_HOURS) if user.role in STAFF_ROLES else dt.timedelta(days=SESSION_DAYS)
+    expires = now + lifetime
     db.add(UserSession(user_id=user.id, token_hash=_token_hash(token), created_at=now, expires_at=expires))
     db.execute(delete(UserSession).where(UserSession.user_id == user.id, UserSession.expires_at <= now))
     db.commit()
@@ -223,9 +230,22 @@ def set_role(db: Session, user_id: int, role: str) -> User:
     user = db.get(User, user_id)
     if user is None:
         raise AccountError("No such account.", 404)
-    user.role = role
+    if user.role == ROLE_ADMIN and role != ROLE_ADMIN and admin_count(db) <= 1:
+        raise AccountError("This is the only administrator account. Make another account an administrator first.", 409)
+    if user.role != role:
+        user.role = role
+        # Sessions started under the old role end, so new permissions and session lengths apply at once.
+        db.execute(delete(UserSession).where(UserSession.user_id == user.id))
     db.commit()
     return user
+
+
+def admin_count(db: Session) -> int:
+    return len(db.scalars(select(User.id).where(User.role == ROLE_ADMIN)).all())
+
+
+def find_by_email(db: Session, email: str) -> User | None:
+    return db.scalar(select(User).where(User.email == email.strip().lower()))
 
 
 # ---------------------------------------------------------------- saved journeys, preferences, export

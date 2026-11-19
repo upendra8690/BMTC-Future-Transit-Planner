@@ -58,6 +58,10 @@
     year: 2027,
     classification: "OFFICIAL_VERIFIED",
     adminKey: "",
+    session: null,
+    accounts: null,
+    accountJourneys: null,
+    recoveryCode: "",
     clock: null,
     clockFailed: false,
     clockOffsetMs: 0,
@@ -371,10 +375,7 @@
     var opts = options || {};
     var headers = { Accept: "application/json", "X-Client-Key": clientKey() };
     var body;
-    if (opts.admin) {
-      if (!state.adminKey) throw new Error(t("admin.key_needed"));
-      headers["X-Admin-Key"] = state.adminKey;
-    }
+    var via = opts.admin || opts.auth ? addAuth(headers, opts.admin) : "";
     if (opts.form) {
       body = opts.form;
     } else if (opts.json !== undefined) {
@@ -388,11 +389,17 @@
       if (response.status === 204) return null;
       var data = await readJson(response);
       if (!response.ok) {
-        if (response.status === 401 && opts.admin) {
+        if (response.status === 401 && via === "key") {
           state.adminKey = "";
           var rejected = httpError(response, data);
           rejected.message = t("admin.key_rejected");
           throw rejected;
+        }
+        if (response.status === 401 && via === "session" && !opts.keepSession) {
+          setSession(null);
+          var ended = httpError(response, data);
+          ended.message = t("account.expired");
+          throw ended;
         }
         throw httpError(response, data);
       }
@@ -402,6 +409,35 @@
     }
   }
 
+  async function saveBlob(blob, name) {
+    // Inside the Android app a WebView cannot save a blob link, so the file goes to the app, which opens the
+    // phone's share sheet. Only the file's name, type and contents are sent.
+    if (window.PlannerAndroid && typeof window.PlannerAndroid.postMessage === "function") {
+      var encoded = await new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () { resolve(String(reader.result).split(",")[1] || ""); };
+        reader.onerror = function () { reject(reader.error); };
+        reader.readAsDataURL(blob);
+      });
+      window.PlannerAndroid.postMessage(JSON.stringify({
+        name: name,
+        type: (blob.type || "").split(";")[0],
+        data: encoded
+      }));
+      return;
+    }
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 1500);
+  }
+
   async function download(path, fallbackName) {
     var timer = startTimer(DOWNLOAD_TIMEOUT_MS);
     try {
@@ -409,32 +445,7 @@
       if (!response.ok) throw httpError(response, await readJson(response));
       var blob = await response.blob();
       var match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
-      // Inside the Android app a WebView cannot save a blob link, so the file goes to the app, which opens the
-      // phone's share sheet. Only the file's name, type and contents are sent.
-      if (window.PlannerAndroid && typeof window.PlannerAndroid.postMessage === "function") {
-        var encoded = await new Promise(function (resolve, reject) {
-          var reader = new FileReader();
-          reader.onload = function () { resolve(String(reader.result).split(",")[1] || ""); };
-          reader.onerror = function () { reject(reader.error); };
-          reader.readAsDataURL(blob);
-        });
-        window.PlannerAndroid.postMessage(JSON.stringify({
-          name: match ? match[1] : fallbackName,
-          type: (blob.type || "").split(";")[0],
-          data: encoded
-        }));
-        return;
-      }
-      var url = URL.createObjectURL(blob);
-      var link = document.createElement("a");
-      link.href = url;
-      link.download = match ? match[1] : fallbackName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(function () {
-        URL.revokeObjectURL(url);
-      }, 1500);
+      await saveBlob(blob, match ? match[1] : fallbackName);
     } catch (err) {
       if (err && err.name === "AbortError") throw new Error(t("msg.timeout"));
       throw err;
@@ -1945,23 +1956,37 @@
       return;
     }
     if (token !== state.viewToken) return;
-    if (!meta.admin_enabled) {
+    var status = await loadAccountStatus();
+    if (token !== state.viewToken) return;
+    var accountsOn = !!status.available;
+    var staff = staffSession();
+    if (!meta.admin_enabled && !accountsOn) {
       setView('<section class="card"><h2>' + esc(t("admin.title")) + '</h2><div class="banner error" role="alert">' + esc(t("admin.disabled")) + "</div></section>");
       return;
     }
-    setView(
-      '<section class="card"><h2>' + esc(t("admin.sign_in")) + "</h2>" +
-      '<p class="muted">' + esc(t("admin.key_note")) + "</p>" +
-      '<form id="adminKeyForm" class="toolbar" autocomplete="off">' +
-      '<label class="field" style="flex:1 1 260px">' + esc(t("admin.key_label")) +
+    var keyForm = '<form id="adminKeyForm" class="toolbar" autocomplete="off">' +
+      '<label class="field grow">' + esc(t("admin.key_label")) +
       '<input name="key" type="password" autocomplete="new-password" spellcheck="false"></label>' +
       '<button type="submit">' + esc(t("admin.key_save")) + "</button>" +
-      '<button type="button" class="secondary" data-action="admin-key-clear">' + esc(t("admin.key_forget")) + "</button></form></section>" +
-      '<div id="adminBody"></div>'
-    );
-    if (state.adminKey) {
-      await loadAdmin(token);
+      '<button type="button" class="secondary" data-action="admin-key-clear">' + esc(t("admin.key_forget")) + "</button></form>";
+    var head;
+    if (staff) {
+      head = '<section class="card"><h2>' + esc(t("admin.title")) + "</h2><p>" +
+        esc(t("admin.signed_in", { email: staff.user.email, role: t("account.role." + staff.user.role) })) + "</p>" +
+        (staff.user.role === "editor" ? '<p class="muted">' + esc(t("admin.editor_note")) + "</p>" : "") + "</section>";
+    } else if (accountsOn) {
+      head = '<section class="card"><h2>' + esc(t("admin.sign_in")) + "</h2><p>" + esc(t("admin.accounts_note")) + "</p>" +
+        '<p><a class="button-link" href="#/account">' + esc(t("account.go_sign_in")) + "</a></p></section>" +
+        (meta.admin_enabled ? '<section class="card"><h2>' + esc(t("admin.bootstrap_title")) + "</h2>" +
+          '<p class="muted">' + esc(t("admin.bootstrap_note")) + "</p>" + keyForm + "</section>" : "");
     } else {
+      head = '<section class="card"><h2>' + esc(t("admin.sign_in")) + "</h2>" +
+        '<p class="muted">' + esc(t("admin.key_note")) + "</p>" + keyForm + "</section>";
+    }
+    setView(head + '<div id="adminBody"></div>');
+    if (staff || state.adminKey) {
+      await loadAdmin(token);
+    } else if (!accountsOn) {
       document.getElementById("adminBody").innerHTML = '<div class="empty">' + esc(t("admin.key_needed")) + "</div>";
     }
   }
@@ -1971,6 +1996,7 @@
     if (!body) return;
     body.innerHTML =
       '<div id="adminNotice" role="alert"></div>' +
+      '<section class="card"><h2>' + esc(t("admin.users_title")) + '</h2><div id="adminUsers">' + loadingInline() + "</div></section>" +
       '<section class="card"><h2>' + esc(t("admin.sources")) + '</h2><div id="adminSources">' + loadingInline() + "</div>" +
       '<form id="sourceDecisionForm" class="form-grid" hidden aria-labelledby="decisionQuestion">' +
       '<label class="field"><span id="decisionQuestion"></span><input name="note" required maxlength="500" autocomplete="off"></label>' +
@@ -2039,6 +2065,7 @@
       '<section class="card"><h2>' + esc(t("admin.db_title")) + '</h2><div id="adminStats">' + loadingInline() + "</div>" +
       '<div class="toolbar" style="margin-top:8px"><button type="button" class="secondary" data-action="backup">' + esc(t("admin.backup")) + "</button></div></section>" +
       '<section class="card"><h2>' + esc(t("admin.audit")) + '</h2><div id="adminAudit">' + loadingInline() + "</div></section>";
+    applyAdminScope();
 
     try {
       await refreshAdminData(token);
@@ -2231,7 +2258,7 @@
     if (err && err.status === 401) {
       state.adminKey = "";
       if (token === state.viewToken) {
-        toast(t("admin.key_rejected"));
+        toast(err.message || t("admin.key_rejected"));
         render();
       }
       return;
@@ -2242,22 +2269,27 @@
   }
 
   async function refreshAdminData(token) {
+    var scope = adminScope();
+    var full = scope === "admin" || scope === "admin-key";
+    var editing = scope !== "bootstrap";
     var results = await Promise.all([
-      api("/api/admin/data-sources", { admin: true }),
-      api("/api/admin/imports", { admin: true }),
-      api("/api/admin/stats", { admin: true }),
-      api("/api/admin/audit-logs?limit=50", { admin: true }),
-      api("/api/upcoming"),
-      api("/api/admin/notices", { admin: true }),
+      full ? api("/api/admin/data-sources", { admin: true }) : null,
+      full ? api("/api/admin/imports", { admin: true }) : null,
+      full ? api("/api/admin/stats", { admin: true }) : null,
+      full ? api("/api/admin/audit-logs?limit=50", { admin: true }) : null,
+      editing ? api("/api/upcoming") : null,
+      editing ? api("/api/admin/notices", { admin: true }) : null,
+      scope === "admin" || scope === "bootstrap" ? api("/api/admin/users", { admin: true }) : null,
     ]);
     if (token !== state.viewToken || !document.getElementById("adminBody")) return;
     setAdminNotice("");
-    renderAdminSources(results[0].sources);
-    renderAdminImports(results[1].imports);
-    renderAdminStats(results[2]);
-    renderAdminAudit(results[3].entries);
-    renderAdminUpcoming(results[4]);
-    renderAdminNotices(results[5]);
+    if (results[0]) renderAdminSources(results[0].sources);
+    if (results[1]) renderAdminImports(results[1].imports);
+    if (results[2]) renderAdminStats(results[2]);
+    if (results[3]) renderAdminAudit(results[3].entries);
+    if (results[4]) renderAdminUpcoming(results[4]);
+    if (results[5]) renderAdminNotices(results[5]);
+    if (results[6]) renderAdminUsers(results[6].users);
   }
 
   // ---------------------------------------------------------------- administration: service notices
@@ -2415,8 +2447,9 @@
   }
 
   function adminHeaders() {
-    if (!state.adminKey) throw new Error(t("admin.key_needed"));
-    return { Accept: "application/json", "X-Client-Key": clientKey(), "X-Admin-Key": state.adminKey };
+    var headers = { Accept: "application/json", "X-Client-Key": clientKey() };
+    addAuth(headers, true);
+    return headers;
   }
 
   function saveAdminKey(input) {
@@ -2906,12 +2939,144 @@
     return '<label class="choice"><input type="radio" name="' + name + '" value="' + value + '"' + (current === value ? " checked" : "") + "> " + esc(t(labelKey)) + "</label>";
   }
 
+  // ---------------------------------------------------------------- accounts
+  // A passenger's sign-in is kept on this device so it survives a reload. An editor's or administrator's sign-in stays
+  // in this page's memory only, like the admin key, and the server ends it after 12 hours.
+  var STAFF_ROLES = ["admin", "editor"];
+  var ACCOUNT_REASONS = ["ACCOUNTS_DISABLED", "NEEDS_PERSISTENT_DATABASE"];
+
+  function loadSession() {
+    var raw = storage.get(PREFIX + "session");
+    if (!raw) return null;
+    try {
+      var saved = JSON.parse(raw);
+      if (saved && typeof saved.token === "string" && saved.user && typeof saved.user.email === "string" &&
+          STAFF_ROLES.indexOf(saved.user.role) === -1 && Date.parse(saved.expires_at) > Date.now()) return saved;
+    } catch (_) {
+      /* unreadable: treated as signed out */
+    }
+    storage.set(PREFIX + "session", "");
+    return null;
+  }
+
+  function setSession(data) {
+    state.session = data && data.token ? { token: data.token, user: data.user, expires_at: data.expires_at } : null;
+    var keep = state.session && STAFF_ROLES.indexOf(state.session.user.role) === -1;
+    storage.set(PREFIX + "session", keep ? JSON.stringify(state.session) : "");
+  }
+
+  function isStaff(session) {
+    return !!(session && STAFF_ROLES.indexOf(session.user.role) !== -1);
+  }
+
+  function staffSession() {
+    return state.accounts && state.accounts.available && isStaff(state.session) ? state.session : null;
+  }
+
+  // Adds the right credential to a request. Returns "session" or "key" so a refusal can be explained.
+  function addAuth(headers, admin) {
+    if (admin) {
+      var staff = staffSession();
+      if (staff) {
+        headers.Authorization = "Bearer " + staff.token;
+        return "session";
+      }
+      if (!state.adminKey) throw new Error(t(state.accounts && state.accounts.available ? "admin.accounts_note" : "admin.key_needed"));
+      headers["X-Admin-Key"] = state.adminKey;
+      return "key";
+    }
+    if (!state.session) throw new Error(t("account.sign_in_first"));
+    headers.Authorization = "Bearer " + state.session.token;
+    return "session";
+  }
+
+  async function loadAccountStatus() {
+    if (state.accounts) return state.accounts;
+    try {
+      state.accounts = await api("/api/account/status");
+      return state.accounts;
+    } catch (_) {
+      return { available: false, reason: null };
+    }
+  }
+
+  function emailField() {
+    return '<label class="field">' + esc(t("account.email")) +
+      '<input name="email" type="email" required maxlength="254" autocomplete="email" spellcheck="false"></label>';
+  }
+
+  function passwordField(labelKey, name, autocomplete, isNew) {
+    return '<label class="field">' + esc(t(labelKey)) + '<input name="' + name + '" type="password" required maxlength="128"' +
+      (isNew ? ' minlength="10"' : "") + ' autocomplete="' + autocomplete + '">' +
+      (isNew ? '<span class="muted small">' + esc(t("account.password_hint")) + "</span>" : "") + "</label>";
+  }
+
+  function recoveryHtml(code) {
+    return '<div class="banner unverified" role="alert"><strong>' + esc(t("account.recovery_title")) + "</strong>" +
+      "<p>" + esc(t("account.recovery_keep")) + '</p><p><code class="recovery-code">' + esc(code) + "</code></p>" +
+      '<button type="button" class="secondary" data-action="account-code-done">' + esc(t("account.recovery_done")) + "</button></div>";
+  }
+
+  function journeyHash(origin, destination, modes, cls) {
+    return "#/journey/" + [origin, destination, modes, cls].map(function (x) { return encodeURIComponent(x || ""); }).join("/");
+  }
+
+  function signedOutHtml() {
+    return "<p>" + esc(t("account.guest")) + "</p>" +
+      "<h3>" + esc(t("account.sign_in")) + '</h3><form id="accountSignInForm" class="form-grid">' +
+      emailField() + passwordField("account.password", "password", "current-password", false) +
+      '<div class="align-end"><button type="submit">' + esc(t("account.sign_in")) + "</button></div></form>" +
+      '<details class="mt-12"><summary>' + esc(t("account.register")) + '</summary><form id="accountRegisterForm" class="form-grid">' +
+      emailField() + passwordField("account.password", "password", "new-password", true) +
+      '<div class="align-end"><button type="submit">' + esc(t("account.register_submit")) + "</button></div></form></details>" +
+      '<details class="mt-12"><summary>' + esc(t("account.recover")) + '</summary><form id="accountRecoverForm" class="form-grid">' +
+      emailField() + '<label class="field">' + esc(t("account.recovery_code")) +
+      '<input name="recovery_code" required minlength="8" maxlength="40" autocomplete="off" spellcheck="false"></label>' +
+      passwordField("account.password_new", "new_password", "new-password", true) +
+      '<div class="align-end"><button type="submit">' + esc(t("account.recover_submit")) + "</button></div></form></details>";
+  }
+
+  function signedInHtml(s) {
+    var until = formatter({ day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(Date.parse(s.expires_at)));
+    return "<p>" + esc(t("account.signed_in_as", { email: s.user.email })) + ' <span class="badge">' + esc(t("account.role." + s.user.role)) + "</span></p>" +
+      '<p class="muted small">' + esc(t("account.session_until", { time: until })) + "</p>" +
+      (isStaff(s) ? '<p class="muted small">' + esc(t("account.staff_memory")) + '</p><p><a class="button-link" href="#/admin">' + esc(t("nav.admin")) + "</a></p>" : "") +
+      '<div class="toolbar"><button type="button" class="secondary" data-action="account-sign-out">' + esc(t("account.sign_out")) + "</button></div></section>" +
+      '<section class="card"><h2>' + esc(t("account.journeys_title")) + '</h2><div id="accountJourneys">' + loadingInline() + "</div>" +
+      '<div class="toolbar mt-8"><button type="button" class="secondary" data-action="account-copy-journeys">' + esc(t("account.journeys_copy")) + "</button></div></section>" +
+      '<section class="card"><h2>' + esc(t("account.notify_title")) + '</h2><form id="accountNotifyForm" class="settings">' +
+      '<label class="switch"><input type="checkbox" name="service_notices"> ' + esc(t("account.notify_notices")) + "</label>" +
+      '<label class="switch"><input type="checkbox" name="upcoming_changes"> ' + esc(t("account.notify_upcoming")) + "</label>" +
+      '<p class="muted small">' + esc(t("account.notify_note")) + "</p>" +
+      '<div><button type="submit">' + esc(t("account.notify_save")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("account.data_title")) + '</h2><div class="toolbar">' +
+      '<button type="button" class="secondary" data-action="account-export">' + esc(t("account.export")) + "</button></div></section>" +
+      '<section class="card"><h2>' + esc(t("account.password_title")) + '</h2><form id="accountPasswordForm" class="form-grid">' +
+      passwordField("account.password_current", "current_password", "current-password", false) +
+      passwordField("account.password_new", "new_password", "new-password", true) +
+      '<div class="align-end"><button type="submit">' + esc(t("account.password_title")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("account.delete_title")) + "</h2><p>" + esc(t("account.delete_body")) + "</p>" +
+      '<form id="accountDeleteForm" class="form-grid">' + passwordField("account.password", "password", "current-password", false) +
+      '<div class="align-end"><button type="submit" class="danger">' + esc(t("account.delete_submit")) + "</button></div></form>";
+  }
+
+  function accountCardHtml(status) {
+    var head = '<section class="card"><div class="card-head"><h2>' + esc(t("account.title")) + "</h2>" + featureChip("accounts") + "</div>";
+    if (!status.available) {
+      var reason = ACCOUNT_REASONS.indexOf(status.reason) !== -1 ? "account.reason." + status.reason : "account.unreachable";
+      return head + "<p>" + esc(t("account.guest")) + '</p><p class="muted">' + esc(t(reason)) + "</p></section>";
+    }
+    var code = state.recoveryCode ? recoveryHtml(state.recoveryCode) : "";
+    return head + code + (state.session ? signedInHtml(state.session) : signedOutHtml()) + "</section>";
+  }
+
   async function renderAccount(args, token) {
     await loadFeatures();
+    var status = await loadAccountStatus();
     if (token !== state.viewToken) return;
+    if (!status.available) setSession(null);
     setView(
-      '<section class="card"><div class="card-head"><h2>' + esc(t("account.title")) + "</h2>" + featureChip("accounts") + "</div>" +
-      "<p>" + esc(t("account.guest")) + '</p><p class="muted">' + esc(t("account.coming")) + "</p></section>" +
+      accountCardHtml(status) +
       '<section class="card"><h2>' + esc(t("settings.title")) + "</h2>" +
       '<form id="settingsForm" class="settings">' +
       '<fieldset><legend>' + esc(t("settings.theme")) + "</legend>" +
@@ -2924,6 +3089,261 @@
       '<section class="card"><h2>' + esc(t("erase.title")) + "</h2><p>" + esc(t("erase.body")) + "</p>" +
       '<div id="eraseBox"><button type="button" class="danger" data-action="erase-ask">' + esc(t("erase.button")) + "</button></div></section>"
     );
+    if (status.available && state.session) await loadAccountDetails(token);
+  }
+
+  async function loadAccountDetails(token) {
+    var results;
+    try {
+      results = await Promise.all([api("/api/account/journeys", { auth: true }), api("/api/account/notifications", { auth: true })]);
+    } catch (err) {
+      if (token !== state.viewToken) return;
+      fail(err);
+      if (err && err.status === 401) render();
+      return;
+    }
+    if (token !== state.viewToken) return;
+    state.accountJourneys = results[0].journeys;
+    renderAccountJourneys(results[0].journeys);
+    var form = document.getElementById("accountNotifyForm");
+    if (form) {
+      form.elements.service_notices.checked = !!results[1].service_notices;
+      form.elements.upcoming_changes.checked = !!results[1].upcoming_changes;
+    }
+  }
+
+  function renderAccountJourneys(list) {
+    var box = document.getElementById("accountJourneys");
+    if (!box) return;
+    box.innerHTML = list.length ? '<ul class="list">' + list.map(function (j) {
+      return '<li><div><div class="title">' + esc(j.origin) + " &rarr; " + esc(j.destination) + '</div><div class="muted">' +
+        esc(t(JOURNEY_MODE_KEYS[j.modes] || "journey.modes_all")) + " · " + esc(t("cls." + j.classification)) + "</div></div>" +
+        '<div class="row-actions"><a class="button secondary" href="' + esc(journeyHash(j.origin, j.destination, j.modes, j.classification)) + '">' + esc(t("account.journey_plan")) + "</a>" +
+        '<button type="button" class="secondary" data-action="account-journey-remove" data-id="' + esc(j.id) + '">' + esc(t("account.journey_remove")) + "</button></div></li>";
+    }).join("") + "</ul>" : '<div class="empty">' + esc(t("account.journeys_none")) + "</div>";
+  }
+
+  function formValue(form, name) {
+    return String(new FormData(form).get(name) || "");
+  }
+
+  async function accountRequest(form, path, method, body, extra) {
+    busy(form, true);
+    try {
+      return await api(path, Object.assign({ method: method, json: body }, extra || {}));
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  async function signIn(form) {
+    var result;
+    try {
+      result = await accountRequest(form, "/api/account/sign-in", "POST",
+        { email: formValue(form, "email").trim(), password: formValue(form, "password") });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    setSession(result);
+    toast(t("account.welcome"));
+    render();
+  }
+
+  async function registerAccount(form) {
+    var email = formValue(form, "email").trim();
+    var password = formValue(form, "password");
+    var made;
+    var result;
+    try {
+      made = await accountRequest(form, "/api/account/register", "POST", { email: email, password: password });
+      result = await api("/api/account/sign-in", { method: "POST", json: { email: email, password: password } });
+    } catch (err) {
+      fail(err);
+      if (made) {
+        state.recoveryCode = made.recovery_code;
+        render();
+      }
+      return;
+    }
+    state.recoveryCode = made.recovery_code;
+    setSession(result);
+    toast(t("account.created"));
+    render();
+  }
+
+  async function recoverAccount(form) {
+    var result;
+    try {
+      result = await accountRequest(form, "/api/account/recover", "POST", {
+        email: formValue(form, "email").trim(), recovery_code: formValue(form, "recovery_code").trim(),
+        new_password: formValue(form, "new_password")
+      });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    state.recoveryCode = result.recovery_code;
+    toast(t("account.recovered"));
+    render();
+  }
+
+  async function saveNotifications(form) {
+    try {
+      await accountRequest(form, "/api/account/notifications", "PUT", {
+        service_notices: form.elements.service_notices.checked, upcoming_changes: form.elements.upcoming_changes.checked
+      }, { auth: true });
+    } catch (err) {
+      fail(err);
+      if (err && err.status === 401) render();
+      return;
+    }
+    toast(t("account.notify_saved"));
+  }
+
+  async function changePassword(form) {
+    try {
+      await accountRequest(form, "/api/account/password", "POST", {
+        current_password: formValue(form, "current_password"), new_password: formValue(form, "new_password")
+      }, { auth: true, keepSession: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    setSession(null);
+    toast(t("account.password_changed"));
+    render();
+  }
+
+  async function deleteAccount(form) {
+    try {
+      await accountRequest(form, "/api/account/delete", "POST", { password: formValue(form, "password") },
+        { auth: true, keepSession: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    setSession(null);
+    toast(t("account.deleted"));
+    render();
+  }
+
+  async function signOut() {
+    try {
+      await api("/api/account/sign-out", { method: "POST", auth: true });
+    } catch (_) {
+      /* the server may already have ended the session; this device forgets it either way */
+    }
+    setSession(null);
+    toast(t("account.signed_out"));
+    render();
+  }
+
+  async function copyJourneysToAccount(token) {
+    var have = (state.accountJourneys || []).map(function (j) {
+      return { from: j.origin, to: j.destination, modes: j.modes, cls: j.classification };
+    });
+    var copied = 0;
+    try {
+      var device = savedJourneys();
+      for (var i = 0; i < device.length; i += 1) {
+        var j = device[i];
+        if (have.some(function (h) { return sameJourney(h, j); })) continue;
+        await api("/api/account/journeys", { method: "POST", auth: true, json: {
+          origin: j.from, destination: j.to, modes: j.modes, classification: j.cls, label: (j.from + " - " + j.to).slice(0, 100)
+        } });
+        have.push(j);
+        copied += 1;
+      }
+    } catch (err) {
+      fail(err);
+    }
+    toast(t("account.journeys_copied", { count: copied }));
+    if (token === state.viewToken) await loadAccountDetails(token);
+  }
+
+  async function removeAccountJourney(id, token) {
+    try {
+      await api("/api/account/journeys/" + encodeURIComponent(id), { method: "DELETE", auth: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    if (token === state.viewToken) await loadAccountDetails(token);
+  }
+
+  async function exportAccount() {
+    var data;
+    try {
+      data = await api("/api/account/export", { auth: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    await saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "my-account-data.json");
+  }
+
+  // ---------------------------------------------------------------- administration: accounts and roles
+  var ADMIN_FULL = ["adminSources", "upcomingForm", "adminNotices", "uploadForm", "adminImports", "adminStats", "adminAudit"];
+  var ADMIN_SECTIONS = {
+    admin: ADMIN_FULL.concat(["adminUsers"]),
+    "admin-key": ADMIN_FULL,
+    editor: ["upcomingForm", "adminNotices"],
+    bootstrap: ["adminUsers"],
+  };
+
+  // What the person on this page may manage: an account's role, the key on a server without accounts, or, with
+  // accounts running and only the key, the first administrator's role.
+  function adminScope() {
+    var staff = staffSession();
+    if (staff) return staff.user.role;
+    return state.accounts && state.accounts.available ? "bootstrap" : "admin-key";
+  }
+
+  function applyAdminScope() {
+    var allowed = ADMIN_SECTIONS[adminScope()];
+    ADMIN_SECTIONS.admin.forEach(function (id) {
+      var node = document.getElementById(id);
+      var section = node && node.closest ? node.closest("section") : null;
+      if (section) section.hidden = allowed.indexOf(id) === -1;
+    });
+  }
+
+  function renderAdminUsers(users) {
+    var box = document.getElementById("adminUsers");
+    if (!box) return;
+    var me = state.session ? state.session.user.id : null;
+    box.innerHTML = users.length ? '<ul class="list">' + users.map(function (u) {
+      return '<li><div><div class="title">' + esc(u.email) + '</div><div class="muted">' + esc(t("account.role." + u.role)) +
+        (u.id === me ? " · " + esc(t("admin.user_you")) : "") + "</div></div>" +
+        '<div class="row-actions"><select id="role-' + esc(u.id) + '" aria-label="' + esc(t("admin.user_role_label", { email: u.email })) + '">' +
+        ["passenger", "editor", "admin"].map(function (r) {
+          return '<option value="' + r + '"' + (r === u.role ? " selected" : "") + ">" + esc(t("account.role." + r)) + "</option>";
+        }).join("") + "</select>" +
+        '<button type="button" class="secondary" data-action="user-role" data-id="' + esc(u.id) + '">' + esc(t("admin.user_role_save")) + "</button></div></li>";
+    }).join("") + "</ul>" : '<div class="empty">' + esc(t("admin.users_none")) + "</div>";
+  }
+
+  async function changeRole(id, token) {
+    var select = document.getElementById("role-" + id);
+    if (!select) return;
+    try {
+      await api("/api/admin/users/" + encodeURIComponent(id) + "/role", { method: "PUT", admin: true, json: { role: select.value } });
+    } catch (err) {
+      adminFailure(err, token);
+      return;
+    }
+    toast(t("admin.user_role_saved"));
+    if (state.session && String(state.session.user.id) === String(id)) {
+      setSession(null);
+      render();
+      return;
+    }
+    try {
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    }
   }
 
   // Erasure: the server deletes everything linked to this device's key; this browser forgets its lists and its key.
@@ -3508,6 +3928,25 @@
       case "erase-ask":
         askErase();
         break;
+      case "account-sign-out":
+        signOut();
+        break;
+      case "account-code-done":
+        state.recoveryCode = "";
+        render();
+        break;
+      case "account-copy-journeys":
+        copyJourneysToAccount(token);
+        break;
+      case "account-journey-remove":
+        removeAccountJourney(id, token);
+        break;
+      case "account-export":
+        exportAccount();
+        break;
+      case "user-role":
+        changeRole(id, token);
+        break;
       case "erase-cancel":
         render();
         break;
@@ -3571,6 +4010,24 @@
         break;
       case "adminKeyForm":
         saveAdminKey(form.elements.key);
+        break;
+      case "accountSignInForm":
+        signIn(form);
+        break;
+      case "accountRegisterForm":
+        registerAccount(form);
+        break;
+      case "accountRecoverForm":
+        recoverAccount(form);
+        break;
+      case "accountNotifyForm":
+        saveNotifications(form);
+        break;
+      case "accountPasswordForm":
+        changePassword(form);
+        break;
+      case "accountDeleteForm":
+        deleteAccount(form);
         break;
       case "homeSearch":
         state.pendingQuery = String(form.elements.q.value || "").trim();
@@ -3666,6 +4123,7 @@
         main.focus();
       });
     }
+    state.session = loadSession();
     if (!location.hash) history.replaceState(null, "", "#/home");
     setView(loadingCard());
     // Dates come from the server clock, so the first render waits for it (or for its failure).

@@ -10,7 +10,7 @@ import datetime as dt
 
 import pytest
 from app.main import create_app
-from app.models import User
+from app.models import AuditLog, User, UserSession
 from app.services import accounts
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -50,7 +50,8 @@ def journey(**changes) -> dict:
 def test_accounts_are_off_by_default(client):
     status = client.get("/api/account/status").json()
     assert status == {"available": False, "reason": "ACCOUNTS_DISABLED", "notification_delivery": "NOT_AVAILABLE",
-                      "roles": ["passenger", "editor", "admin"]}
+                      "roles": ["passenger", "editor", "admin"], "staff_session_hours": 12,
+                      "passenger_session_days": 30}
     refused = client.post("/api/account/register", json={"email": "a@example.org", "password": PASSWORD})
     assert refused.status_code == 503
 
@@ -242,7 +243,7 @@ def test_an_admin_account_can_manage_data_and_roles(app_client):
     target = next(u for u in users if u["email"] == "later@example.org")
     assert app_client.put(f"/api/admin/users/{target['id']}/role", headers=admin,
                           json={"role": "editor"}).status_code == 200
-    entries = app_client.get("/api/admin/audit-logs", headers=admin_headers()).json()["entries"]
+    entries = app_client.get("/api/admin/audit-logs", headers=admin).json()["entries"]
     assert any(e["action"] == "user.role" and e["actor"].startswith("user:") for e in entries)
 
 
@@ -251,5 +252,97 @@ def test_an_unknown_role_is_refused(app_client):
     assert app_client.put("/api/admin/users/1/role", headers=admin_headers(), json={"role": "owner"}).status_code == 422
 
 
-def test_the_admin_key_still_works_when_accounts_are_on(app_client):
-    assert app_client.get("/api/admin/data-sources", headers=admin_headers()).status_code == 200
+def test_while_accounts_run_the_shared_key_only_lists_accounts_and_assigns_roles(app_client):
+    # Individual accounts replace the shared key: it can still create the first administrator, nothing else.
+    refused = app_client.get("/api/admin/data-sources", headers=admin_headers())
+    assert refused.status_code == 403
+    assert "sign in with your own account" in refused.json()["detail"]
+    assert app_client.patch("/api/admin/upcoming/metro_blue", headers=admin_headers(),
+                            json={"status": "DELAYED", "reason": "Operator statement checked"}).status_code == 403
+    assert app_client.get("/api/admin/users", headers=admin_headers()).status_code == 200
+
+
+def test_without_accounts_the_shared_key_keeps_full_access(client):
+    assert client.get("/api/admin/data-sources", headers=admin_headers()).status_code == 200
+
+
+def test_administration_asks_for_a_sign_in_while_accounts_run(app_client):
+    response = app_client.get("/api/admin/data-sources")
+    assert response.status_code == 401
+    assert "Sign in" in response.json()["detail"]
+
+
+def test_staff_sessions_are_short_and_passenger_sessions_long(app_client):
+    register(app_client)
+    passenger = app_client.post("/api/account/sign-in", json={"email": "asha@example.org", "password": PASSWORD}).json()
+    admin_token = make_role(app_client, "boss@example.org", "admin")["Authorization"].split()[1]
+    with app_client.app.state.db.session() as db:
+        user = accounts.user_for_token(db, admin_token)
+        row = db.scalars(select(UserSession).where(UserSession.user_id == user.id)).one()
+        assert row.expires_at - row.created_at == dt.timedelta(hours=accounts.STAFF_SESSION_HOURS)
+    issued = dt.datetime.fromisoformat(passenger["expires_at"].rstrip("Z"))
+    assert issued - dt.datetime.now(dt.UTC).replace(tzinfo=None) > dt.timedelta(days=29)
+    status = app_client.get("/api/account/status").json()
+    assert status["staff_session_hours"] == 12
+    assert status["passenger_session_days"] == 30
+
+
+def test_changing_a_role_signs_that_account_out(app_client):
+    register(app_client)
+    headers = sign_in(app_client)
+    assert app_client.get("/api/account/me", headers=headers).status_code == 200
+    app_client.put("/api/admin/users/1/role", headers=admin_headers(), json={"role": "editor"})
+    assert app_client.get("/api/account/me", headers=headers).status_code == 401
+
+
+def test_the_last_administrator_cannot_lose_the_role(app_client):
+    admin = make_role(app_client, "boss@example.org", "admin")
+    me = app_client.get("/api/account/me", headers=admin).json()["user"]
+    refused = app_client.put(f"/api/admin/users/{me['id']}/role", headers=admin, json={"role": "passenger"})
+    assert refused.status_code == 409
+    assert "only administrator" in refused.json()["detail"]
+    second = make_role(app_client, "second@example.org", "admin")
+    assert app_client.put(f"/api/admin/users/{me['id']}/role", headers=second,
+                          json={"role": "passenger"}).status_code == 200
+
+
+def test_staff_sign_ins_are_audited_and_passenger_sign_ins_are_not(app_client):
+    register(app_client)
+    sign_in(app_client)
+    admin = make_role(app_client, "boss@example.org", "admin")
+    entries = app_client.get("/api/admin/audit-logs", headers=admin).json()["entries"]
+    sign_ins = [e for e in entries if e["action"] == "account.sign_in"]
+    assert len(sign_ins) == 1
+    assert sign_ins[0]["actor"].startswith("user:")
+
+
+def test_an_editor_may_post_notices_but_not_manage_accounts(app_client):
+    editor = make_role(app_client, "editor@example.org", "editor")
+    assert app_client.get("/api/admin/notices", headers=editor).status_code == 200
+    assert app_client.get("/api/admin/users", headers=editor).status_code == 403
+    assert app_client.get("/api/admin/audit-logs", headers=editor).status_code == 403
+
+
+def test_features_report_accounts_available_when_they_run(app_client):
+    features = {f["id"]: f for f in app_client.get("/api/features").json()["features"]}
+    assert features["accounts"] == {"id": "accounts", "state": "AVAILABLE", "reason": None}
+
+
+def test_the_create_admin_script_promotes_an_existing_account(app_client, tmp_path, monkeypatch, capsys):
+    import importlib.util
+    from pathlib import Path
+
+    register(app_client, email="owner@example.org")
+    url = app_client.app.state.settings.database_url
+    monkeypatch.setenv("DATABASE_URL", url)
+    path = Path(__file__).resolve().parents[1] / "scripts" / "create_admin.py"
+    spec = importlib.util.spec_from_file_location("create_admin", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.main(["owner@example.org"]) == 0
+    assert module.main(["nobody@example.org"]) == 1
+    assert "No account" in capsys.readouterr().err
+    with app_client.app.state.db.session() as db:
+        assert accounts.find_by_email(db, "owner@example.org").role == "admin"
+        entries = [e.action for e in db.scalars(select(AuditLog))]
+    assert "user.role" in entries

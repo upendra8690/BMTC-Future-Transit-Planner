@@ -57,15 +57,22 @@ def bearer_token(request: Request) -> str:
     return token.strip() if scheme.lower() == "bearer" else ""
 
 
-def require_admin(request: Request, roles: tuple[str, ...] = ("admin",)) -> str:
+def require_admin(request: Request, roles: tuple[str, ...] = ("admin",), bootstrap: bool = False) -> str:
     """Fail closed. Returns who acted, and keeps it in request.state.admin_actor for the audit log.
 
-    With passenger accounts running, a signed-in account whose role is in ``roles`` is accepted and recorded as
-    "user:<id>". Otherwise the ADMIN_API_KEY holder is accepted and recorded as "admin"; without that key configured,
+    With accounts running (a permanent database), administration uses individual accounts: a signed-in account whose
+    role is in ``roles`` is accepted and recorded as "user:<id>". The shared ADMIN_API_KEY then works only on the
+    routes marked ``bootstrap`` (listing accounts and assigning roles), so it can create the first administrator but
+    cannot be used for day-to-day changes.
+
+    Without accounts, the ADMIN_API_KEY holder is accepted and recorded as "admin"; without that key configured,
     administrative routes are disabled.
     """
     token = bearer_token(request)
-    if token and getattr(request.app.state, "accounts_reason", "off") is None:
+    accounts_running = getattr(request.app.state, "accounts_reason", "off") is None
+    if accounts_running and not token and not request.headers.get("x-admin-key"):
+        raise HTTPException(status_code=401, detail="Sign in with an administrator or editor account.")
+    if token and accounts_running:
         from .services import accounts  # imported here: the account service is optional
 
         with request.app.state.db.session() as session:
@@ -83,6 +90,10 @@ def require_admin(request: Request, roles: tuple[str, ...] = ("admin",)) -> str:
         supplied = request.headers.get("x-admin-key", "")
         if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
             raise HTTPException(status_code=401, detail="Invalid or missing admin key.")
+        if accounts_running and not bootstrap:
+            raise HTTPException(status_code=403, detail=(
+                "Administrator accounts are running on this server, so sign in with your own account. The shared "
+                "admin key can only list accounts and assign roles."))
         actor = "admin"
     request.state.admin_actor = actor
     return actor
