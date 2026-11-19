@@ -1,78 +1,63 @@
-# Android app (Flutter starter)
+# Android app (Flutter WebView wrapper)
 
-## Status: not built
+## Status (18 November 2026)
+- **Built by GitHub Actions** (`.github/workflows/android-apk.yml`). Every push to `v4` that changes `android/` runs
+  `flutter analyze` and builds a release APK and a Play bundle (AAB), as a compile check only. **Nothing is kept or
+  published from `v4`.** A pre-release needs a manual run with `publish_v4_preview` and the `V4_PLANNER_URL` variable,
+  and the owner's approval (`tests/test_release_guard.py`).
+- **Not yet run on a phone or an emulator.** The development computer has no Flutter SDK; see "Testing" below.
+- **Signing:** without the owner's release key, builds are signed with Flutter's debug key and are **not** for Google
+  Play. See "Release key".
 
-- **No APK is included.** The build environment could not download the Flutter SDK, the Android SDK or the Maven and
-  Google repositories. None of those hosts could be reached from the build sandbox, so no Flutter or Android build was run.
-- **The starter is not compiled.** Only these static checks were run: `pubspec.yaml` and `analysis_options.yaml` were
-  parsed as YAML, and `lib/main.dart` was parsed with a Dart grammar (tree-sitter) and reported zero syntax errors. Run the same checks with `python android/check_starter.py`. Install the exact versions that passed, in a separate
-  virtual environment, with `python -m pip install -r requirements-android-check.txt`. Those packages are not needed to
-  run the planner.
-- **Nothing was run on a phone or an emulator.** Geolocation, the service worker and the back button inside the
-  WebView have not been tested.
+## What the wrapper does (`flutter_app/lib/main.dart`)
+| Behaviour | How |
+|---|---|
+| Shows the planner | A full-screen WebView of the address given at build time (`--dart-define=PLANNER_URL=...`) |
+| Links | Planner pages open inside the app; `tel:` links (SOS, helplines) open the dialler; other `https` links open the browser; nothing else is followed |
+| Back button | Goes back a page inside the app; closes the app when there is none |
+| "Stops near me" | When the page asks for the location, Android asks the passenger, then and only then. Only the planner's own address can ask, and the WebView never keeps the permission |
+| Downloads (timetable CSV, PDFs) | The page sends the file through one named channel (`PlannerAndroid`); the app accepts only CSV, PDF or JSON up to about 7.5 MB, writes it to its temporary folder and opens Android's share sheet |
+| Load errors | A clear message and **Try again** |
+| Backup | Switched off (`android:allowBackup="false"`), so the device key and saved journeys stay on the phone |
+| Play requirements | Target and compile API level at least 36 (checked on every build); version code = workflow run number |
+| Permissions | Internet; location (asked only when needed) |
 
-## What the starter does
+Static check without Flutter: `python android/check_starter.py` (needs `requirements-android-check.txt`).
 
-`flutter_app/lib/main.dart` opens the planner web page in a full-screen WebView. The page address is set at build
-time with `--dart-define=PLANNER_URL=...`. The app:
+## Release key (owner only)
+1. Create an upload key on your own computer, for example with Android Studio's JDK:
+   `keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload`.
+   Keep the file and its passwords in a safe place **outside** this repository.
+2. Encode it: `base64 -w 0 upload-keystore.jks` (Linux) or `[Convert]::ToBase64String([IO.File]::ReadAllBytes("upload-keystore.jks"))`
+   (PowerShell).
+3. In GitHub: **Settings > Secrets and variables > Actions > New repository secret**. Add `ANDROID_KEYSTORE_BASE64`,
+   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+4. **Never paste the key or its passwords into a chat, an issue or a commit.**
 
-- loads only pages on the planner's own host, and sends every other link outside the app
-- shows the planner's own message if the page cannot be loaded, or if no address was given at build time
+The next build then signs the APK and AAB with that key. This path has not been run yet, because no key exists.
 
-It does not store data, does not request location permission itself, and does not handle the Android back button.
+## Testing
+- **Emulator.** The development computer has the Android SDK, the emulator and Android 16 (API 36) images. An APK
+  pointing at the public address is needed: either the owner approves setting `V4_PLANNER_URL`, or Flutter is
+  installed locally to build one.
+- **Phone.** Install the APK, then check: the planner opens; "Stops near me" asks for location and works; SOS opens the
+  dialler with 112; an official link opens the browser; the back button; a timetable CSV download opens the share
+  sheet; airplane mode shows the offline copy or "Try again".
 
-## Build it on a developer machine
+## Build on a developer machine
+Requires the Flutter SDK (stable), the Android SDK and Java 17 or newer.
+```
+cd android/flutter_app
+flutter create --platforms=android --project-name bmtc_planner_app --org io.github.upendra8690 .
+```
+Then apply the manifest and Gradle changes that the workflow makes (permissions, backup off, API level 36), and:
+```
+flutter pub get
+flutter analyze
+flutter run --dart-define=PLANNER_URL=https://bengaluru-transit-planner-v4.onrender.com/
+```
 
-These steps need the Flutter SDK (stable channel), the Android SDK and Java 17 or newer.
-
-1. Accept the Android licences: `flutter doctor --android-licenses`.
-2. Create the native Android folder inside the starter. This keeps the existing `lib/` and `pubspec.yaml`:
-
-   ```
-   cd android\flutter_app
-   flutter create --platforms=android --project-name bmtc_planner_app .
-   ```
-
-   If `flutter create` reports that `lib/main.dart` or `pubspec.yaml` already exists, keep the starter versions.
-
-3. Allow internet access in release builds. Open `android/app/src/main/AndroidManifest.xml` and add this line above
-   `<application>`:
-
-   ```xml
-   <uses-permission android:name="android.permission.INTERNET" />
-   ```
-
-4. Check and run:
-
-   ```
-   flutter pub get
-   flutter analyze
-   flutter run --dart-define=PLANNER_URL=https://your-planner.example.org/
-   ```
-
-5. Build the APK only after steps 1 to 4 pass:
-
-   ```
-   flutter build apk --release --dart-define=PLANNER_URL=https://your-planner.example.org/
-   ```
-
-   The release build uses the debug signing key unless you configure your own keystore. The keystore and its
-   passwords must never be placed in this project.
-
-## Limits to know before you use it
-
-- **The planner must be on HTTPS** for phone use. Browsers only allow location and the offline service worker on secure
-  addresses. Plain-HTTP addresses such as `http://192.168.x.x:8000` are not enough for "near me" or offline use.
-  See `docs/PHONE_ACCESS.md`.
-- **Location inside the WebView is not wired.** Using "near me" inside this app needs Android location permission and
-  WebView location handling. The starter does not do either, so the planner's location request fails and it shows a message to search by stop name
-  instead.
-- **No Play Store or signing setup** is included.
-- **The app is a thin wrapper.** Everything shown comes from the planner web page, so the same data rules apply.
-
-## Without building an app
-
-Chrome on Android can install the planner as an app from the browser menu ("Install app" or "Add to Home screen"),
-once the planner is served over HTTPS. The dashboard includes the manifest and service worker that this needs. In this
-build the manifest and service worker were checked in headless desktop Chrome. The install step itself was not tested,
-and nothing was tested on a phone.
+## Limits
+- The wrapper adds no data of its own; every data rule of the web app applies.
+- Google Play may judge a thin website wrapper as offering too little beyond the website. That is a risk to weigh
+  before submitting it.

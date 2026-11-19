@@ -20,6 +20,15 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_DIR / "data"
 DASHBOARD_DIR = PROJECT_DIR / "dashboard"
 _WHOLE_NUMBER = re.compile(r"[0-9]{1,12}")
+_HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+def _header_name(name: str) -> str:
+    """An HTTP header name, or empty. A malformed value stops the start-up instead of being ignored silently."""
+    raw = os.environ.get(name, "").strip()
+    if raw and not _HEADER_NAME.fullmatch(raw):
+        raise ValueError(f"{name} must be an HTTP header name such as CF-Connecting-IP. Found '{raw}'.")
+    return raw.lower()
 
 
 def _read_dotenv(path: Path) -> None:
@@ -69,6 +78,10 @@ def _check_font_file(path: Path) -> None:
         raise ValueError(f"PDF_FONT_PATH is not a readable TrueType (.ttf) font: {path}") from exc
 
 
+def _flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -92,6 +105,40 @@ class Settings:
     min_transfer_minutes: float = 3.0
     max_transfer_walk_m: int = 300
     walk_speed_kmph: float = 4.8
+    # Demonstration mode serves the invented SYNTHETIC_DEMO feeds. Off by default, so the public service shows only
+    # real information; a demonstration server sets DEMO_MODE=1 (see app/demo.py).
+    demo_mode: bool = False
+    # Passenger accounts run only when switched on AND the database is permanent (PostgreSQL). ACCOUNTS_ALLOW_SQLITE
+    # is for local development and tests only: on a hosting service's temporary disk every account would be lost.
+    accounts_enabled: bool = False
+    accounts_allow_sqlite: bool = False
+    # A header that the hosting provider's edge sets to the visitor's address and that a visitor cannot set, such as
+    # CF-Connecting-IP behind Cloudflare. Empty: the address uvicorn reports is used. It counts visitors for the rate
+    # limit; X-Forwarded-For is not used for that, because its first entry can be written by the visitor.
+    client_ip_header: str = ""
+    # True on hosting whose disk is erased on every restart (Render's free plan with SQLite). The app then tells
+    # passengers that items saved on the server can be lost, and points them to what is kept on their own device.
+    ephemeral_storage: bool = False
+    # Live vehicles and arrival estimates (GTFS-Realtime). Empty URLs: not connected, which is the case until BMTC
+    # authorises access. See app/services/realtime.py. REALTIME_AUTH_HEADER is a secret and is never returned.
+    realtime_vehicles_url: str = ""
+    realtime_trip_updates_url: str = ""
+    realtime_auth_header: str = ""
+    realtime_source_kind: str = "OFFICIAL"
+    realtime_classification: str = "OFFICIAL_VERIFIED"
+    realtime_poll_seconds: int = 20
+    realtime_stale_seconds: int = 120
+    # Payments and ticketing (app/services/payment_providers.py). Empty: nothing can be bought. Key secrets and the
+    # webhook secret are secrets: set them in the hosting dashboard, never in GitHub.
+    payment_provider: str = ""
+    payment_environment: str = "production"
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    public_base_url: str = ""
+    merchant_name: str = "Bengaluru Transit Planner"
+    ticketing_provider: str = ""
+    payment_sandbox_state: Path = DATA_DIR / "payment_sandbox.json"
 
     @classmethod
     def from_env(cls, env_file: Path | None = None) -> Settings:
@@ -130,4 +177,26 @@ class Settings:
             min_transfer_minutes=_get_float("MIN_TRANSFER_MINUTES", 3.0, low=0.0, high=60.0),
             max_transfer_walk_m=_get_int("MAX_TRANSFER_WALK_M", 300, low=0, high=1000),
             walk_speed_kmph=_get_float("WALK_SPEED_KMPH", 4.8, low=1.0, high=10.0),
+            demo_mode=_flag("DEMO_MODE"),
+            accounts_enabled=_flag("ACCOUNTS_ENABLED"),
+            accounts_allow_sqlite=_flag("ACCOUNTS_ALLOW_SQLITE"),
+            client_ip_header=_header_name("CLIENT_IP_HEADER"),
+            ephemeral_storage=_flag("EPHEMERAL_STORAGE"),
+            realtime_vehicles_url=os.environ.get("REALTIME_VEHICLES_URL", "").strip(),
+            realtime_trip_updates_url=os.environ.get("REALTIME_TRIP_UPDATES_URL", "").strip(),
+            realtime_auth_header=os.environ.get("REALTIME_AUTH_HEADER", "").strip(),
+            realtime_source_kind=os.environ.get("REALTIME_SOURCE_KIND", "OFFICIAL").strip().upper() or "OFFICIAL",
+            realtime_classification=(os.environ.get("REALTIME_CLASSIFICATION", "").strip()
+                                     or "OFFICIAL_VERIFIED"),
+            realtime_poll_seconds=_get_int("REALTIME_POLL_SECONDS", 20, low=5, high=600),
+            realtime_stale_seconds=_get_int("REALTIME_STALE_SECONDS", 120, low=30, high=600),
+            payment_provider=os.environ.get("PAYMENT_PROVIDER", "").strip().lower(),
+            payment_environment=os.environ.get("PAYMENT_ENVIRONMENT", "production").strip().lower() or "production",
+            razorpay_key_id=os.environ.get("RAZORPAY_KEY_ID", "").strip(),
+            razorpay_key_secret=os.environ.get("RAZORPAY_KEY_SECRET", "").strip(),
+            razorpay_webhook_secret=os.environ.get("RAZORPAY_WEBHOOK_SECRET", "").strip(),
+            public_base_url=os.environ.get("PUBLIC_BASE_URL", "").strip(),
+            merchant_name=os.environ.get("MERCHANT_NAME", "").strip() or "Bengaluru Transit Planner",
+            ticketing_provider=os.environ.get("TICKETING_PROVIDER", "").strip().lower(),
+            payment_sandbox_state=Path(os.environ.get("PAYMENT_SANDBOX_STATE") or (DATA_DIR / "payment_sandbox.json")),
         )

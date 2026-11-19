@@ -32,6 +32,8 @@ packaging==26.3
 pillow==13.0.0
 playwright==1.65.2
 pluggy==1.7.0
+psycopg-binary==3.2.13
+psycopg==3.2.13
 pydantic==2.14.3
 pydantic_core==2.50.4
 Pygments==2.21.0

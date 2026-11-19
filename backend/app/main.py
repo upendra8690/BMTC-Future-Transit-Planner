@@ -13,10 +13,15 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
+from . import demo
 from .api import router
 from .config import DASHBOARD_DIR, Settings
 from .database import Database
+from .sandbox_pages import router as sandbox_router
 from .security import RateLimiter, client_ip
+from .services import accounts as accounts_service
+from .services.payment_providers import build_commerce
+from .services.realtime import LiveService
 
 LOG = logging.getLogger("bmtc_planner")
 
@@ -24,7 +29,7 @@ DASHBOARD_CSP = (
     "default-src 'self'; "
     "object-src 'none'; "
     "script-src 'self'; "
-    "style-src 'self' 'unsafe-inline'; "
+    "style-src 'self'; "
     "img-src 'self' data: https://*.tile.openstreetmap.org; "
     "connect-src 'self'; "
     "manifest-src 'self'; "
@@ -45,7 +50,14 @@ MIN_ADMIN_KEY_LENGTH = 32
 GZIP_MIN_BYTES = 1024
 
 
-def _apply_security_headers(response: Response, path: str) -> None:
+# One year. Sent only over HTTPS (browsers ignore it on plain HTTP). No includeSubDomains: the host may be a shared
+# platform domain whose other subdomains are not ours.
+HSTS = "max-age=31536000"
+
+
+def _apply_security_headers(response: Response, path: str, https: bool = False) -> None:
+    if https:
+        response.headers.setdefault("Strict-Transport-Security", HSTS)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -78,8 +90,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.dispose()
 
     app = FastAPI(
-        title="BMTC Future Transit Planner API",
-        version="3.0.0",
+        title="Bengaluru Transit Planner API",
+        version="4.0.0-beta.1",
         description=(
             "Verified timetables are shown separately from unverified feeds. "
             "Future scenarios are always labelled ESTIMATED_SCENARIO and are not official announcements."
@@ -91,6 +103,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.db = db
+    app.state.live = LiveService(settings)
+    # Payment and ticketing providers come from the settings; by default none, so nothing can be bought.
+    app.state.commerce = build_commerce(settings)
+    app.state.accounts_reason = accounts_service.availability(
+        settings.accounts_enabled, settings.accounts_allow_sqlite, settings.database_url)
+    if settings.accounts_enabled and app.state.accounts_reason:
+        LOG.warning("ACCOUNTS_ENABLED is set but accounts stay off: they need a PostgreSQL database (DATABASE_URL).")
     limiter = RateLimiter(settings.rate_limit_per_minute)
     if settings.admin_api_key and len(settings.admin_api_key) < MIN_ADMIN_KEY_LENGTH:
         # A short key still works, so existing deployments keep running. The warning tells the owner to replace it.
@@ -104,7 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=list(settings.cors_origins),
             allow_methods=["GET", "POST", "PUT", "DELETE"],
-            allow_headers=["Content-Type", "X-Client-Key", "X-Admin-Key"],
+            allow_headers=["Content-Type", "X-Client-Key", "X-Admin-Key", "Authorization"],
         )
 
     @app.middleware("http")
@@ -118,14 +137,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 headers={"Retry-After": "60"},
             )
         else:
-            response = await call_next(request)
-        _apply_security_headers(response, path)
+            token = demo.enter(settings.demo_mode)
+            try:
+                response = await call_next(request)
+            finally:
+                demo.leave(token)
+        _apply_security_headers(response, path, https=request.url.scheme == "https")
         elapsed_ms = (time.perf_counter() - started) * 1000
         if path.startswith("/api/") and request.method != "GET":
             LOG.info("%s %s -> %s (%.1f ms)", request.method, path, response.status_code, elapsed_ms)
         return response
 
     app.include_router(router, prefix="/api")
+    app.include_router(sandbox_router)  # 404 unless the sandbox gateway is configured (demonstration servers only)
 
     if DASHBOARD_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(DASHBOARD_DIR), html=True), name="dashboard")

@@ -19,9 +19,19 @@ LANGUAGES = ("en", "kn", "te", "hi")
 # Text that is the same in every language on purpose: product name, format strings, abbreviations.
 ALLOWED_UNTRANSLATED = {"app.brand", "clock.line", "common.pdf", "route.col_seq", "admin.col_id"}
 # Keys whose full name is built at run time from a prefix, such as "cls." + classification code.
-DYNAMIC_PREFIXES = ("cls.", "day.", "msgcode.")
+DYNAMIC_PREFIXES = (
+    "cls.", "day.", "msgcode.", "feature.state.", "feature.reason.", "feature.name.", "svc.cat.", "mode.",
+    "upcoming.status.", "upcoming.type.", "upcoming.kind.", "providers.feed_state.", "providers.permission.",
+    "providers.integration.", "integ.cap.", "notices.kind.", "notices.mode.", "notices.status.", "account.reason.",
+    "account.role.", "live.state.", "live.fresh.", "live.kind.",
+    "tickets.product.", "tickets.needs.", "tickets.order_status.", "tickets.refund_status.",
+    "tickets.method.", "tickets.payment_status.",
+)
 # Storage keys the dashboard may write. The admin key must never be one of them.
-STORED_KEYS = {"clientKey", "lang", "classification", "year"}
+STORED_KEYS = {
+    "clientKey", "lang", "classification", "year", "theme", "lowData", "largeText", "favStops", "favJourneys", "recent",
+    "session",
+}
 DYNAMIC_CODE = (
     r"\beval\s*\(",
     r"new\s+Function\s*\(",
@@ -118,7 +128,8 @@ BACKEND = Path(__file__).resolve().parents[1] / "backend" / "app"
 # this list fails the test, and so does a listed code that the source no longer sets.
 SERVER_MESSAGE_CODES = {
     "DESTINATION_NOT_FOUND", "DESTINATION_NOT_SERVED", "NEED_BOTH_STOPS", "NOT_COVERED", "NO_DEPARTURES",
-    "NO_DIRECT_SERVICE", "NO_OFFICIAL_DATA", "NO_PLANNED_JOURNEY", "NO_SERVICE", "NO_TRIPS", "NO_UNVERIFIED_DATA",
+    "NO_DIRECT_SERVICE", "NO_JOURNEY_FOR_MODE", "NO_METRO_STATIONS",
+    "NO_OFFICIAL_DATA", "NO_PLANNED_JOURNEY", "NO_SERVICE", "NO_TRIPS", "NO_UNVERIFIED_DATA",
     "ORIGIN_NOT_FOUND", "ORIGIN_NOT_SERVED", "SAME_STOP",
 }
 
@@ -230,12 +241,13 @@ def test_every_local_reference_in_the_page_and_stylesheet_exists():
         assert (DASHBOARD / ref.lstrip("/")).is_file(), f"styles.css refers to a missing file: {ref}"
 
 
-def test_the_only_external_host_is_the_map_tile_server():
+def test_the_only_external_hosts_are_openstreetmap_tiles_and_walking_directions():
     hosts = set()
     for name in ("index.html", "app.js", "i18n.js", "styles.css", "sw.js", "manifest.webmanifest"):
         hosts |= {match.group(1) for match in re.finditer(r"https?://([^/\s\"'`)]+)", read(name))}
     assert hosts, "expected the map tile address in app.js"
-    assert all(host.endswith("tile.openstreetmap.org") for host in hosts), sorted(hosts)
+    allowed = {"www.openstreetmap.org"}
+    assert all(host.endswith("tile.openstreetmap.org") or host in allowed for host in hosts), sorted(hosts)
 
 
 def test_the_network_is_used_only_through_the_one_send_function():
@@ -269,12 +281,16 @@ def test_the_service_worker_saves_only_public_timetable_answers():
     found = re.search(r"var SAVED_API = (/.*/);", sw)
     assert found, "SAVED_API allowlist not found in sw.js"
     allowed = re.compile(found.group(1)[1:-1])
-    for path in ["/api/routes", "/api/routes/R1", "/api/routes/R1/timetable", "/api/stops", "/api/data-sources"]:
+    kept = ["/api/routes", "/api/routes/R1", "/api/routes/R1/timetable", "/api/stops", "/api/data-sources",
+            "/api/services"]
+    for path in kept:
         assert allowed.fullmatch(path), f"should be kept for offline reading: {path}"
     never_kept = [
         "/api/clock", "/api/meta", "/api/health", "/api/journey", "/api/plan", "/api/stops/nearby",
         "/api/stops/S1/departures", "/api/routes/R1/timetable.csv", "/api/years/2027/status",
         "/api/scenarios", "/api/scenarios/compare", "/api/saved-routes", "/api/preferences", "/api/admin/stats",
+        "/api/features", "/api/account/me", "/api/account/journeys", "/api/account/export",
+        "/api/account/notifications", "/api/admin/users",
     ]
     for path in never_kept:
         assert not allowed.fullmatch(path), f"must never be kept: {path}"
@@ -310,3 +326,34 @@ def test_verification_is_asked_for_on_the_page_and_never_in_a_browser_dialog():
     assert 'case "sourceDecisionForm":' in source
     assert 'data-action="decision-cancel"' in source
 
+
+
+def test_every_scrollable_table_can_be_reached_by_keyboard():
+    """axe rule scrollable-region-focusable: a table that scrolls sideways must be focusable and labelled."""
+    app = read("app.js")
+    wraps = re.findall(r'<div class="table-wrap"[^>]*>', app)
+    assert wraps, "no table containers found"
+    for tag in wraps:
+        assert 'tabindex="0"' in tag, tag
+        assert 'role="region"' in tag, tag
+        assert "aria-label=" in tag, tag
+
+
+def test_no_form_control_hides_a_form_property():
+    # A control named "id" makes form.id return that control, so the submit handler's switch on form.id misses the
+    # form and the browser submits it natively (a page reload with the fields in the address). Found in the
+    # upcoming-transport editor by tests/browser/upcoming_admin_check.py.
+    reserved = re.compile(r"""name=\\?["'](id|action|method|elements|submit|reset)\\?["']""")
+    for name in ("index.html", "app.js"):
+        found = reserved.findall(read(name))
+        assert not found, f"{name}: form controls named {found}"
+
+
+def test_markup_has_no_style_attributes_so_the_policy_needs_no_unsafe_inline():
+    """The security policy allows styles only from the app's own stylesheet. Inline style attributes would be refused,
+    so none may appear in the page or in markup the script builds. Colours from data are set through the DOM."""
+    for name in ("app.js", "index.html"):
+        text = read(name)
+        assert 'style="' not in text, f"inline style attribute in {name}"
+        assert "<style" not in text, f"style element in {name}"
+        assert 'setAttribute("style"' not in text

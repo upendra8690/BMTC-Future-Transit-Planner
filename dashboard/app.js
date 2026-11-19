@@ -58,6 +58,11 @@
     year: 2027,
     classification: "OFFICIAL_VERIFIED",
     adminKey: "",
+    session: null,
+    accounts: null,
+    accountJourneys: null,
+    recoveryCode: "",
+    liveRoute: "",
     clock: null,
     clockFailed: false,
     clockOffsetMs: 0,
@@ -72,7 +77,17 @@
     scenarioEditId: null,
     scenarioStops: [],
     route: null,
+    features: null,
+    services: null,
+    version: "",
+    theme: "system",
+    lowData: false,
+    largeText: false,
+    autoNearby: false,
+    pendingQuery: "",
   };
+
+  var startedAt = Date.now();
 
   var el = {
     view: document.getElementById("view"),
@@ -203,6 +218,18 @@
     if (!m) return t("common.na");
     var date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
     return new Intl.DateTimeFormat(localeTag(), { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(date);
+  }
+
+  // A YYYY, YYYY-MM or YYYY-MM-DD value, shown only as precisely as it was announced.
+  function formatPartialDate(value) {
+    var text = String(value || "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return formatCalendarDate(text);
+    var m = /^(\d{4})-(\d{2})$/.exec(text);
+    if (m) {
+      var month = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1));
+      return new Intl.DateTimeFormat(localeTag(), { timeZone: "UTC", month: "long", year: "numeric" }).format(month);
+    }
+    return /^\d{4}$/.test(text) ? text : t("common.na");
   }
 
   // A clock time (for example 08:12) in the service zone, from an ISO string that carries its own offset.
@@ -349,10 +376,7 @@
     var opts = options || {};
     var headers = { Accept: "application/json", "X-Client-Key": clientKey() };
     var body;
-    if (opts.admin) {
-      if (!state.adminKey) throw new Error(t("admin.key_needed"));
-      headers["X-Admin-Key"] = state.adminKey;
-    }
+    var via = opts.admin || opts.auth ? addAuth(headers, opts.admin) : "";
     if (opts.form) {
       body = opts.form;
     } else if (opts.json !== undefined) {
@@ -366,11 +390,17 @@
       if (response.status === 204) return null;
       var data = await readJson(response);
       if (!response.ok) {
-        if (response.status === 401 && opts.admin) {
+        if (response.status === 401 && via === "key") {
           state.adminKey = "";
           var rejected = httpError(response, data);
           rejected.message = t("admin.key_rejected");
           throw rejected;
+        }
+        if (response.status === 401 && via === "session" && !opts.keepSession) {
+          setSession(null);
+          var ended = httpError(response, data);
+          ended.message = t("account.expired");
+          throw ended;
         }
         throw httpError(response, data);
       }
@@ -380,6 +410,35 @@
     }
   }
 
+  async function saveBlob(blob, name) {
+    // Inside the Android app a WebView cannot save a blob link, so the file goes to the app, which opens the
+    // phone's share sheet. Only the file's name, type and contents are sent.
+    if (window.PlannerAndroid && typeof window.PlannerAndroid.postMessage === "function") {
+      var encoded = await new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () { resolve(String(reader.result).split(",")[1] || ""); };
+        reader.onerror = function () { reject(reader.error); };
+        reader.readAsDataURL(blob);
+      });
+      window.PlannerAndroid.postMessage(JSON.stringify({
+        name: name,
+        type: (blob.type || "").split(";")[0],
+        data: encoded
+      }));
+      return;
+    }
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 1500);
+  }
+
   async function download(path, fallbackName) {
     var timer = startTimer(DOWNLOAD_TIMEOUT_MS);
     try {
@@ -387,16 +446,7 @@
       if (!response.ok) throw httpError(response, await readJson(response));
       var blob = await response.blob();
       var match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
-      var url = URL.createObjectURL(blob);
-      var link = document.createElement("a");
-      link.href = url;
-      link.download = match ? match[1] : fallbackName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(function () {
-        URL.revokeObjectURL(url);
-      }, 1500);
+      await saveBlob(blob, match ? match[1] : fallbackName);
     } catch (err) {
       if (err && err.name === "AbortError") throw new Error(t("msg.timeout"));
       throw err;
@@ -552,11 +602,20 @@
 
   function panelError(err, action) {
     return '<div class="banner error" role="alert"><strong>' + esc(t("common.error")) + "</strong>" + esc(err.message || t("msg.unexpected")) +
-      '<div style="margin-top:8px"><button type="button" class="secondary" data-action="' + esc(action) + '">' + esc(t("common.retry")) + "</button></div></div>";
+      '<div class="mt-8"><button type="button" class="secondary" data-action="' + esc(action) + '">' + esc(t("common.retry")) + "</button></div></div>";
   }
 
   function setView(html) {
     el.view.innerHTML = html;
+  }
+
+  // A search typed on the home screen is handed to the Routes or Stops page, which shows it in its own search box.
+  function takePendingQuery(formId) {
+    var query = state.pendingQuery || "";
+    state.pendingQuery = "";
+    var form = document.getElementById(formId);
+    if (query && form && form.elements.q) form.elements.q.value = query;
+    return query;
   }
 
   function routeParts() {
@@ -569,28 +628,51 @@
     state.renderedDate = todayKey();
     destroyMap();
     var parts = routeParts();
-    var name = parts[0] && Object.prototype.hasOwnProperty.call(ROUTES, parts[0]) ? parts[0] : "routes";
+    var name = parts[0] && Object.prototype.hasOwnProperty.call(ROUTES, parts[0]) ? parts[0] : "home";
+    var isSection = NEW_SECTIONS.indexOf(name) !== -1;
+    document.body.setAttribute("data-view", isSection ? name : "tools");
     document.querySelectorAll("[data-nav]").forEach(function (link) {
       if (link.getAttribute("href") === "#/" + name) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
     setMenu(false);
-    renderYearStatus();
+    if (isSection && name !== "nearby") {
+      state.yearToken += 1;
+      el.yearStatus.innerHTML = "";
+      el.yearStatus.hidden = true;
+    } else {
+      el.yearStatus.hidden = false;
+      renderYearStatus();
+    }
     try {
       await ROUTES[name](parts.slice(1), token);
     } catch (err) {
       if (token === state.viewToken) setView(panelError(err, "rerender"));
     }
+    hideSplash();
   }
 
   // Fills one panel with the result of job(). Stale answers are dropped; errors stay inside the panel.
+  // Colours that come from data (a Metro line's colour) are set through the DOM, because the page's security policy
+  // allows no style attributes in markup. Only "#rrggbb" or one of the app's own colour variables is accepted.
+  function paintColours(root) {
+    var nodes = root && root.querySelectorAll ? root.querySelectorAll("[data-colour]") : [];
+    for (var i = 0; i < nodes.length; i += 1) {
+      var colour = nodes[i].getAttribute("data-colour") || "";
+      if (/^#[0-9A-Fa-f]{6}$/.test(colour) || /^var\(--[a-z-]+\)$/.test(colour)) nodes[i].style.borderColor = colour;
+    }
+  }
+
   async function fillPanel(panel, token, job, searchSeq) {
     if (!panel) return;
     panel.innerHTML = loadingInline();
     try {
       var html = await job();
       var stale = searchSeq !== undefined && searchSeq !== state.searchToken;
-      if (!stale && isCurrent(panel, token)) panel.innerHTML = html;
+      if (!stale && isCurrent(panel, token)) {
+        panel.innerHTML = html;
+        paintColours(panel);
+      }
     } catch (err) {
       var stillWanted = searchSeq === undefined || searchSeq === state.searchToken;
       if (stillWanted && isCurrent(panel, token)) panel.innerHTML = panelError(err, "rerender");
@@ -602,9 +684,12 @@
     try {
       var data = await api("/api/years/" + encodeURIComponent(state.year) + "/status");
       if (seq !== state.yearToken) return;
+      // A heading names data only when that data exists; otherwise it says plainly that none is available.
+      var officialTitle = data.official.imports ? t("year.official_title", { year: state.year }) : t("year.official_none");
+      var unverifiedTitle = data.unverified.imports ? t("year.unverified_title", { year: state.year }) : t("year.unverified_none");
       el.yearStatus.innerHTML =
-        '<div class="banner official"><strong>' + badge("OFFICIAL_VERIFIED") + " " + esc(t("year.official_title", { year: state.year })) + "</strong>" + esc(data.official.message) + "</div>" +
-        '<div class="banner unverified"><strong>' + badge("UNVERIFIED_FEED") + " " + esc(t("year.unverified_title", { year: state.year })) + "</strong>" + esc(data.unverified.message) + "</div>" +
+        '<div class="banner official"><strong>' + badge("OFFICIAL_VERIFIED") + " " + esc(officialTitle) + "</strong>" + esc(data.official.message) + "</div>" +
+        '<div class="banner unverified"><strong>' + badge("UNVERIFIED_FEED") + " " + esc(unverifiedTitle) + "</strong>" + esc(data.unverified.message) + "</div>" +
         '<div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + "</strong>" + esc(t("scn.notice")) + "</div>";
     } catch (err) {
       if (seq === state.yearToken) el.yearStatus.innerHTML = '<div class="banner error" role="alert">' + esc(err.message) + "</div>";
@@ -617,6 +702,75 @@
       return '<button type="button" data-action="cls" data-cls="' + code + '" aria-pressed="' + pressed + '">' + esc(classLabel(code)) + "</button>";
     }
     return '<div class="seg" role="group" aria-label="' + esc(t("cls.label")) + '">' + option("OFFICIAL_VERIFIED") + option("UNVERIFIED_FEED") + "</div>";
+  }
+
+  // ---------------------------------------------------------------- journey: choosing a place on the map
+  // The map only helps to find a stop. A tap (or the map's centre) lists the nearest stops and stations in the chosen
+  // data, and the passenger picks one as the start or the destination. No place is invented.
+  function toggleMapPicker(button) {
+    var box = document.getElementById("pickMapBox");
+    if (!box) return;
+    var open = box.hidden;
+    box.hidden = !open;
+    if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
+    if (!open) {
+      destroyMap();
+      return;
+    }
+    var map = makeMap("pickMap");
+    if (!map) return;
+    map.setView(BENGALURU, 12);
+    map.on("click", function (event) {
+      pickNear(event.latlng.lat, event.latlng.lng);
+    });
+  }
+
+  function pickAtCentre() {
+    if (!state.map) return;
+    var centre = state.map.getCenter();
+    pickNear(centre.lat, centre.lng);
+  }
+
+  async function pickNear(lat, lon) {
+    var list = document.getElementById("pickResults");
+    if (!list) return;
+    var L = window.L;
+    if (state.markers && L) {
+      state.markers.clearLayers();
+      L.circleMarker([lat, lon], { radius: 7, color: "#b91c1c", weight: 3 }).addTo(state.markers);
+    }
+    list.innerHTML = loadingInline();
+    var data;
+    try {
+      data = await api("/api/stops/nearby?" + new URLSearchParams({
+        lat: lat.toFixed(6), lon: lon.toFixed(6), radius_m: "1500", limit: "5", classification: state.classification
+      }).toString());
+    } catch (err) {
+      list.innerHTML = '<div class="banner error" role="alert">' + esc(err && err.message ? err.message : t("msg.unexpected")) + "</div>";
+      return;
+    }
+    if (!document.getElementById("pickResults")) return;
+    if (!data.results.length) {
+      list.innerHTML = '<div class="empty">' + esc(t("journey.map_none")) + "</div>";
+      return;
+    }
+    list.innerHTML = '<ul class="list">' + data.results.map(function (stop) {
+      return '<li><div><div class="title">' + esc(stop.name) + '</div><div class="muted">' + esc(t("journey.map_distance", { m: stop.distance_m })) + "</div></div>" +
+        '<div class="row-actions"><button type="button" class="secondary" data-action="pick-origin" data-name="' + esc(stop.name) + '">' + esc(t("journey.map_start")) + "</button>" +
+        '<button type="button" class="secondary" data-action="pick-destination" data-name="' + esc(stop.name) + '">' + esc(t("journey.map_end")) + "</button></div></li>";
+    }).join("") + "</ul>";
+    if (state.markers && L) {
+      data.results.forEach(function (stop) {
+        L.circleMarker([stop.lat, stop.lon], { radius: 5, color: "#1d4ed8", weight: 2 }).bindTooltip(esc(stop.name)).addTo(state.markers);
+      });
+    }
+  }
+
+  function pickPlace(field, name) {
+    var form = document.getElementById("journeyForm");
+    if (!form || !name) return;
+    form.elements[field].value = name;
+    toast(t(field === "origin" ? "journey.map_set_start" : "journey.map_set_end", { name: name }));
   }
 
   // ---------------------------------------------------------------- maps (guarded: the map is optional)
@@ -638,8 +792,11 @@
     var map = L.map(element, { scrollWheelZoom: false }).setView([20, 0], 2);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
     }).addTo(map);
+    // Credits never replace the app: the map data credit opens in a new tab, and the library is named without a link
+    // (Leaflet's own default links away in the same tab, which in the installed app would leave the app).
+    if (map.attributionControl) map.attributionControl.setPrefix("Leaflet");
     state.map = map;
     state.markers = L.layerGroup().addTo(map);
     return map;
@@ -685,15 +842,35 @@
     var seq = ++state.searchToken;
     await fillPanel(panel, token, async function () {
       var params = new URLSearchParams({ classification: state.classification, year: String(state.year), q: query, limit: "100" });
-      return routeListHtml(await api("/api/routes?" + params.toString()));
+      var data = await api("/api/routes?" + params.toString());
+      return routeListHtml(data) + (data.results.length ? "" : await otherClassificationHint("/api/routes", query));
     }, seq);
+  }
+
+  // When nothing matches in the chosen classification, say whether the other one has matches. The two are never
+  // mixed: the user decides to switch, and the search is repeated there.
+  async function otherClassificationHint(path, query) {
+    var other = state.classification === "OFFICIAL_VERIFIED" ? "UNVERIFIED_FEED" : "OFFICIAL_VERIFIED";
+    try {
+      var params = new URLSearchParams({ classification: other, year: String(state.year), q: query, limit: "1" });
+      var data = await api(path + "?" + params.toString());
+      if (!data.results.length) return "";
+    } catch (_) {
+      return "";
+    }
+    return '<div class="notice"><p>' + esc(t("search.other_found", { cls: classLabel(state.classification), other: classLabel(other) })) + "</p>" +
+      '<button type="button" class="secondary" data-action="cls-search" data-cls="' + esc(other) + '" data-q="' + esc(query) + '">' +
+      esc(t("search.show_other", { other: classLabel(other) })) + "</button></div>";
   }
 
   async function loadSaved(panel, token) {
     await fillPanel(panel, token, async function () {
       var data = await api("/api/saved-routes");
-      if (!data.saved.length) return '<div class="empty">' + esc(t("routes.saved_none")) + "</div>";
-      return '<ul class="list">' + data.saved.map(function (s) {
+      // On free hosting the server's disk is erased on restart; say so where the passenger saves things.
+      var note = state.serverStoragePersistent === false
+        ? '<div class="notice"><p>' + esc(t("routes.saved_temporary")) + "</p></div>" : "";
+      if (!data.saved.length) return note + '<div class="empty">' + esc(t("routes.saved_none")) + "</div>";
+      return note + '<ul class="list">' + data.saved.map(function (s) {
         return '<li><div><div class="title">' + esc(s.label) + '</div><div class="muted">' + esc(s.gtfs_route_id) + "</div></div>" +
           '<div class="row-actions">' + badge(s.classification) +
           '<button type="button" class="secondary" data-action="open-saved" data-gtfs="' + esc(s.gtfs_route_id) + '" data-cls="' + esc(s.classification) + '">' + esc(t("common.open")) + "</button>" +
@@ -708,15 +885,16 @@
       '<section class="card"><h2>' + esc(t("routes.title")) + "</h2>" +
       '<p class="muted">' + esc(t("routes.intro", { year: state.year, cls: classLabel(state.classification) })) + "</p>" +
       segmentedClassification() +
-      '<form id="routeSearch" class="toolbar" role="search" style="margin-top:12px">' +
-      '<label class="field" style="flex:1 1 240px">' + esc(t("routes.search_label")) +
+      '<form id="routeSearch" class="mt-12 toolbar" role="search">' +
+      '<label class="grow-240 field">' + esc(t("routes.search_label")) +
       '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("routes.search_placeholder")) + '"></label>' +
       '<button type="submit">' + esc(t("common.search")) + "</button></form>" +
-      '<div id="routeResults" style="margin-top:12px"></div></section>' +
+      '<div class="mt-12" id="routeResults"></div></section>' +
       '<section class="card"><h2>' + esc(t("routes.saved_title")) + '</h2><div id="savedRoutes"></div></section>'
     );
+    var routeQuery = takePendingQuery("routeSearch");
     await Promise.all([
-      loadRouteResults("", document.getElementById("routeResults"), token),
+      loadRouteResults(routeQuery, document.getElementById("routeResults"), token),
       loadSaved(document.getElementById("savedRoutes"), token),
     ]);
   }
@@ -727,9 +905,11 @@
       : t("route.direction", { n: direction.direction_id });
     if (direction.headsign) heading += " " + t("route.towards", { headsign: direction.headsign });
     var rows = (direction.stops || []).map(function (s) {
-      return '<tr><td class="num">' + esc(s.sequence) + "</td><td>" + esc(s.name) + "</td><td>" + esc(s.arrival || "") + "</td><td>" + esc(s.departure || "") + "</td></tr>";
+      var stopName = s.stop_id !== null && s.stop_id !== undefined
+        ? '<a href="#/stops/' + esc(encodeURIComponent(s.stop_id)) + '">' + esc(s.name) + "</a>" : esc(s.name);
+      return '<tr><td class="num">' + esc(s.sequence) + "</td><td>" + stopName + "</td><td>" + esc(s.arrival || "") + "</td><td>" + esc(s.departure || "") + "</td></tr>";
     }).join("");
-    return "<h3>" + esc(heading) + '</h3><div class="table-wrap"><table><thead><tr>' +
+    return "<h3>" + esc(heading) + '</h3><div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: heading })) + '"><table><thead><tr>' +
       '<th class="num">' + esc(t("route.col_seq")) + "</th><th>" + esc(t("route.col_stop")) + "</th><th>" + esc(t("route.col_arrival")) + "</th><th>" + esc(t("route.col_departure")) + "</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
@@ -764,7 +944,7 @@
       '<button type="button" data-action="tt-load" data-id="' + esc(detail.id) + '">' + esc(t("route.show_timetable")) + "</button>" +
       '<button type="button" class="secondary" data-action="tt-csv" data-id="' + esc(detail.id) + '">' + esc(t("common.download_csv")) + "</button>" +
       '<button type="button" class="secondary" data-action="save-route" data-gtfs="' + esc(detail.gtfs_route_id) + '" data-cls="' + esc(detail.classification) + '" data-label="' + esc(title) + '">' + esc(t("route.save")) + "</button></div>" +
-      '<div id="timetable" style="margin-top:12px"></div></section>' +
+      '<div class="mt-12" id="timetable"></div></section>' +
       '<section class="card"><h2>' + esc(t("route.stops_title")) + "</h2>" + directions + "</section>"
     );
     drawRouteMap(detail);
@@ -853,7 +1033,7 @@
       (isToday ? '<p class="muted">' + esc(t("timetable.hint_today", { zone: zoneName() })) + "</p>" : "") +
       (afterMidnight ? '<p class="muted">' + esc(t("timetable.after_midnight")) + "</p>" : "") +
       (data.trips.length > MAX_TRIPS_SHOWN ? '<p class="muted">' + esc(t("timetable.truncated", { max: MAX_TRIPS_SHOWN })) + "</p>" : "") +
-      '<div class="table-wrap"><table><thead><tr><th>' + esc(t("timetable.col_trip")) + "</th><th>" + esc(t("timetable.col_towards")) +
+      '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.timetable") })) + '"><table><thead><tr><th>' + esc(t("timetable.col_trip")) + "</th><th>" + esc(t("timetable.col_towards")) +
       "</th><th>" + esc(t("timetable.col_first")) + "</th><th>" + esc(t("timetable.col_last")) + '</th><th class="num">' + esc(t("timetable.col_stops")) +
       "</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
@@ -880,7 +1060,7 @@
       var params = new URLSearchParams({ classification: state.classification, year: String(state.year), q: query, limit: "100" });
       var data = await api("/api/stops?" + params.toString());
       if (seq === state.searchToken && token === state.viewToken) plotStops(data.results, null);
-      return stopListHtml(data.results, false);
+      return stopListHtml(data.results, false) + (data.results.length ? "" : await otherClassificationHint("/api/stops", query));
     }, seq);
   }
 
@@ -890,8 +1070,8 @@
       '<section class="card"><h2>' + esc(t("stops.title")) + "</h2>" +
       '<p class="muted">' + esc(t("stops.intro")) + "</p>" +
       segmentedClassification() +
-      '<form id="stopSearch" class="toolbar" role="search" style="margin-top:12px">' +
-      '<label class="field" style="flex:1 1 240px">' + esc(t("stops.search_label")) +
+      '<form id="stopSearch" class="mt-12 toolbar" role="search">' +
+      '<label class="grow-240 field">' + esc(t("stops.search_label")) +
       '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("stops.search_placeholder")) + '"></label>' +
       '<button type="submit">' + esc(t("common.search")) + "</button>" +
       '<button type="button" class="secondary" data-action="nearby-me">' + esc(t("stops.nearby")) + "</button></form>" +
@@ -899,7 +1079,7 @@
       '<div id="stopResults"></div></section>'
     );
     makeMap("stopMap");
-    await loadStops("", token);
+    await loadStops(takePendingQuery("stopSearch"), token);
   }
 
   function plotStops(stops, here) {
@@ -977,18 +1157,135 @@
         "</td><td>" + esc(dayLabel(d.departure_local, today)) + "</td><td>" + esc(minutes) + "</td></tr>";
     }).join("");
     var body = data.departures.length
-      ? '<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>' + esc(t("stop.col_time")) + "</th><th>" + esc(t("stop.col_route")) +
+      ? '<div class="mt-12 table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.departures") })) + '"><table><thead><tr><th>' + esc(t("stop.col_time")) + "</th><th>" + esc(t("stop.col_route")) +
         "</th><th>" + esc(t("stop.col_towards")) + "</th><th>" + esc(t("stop.col_day")) + "</th><th>" + esc(t("journey.col_wait")) +
         "</th></tr></thead><tbody>" + rows + "</tbody></table></div>"
-      : '<div class="empty" style="margin-top:12px">' + esc(messageFor(data.message_code, data.message)) + "</div>";
+      : '<div class="mt-12 empty">' + esc(messageFor(data.message_code, data.message)) + "</div>";
     setView(
       '<section class="card"><p><a href="#/stops">&larr; ' + esc(t("stop.back")) + "</a></p>" +
       "<h2>" + esc(t("stop.title", { name: data.stop.name })) + "</h2><p>" + badge(data.stop.classification) + "</p>" +
       '<p class="muted">' + esc(t("stop.intro", { zone: data.service_timezone })) + "</p>" +
       '<div class="toolbar"><button type="button" class="secondary" data-action="rerender">' + esc(t("common.refresh")) + "</button></div>" +
       body +
-      '<p class="muted" style="margin-top:12px">' + esc(t("clock.scheduled_only")) + "</p></section>"
+      '<p class="mt-12 muted">' + esc(t("clock.scheduled_only")) + "</p></section>" +
+      '<section class="card" id="stopLiveCard" hidden><h2>' + esc(t("live.stop_title")) + '</h2><div id="stopLive"></div></section>' +
+      stopExtrasHtml(data.stop)
     );
+    loadStopLive(stopId, token);
+    await fillPanel(document.getElementById("stopRoutes"), token, async function () {
+      var routes = await api("/api/stops/" + encodeURIComponent(stopId) + "/routes?classification=" + encodeURIComponent(state.classification));
+      if (!routes.routes.length) return '<div class="empty">' + esc(t("stop.routes_none")) + "</div>";
+      return '<ul class="list">' + routes.routes.map(function (r) {
+        var towards = r.towards.length ? '<div class="muted">' + esc(t("stop.towards_list", { places: r.towards.join(", ") })) + "</div>" : "";
+        return '<li><div><div class="title"><span class="mode-tag">' + esc(t("mode." + modeOfType(r.route_type))) + "</span> " + esc(r.route_number || "") +
+          (r.route_name ? " - " + esc(r.route_name) : "") + "</div>" + towards + "</div>" +
+          '<div class="row-actions"><a class="button secondary" href="#/routes/' + esc(encodeURIComponent(r.id)) + '">' + esc(t("common.open")) + "</a></div></li>";
+      }).join("") + "</ul>";
+    });
+  }
+
+  var MODES = ["bus", "metro", "rail", "tram", "other"];
+  function modeOfType(routeType) {
+    var type = Number(routeType);
+    if ([1, 400, 401, 402, 403, 404, 405].indexOf(type) !== -1) return "metro";
+    if ([2, 100, 101, 102, 103, 106, 109].indexOf(type) !== -1) return "rail";
+    if ([0, 900, 901, 902].indexOf(type) !== -1) return "tram";
+    if (type === 3 || (type >= 700 && type <= 799)) return "bus";
+    return "other";
+  }
+
+  function walkingDirectionsUrl(stop) {
+    if (!validCoord(stop.lat, stop.lon)) return null;
+    return "https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=%3B" + stop.lat.toFixed(6) + "%2C" + stop.lon.toFixed(6);
+  }
+
+  function stopExtrasHtml(stop) {
+    var saved = favouriteStops().some(function (f) {
+      return f.gtfs === stop.gtfs_stop_id && f.cls === stop.classification;
+    });
+    var walk = walkingDirectionsUrl(stop);
+    return '<section class="card"><h2>' + esc(t("stop.routes_title")) + '</h2><div id="stopRoutes"></div></section>' +
+      '<section class="card"><div class="toolbar">' +
+      (walk ? '<a class="button-link secondary" href="' + esc(walk) + '" target="_blank" rel="noopener noreferrer">' + esc(t("stop.walk")) + "</a>" : "") +
+      (saved
+        ? '<button type="button" class="secondary" data-action="unfav-stop" data-gtfs="' + esc(stop.gtfs_stop_id) + '" data-cls="' + esc(stop.classification) + '">' + esc(t("stop.unsave")) + "</button>"
+        : '<button type="button" data-action="fav-stop" data-gtfs="' + esc(stop.gtfs_stop_id) + '" data-cls="' + esc(stop.classification) + '" data-name="' + esc(stop.name) + '">' + esc(t("stop.save")) + "</button>") +
+      "</div>" + (walk ? '<p class="muted small">' + esc(t("stop.walk_note")) + "</p>" : "") + "</section>";
+  }
+
+  // ---------------------------------------------------------------- device-only lists: favourite stops, recent searches
+  // Kept in this browser only (never sent to the server), so they work offline and need no account.
+  function readList(key) {
+    try {
+      var value = JSON.parse(storage.get(PREFIX + key) || "[]");
+      return Array.isArray(value) ? value : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function favouriteStops() {
+    return readList("favStops").filter(function (f) {
+      return f && typeof f.gtfs === "string" && (f.cls === "OFFICIAL_VERIFIED" || f.cls === "UNVERIFIED_FEED");
+    });
+  }
+
+  function setFavouriteStop(node, on) {
+    var gtfs = node.getAttribute("data-gtfs");
+    var cls = node.getAttribute("data-cls");
+    var list = favouriteStops().filter(function (f) {
+      return !(f.gtfs === gtfs && f.cls === cls);
+    });
+    if (on) list.unshift({ gtfs: gtfs, cls: cls, name: String(node.getAttribute("data-name") || gtfs).slice(0, 200) });
+    storage.set(PREFIX + "favStops", JSON.stringify(list.slice(0, 50)));
+    toast(t(on ? "stop.saved" : "stop.unsaved"));
+    render();
+  }
+
+  // A saved stop is found again by its GTFS id, because internal ids change when a feed is re-imported.
+  async function openFavouriteStop(node) {
+    var gtfs = node.getAttribute("data-gtfs");
+    var cls = node.getAttribute("data-cls");
+    var data;
+    try {
+      data = await api("/api/stops?" + new URLSearchParams({ classification: cls, q: gtfs, limit: "100" }).toString());
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    var match = data.results.filter(function (stop) {
+      return stop.gtfs_stop_id === gtfs;
+    })[0];
+    if (!match) {
+      toast(t("fav.stop_gone"));
+      return;
+    }
+    state.classification = cls;
+    storage.set(PREFIX + "classification", cls);
+    location.hash = "#/stops/" + encodeURIComponent(match.id);
+  }
+
+  function recentSearches() {
+    return readList("recent").filter(function (r) {
+      return r && (r.kind === "routes" || r.kind === "stops") && typeof r.q === "string" && r.q;
+    });
+  }
+
+  function addRecent(kind, query) {
+    if (!query) return;
+    var list = recentSearches().filter(function (r) {
+      return !(r.kind === kind && r.q.toLowerCase() === query.toLowerCase());
+    });
+    list.unshift({ kind: kind, q: query.slice(0, 80) });
+    storage.set(PREFIX + "recent", JSON.stringify(list.slice(0, 8)));
+  }
+
+  function recentHtml() {
+    var list = recentSearches();
+    if (!list.length) return "";
+    return '<div class="recent"><span class="recent-title">' + esc(t("recent.title")) + "</span>" + list.map(function (r) {
+      return '<button type="button" class="chip-button" data-action="recent" data-kind="' + esc(r.kind) + '" data-q="' + esc(r.q) + '">' + esc(r.q) + "</button>";
+    }).join("") + '<button type="button" class="link-button" data-action="recent-clear">' + esc(t("recent.clear")) + "</button></div>";
   }
 
   // ---------------------------------------------------------------- direct journeys
@@ -996,37 +1293,82 @@
   // The planner: up to two changes, from /api/plan. Every time is scheduled; live positions are never shown.
   var LABEL_KEYS = {
     EARLIEST_ARRIVAL: "journey.label_earliest_arrival",
-    FEWEST_CHANGES: "journey.label_fewest_changes"
+    FEWEST_CHANGES: "journey.label_fewest_changes",
+    BUS_AND_METRO: "journey.label_bus_metro"
   };
 
-  function renderJourney() {
+  // A journey link: #/journey/<from>/<to>/<modes>/<classification>. Opening one plans that journey.
+  function journeyFromLink(args) {
+    if (!args || args.length < 2) return null;
+    var dec = function (x) {
+      try { return decodeURIComponent(x || ""); } catch (e) { return ""; }
+    };
+    var link = { from: dec(args[0]).slice(0, 80), to: dec(args[1]).slice(0, 80), modes: dec(args[2]) || "all", cls: dec(args[3]) };
+    return link.from.trim().length >= 2 && link.to.trim().length >= 2 ? link : null;
+  }
+
+  function renderJourney(args, token) {
+    if (!state.pendingJourney) {
+      var linked = journeyFromLink(args);
+      if (linked) {
+        useClassification(linked.cls);
+        state.pendingJourney = linked;
+      }
+    }
     setView(
       '<section class="card"><h2>' + esc(t("journey.title")) + "</h2>" +
       '<p class="muted">' + esc(t("journey.intro")) + "</p>" +
       segmentedClassification() +
-      '<form id="journeyForm" style="margin-top:12px">' +
+      '<form class="mt-12" id="journeyForm">' +
       '<div class="form-grid">' +
       '<label class="field">' + esc(t("journey.from")) + '<input name="origin" required minlength="2" maxlength="80" autocomplete="off"></label>' +
       '<label class="field">' + esc(t("journey.to")) + '<input name="destination" required minlength="2" maxlength="80" autocomplete="off"></label>' +
       "</div>" +
-      '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.when")) + "</legend>" +
+      '<div class="toolbar journey-tools">' +
+      '<button type="button" class="secondary" data-action="locate-origin">' + esc(t("journey.use_location")) + "</button>" +
+      '<button type="button" class="secondary" data-action="swap-journey" aria-label="' + esc(t("journey.swap_label")) + '">⇅ ' + esc(t("journey.swap")) + "</button>" +
+      '<button type="button" class="secondary" data-action="map-pick" aria-controls="pickMapBox" aria-expanded="false">' + esc(t("journey.map_pick")) + "</button>" +
+      "</div>" +
+      '<div id="pickMapBox" class="mt-8" hidden><p class="muted small">' + esc(t("journey.map_hint")) + "</p>" +
+      '<div id="pickMap" class="map pick-map"></div>' +
+      '<div class="toolbar mt-8"><button type="button" class="secondary" data-action="map-centre">' + esc(t("journey.map_centre")) + "</button></div>" +
+      '<div id="pickResults" aria-live="polite"></div></div>' +
+      '<fieldset class="mt-12"><legend>' + esc(t("journey.when")) + "</legend>" +
       '<div class="checks">' +
       '<label><input type="radio" name="when" value="now" checked> ' + esc(t("journey.now")) + "</label>" +
       '<label><input type="radio" name="when" value="date"> ' + esc(t("journey.on_date")) + "</label>" +
       "</div>" +
-      '<label class="field" style="margin-top:8px">' + esc(t("journey.date")) +
+      '<label class="mt-8 field">' + esc(t("journey.date")) +
       '<input name="date" type="date" value="' + esc(defaultDate()) + '" disabled></label>' +
       "</fieldset>" +
-      '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.changes_legend")) + "</legend>" +
+      '<fieldset class="mt-12"><legend>' + esc(t("journey.changes_legend")) + "</legend>" +
       '<div class="checks">' +
       '<label><input type="radio" name="changes" value="0"> ' + esc(t("journey.changes_0")) + "</label>" +
       '<label><input type="radio" name="changes" value="1"> ' + esc(t("journey.changes_1")) + "</label>" +
       '<label><input type="radio" name="changes" value="2" checked> ' + esc(t("journey.changes_2")) + "</label>" +
       "</div></fieldset>" +
+      '<fieldset class="mt-12"><legend>' + esc(t("journey.modes_legend")) + "</legend>" +
+      '<div class="checks">' +
+      '<label><input type="radio" name="modes" value="all" checked> ' + esc(t("journey.modes_all")) + "</label>" +
+      '<label><input type="radio" name="modes" value="bus"> ' + esc(t("journey.modes_bus")) + "</label>" +
+      '<label><input type="radio" name="modes" value="metro"> ' + esc(t("journey.modes_metro")) + "</label>" +
+      "</div></fieldset>" +
       '<div class="toolbar"><button type="submit">' + esc(t("journey.submit")) + "</button></div>" +
       "</form>" +
-      '<div id="journeyResults" style="margin-top:12px" aria-live="polite"></div></section>'
+      '<div class="mt-12" id="journeyResults" aria-live="polite"></div></section>'
     );
+    var pending = state.pendingJourney;
+    state.pendingJourney = null;
+    var form = document.getElementById("journeyForm");
+    if (pending && form) {
+      form.elements.origin.value = pending.from;
+      form.elements.destination.value = pending.to;
+      var mode = form.querySelector('input[name="modes"][value="' + (JOURNEY_MODES.indexOf(pending.modes) !== -1 ? pending.modes : "all") + '"]');
+      if (mode) mode.checked = true;
+      // A quick destination fills only the destination: the passenger adds where they start.
+      if (String(pending.from || "").trim()) submitJourney(form, token);
+      else form.elements.origin.focus();
+    }
   }
 
   async function submitJourney(form, token) {
@@ -1043,7 +1385,8 @@
       origin: origin,
       destination: destination,
       classification: state.classification,
-      max_changes: String(form.elements.changes.value || "2")
+      max_changes: String(form.elements.changes.value || "2"),
+      modes: ["all", "bus", "metro"].indexOf(form.elements.modes.value) !== -1 ? form.elements.modes.value : "all"
     };
     if (when === "date") {
       if (!isIsoDate(form.elements.date.value)) {
@@ -1057,10 +1400,79 @@
     try {
       var data = await api("/api/plan?" + new URLSearchParams(params).toString());
       if (seq !== state.searchToken || token !== state.viewToken || !box.isConnected) return;
-      box.innerHTML = journeyHtml(data);
+      box.innerHTML = journeyHtml(data) + shareButtonHtml(data);
     } catch (err) {
       if (seq === state.searchToken && token === state.viewToken && box.isConnected) box.innerHTML = panelError(err, "rerender");
     }
+  }
+
+  function shareButtonHtml(data) {
+    if (!data || !data.options || !data.options.length) return "";
+    return '<div class="toolbar"><button type="button" class="secondary" data-action="share-journey"' +
+      ' data-from="' + esc(data.origin_query || "") + '" data-to="' + esc(data.destination_query || "") + '"' +
+      ' data-modes="' + esc(data.travel_modes || "all") + '" data-cls="' + esc(data.classification || state.classification) + '">' +
+      esc(t("journey.share")) + '</button></div><div id="shareBox"></div>';
+  }
+
+  async function shareJourney(node) {
+    var parts = [node.getAttribute("data-from"), node.getAttribute("data-to"), node.getAttribute("data-modes") || "all",
+      node.getAttribute("data-cls") || state.classification].map(function (x) { return encodeURIComponent(x || ""); });
+    var url = location.origin + location.pathname + "#/journey/" + parts.join("/");
+    var title = t("journey.share_title", { from: node.getAttribute("data-from") || "", to: node.getAttribute("data-to") || "" });
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: title, url: url });
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        toast(t("journey.link_copied"));
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+    }
+    var shareBox = document.getElementById("shareBox");
+    if (!shareBox) return;
+    shareBox.innerHTML = '<label class="field">' + esc(t("journey.share_link")) +
+      '<input readonly value="' + esc(url) + '"></label>';
+    var linkInput = shareBox.querySelector("input");
+    linkInput.focus();
+    linkInput.select();
+  }
+
+  // Fills "From" with the nearest stop or station. The location is used once, in this request, and never stored.
+  function locateOrigin(node) {
+    var form = document.getElementById("journeyForm");
+    if (!form) return;
+    if (!navigator.geolocation) {
+      toast(t("journey.no_geolocation"));
+      return;
+    }
+    node.disabled = true;
+    toast(t("journey.locating"));
+    navigator.geolocation.getCurrentPosition(async function (pos) {
+      try {
+        var data = await api("/api/stops/nearby?" + new URLSearchParams({
+          lat: pos.coords.latitude.toFixed(5), lon: pos.coords.longitude.toFixed(5), radius_m: "1500", limit: "1",
+          classification: state.classification
+        }).toString());
+        var stop = data.results && data.results[0];
+        if (!stop) {
+          toast(t("journey.no_stop_near"));
+          return;
+        }
+        if (form.isConnected) form.elements.origin.value = stop.name;
+        toast(t("journey.located", { name: stop.name, m: fmtNum(stop.distance_m) }));
+      } catch (err) {
+        toast(err && err.message ? err.message : t("journey.no_stop_near"));
+      } finally {
+        node.disabled = false;
+      }
+    }, function () {
+      node.disabled = false;
+      toast(t("journey.location_refused"));
+    }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
   }
 
   function journeyHtml(data) {
@@ -1078,6 +1490,7 @@
     }
     html += '<ol class="options" aria-label="' + esc(t("journey.options_label")) + '">' +
       data.options.map(function (option, index) { return optionHtml(option, index + 1); }).join("") + "</ol>";
+    html += saveJourneyButton(data);
     html += sourcesHtml(data);
     html += '<p class="muted small">' + esc(t("journey.assumptions", {
       speed: fmtNum(assumptions.walk_speed_kmph),
@@ -1085,6 +1498,79 @@
       metres: fmtNum(assumptions.max_walk_m)
     })) + "</p>";
     return html;
+  }
+
+  // ---------------------------------------------------------------- saved journeys (on this device only)
+  var JOURNEY_MODES = ["all", "bus", "metro"];
+  var JOURNEY_MODE_KEYS = { all: "journey.modes_all", bus: "journey.modes_bus", metro: "journey.modes_metro" };
+
+  function savedJourneys() {
+    return readList("favJourneys").filter(function (j) {
+      return j && typeof j.from === "string" && j.from && typeof j.to === "string" && j.to &&
+        JOURNEY_MODES.indexOf(j.modes) !== -1 && (j.cls === "OFFICIAL_VERIFIED" || j.cls === "UNVERIFIED_FEED");
+    });
+  }
+
+  function sameJourney(a, b) {
+    return a.from.toLowerCase() === b.from.toLowerCase() && a.to.toLowerCase() === b.to.toLowerCase() &&
+      a.modes === b.modes && a.cls === b.cls;
+  }
+
+  function saveJourneyButton(data) {
+    var journey = { from: String(data.origin_query || ""), to: String(data.destination_query || ""), modes: data.travel_modes || "all", cls: data.classification };
+    var saved = savedJourneys().some(function (j) { return sameJourney(j, journey); });
+    return '<div class="toolbar"><button type="button" class="secondary" data-action="save-journey"' +
+      ' data-from="' + esc(journey.from) + '" data-to="' + esc(journey.to) + '" data-modes="' + esc(journey.modes) + '" data-cls="' + esc(journey.cls) + '"' +
+      (saved ? " disabled" : "") + ">" + esc(t(saved ? "journey.saved" : "journey.save")) + "</button></div>";
+  }
+
+  function journeyFromNode(node) {
+    return {
+      from: String(node.getAttribute("data-from") || "").trim().slice(0, 80),
+      to: String(node.getAttribute("data-to") || "").trim().slice(0, 80),
+      modes: node.getAttribute("data-modes") || "all",
+      cls: node.getAttribute("data-cls") || ""
+    };
+  }
+
+  function setSavedJourney(node, on) {
+    var journey = journeyFromNode(node);
+    if (journey.from.length < 2 || journey.to.length < 2 || JOURNEY_MODES.indexOf(journey.modes) === -1 ||
+        (journey.cls !== "OFFICIAL_VERIFIED" && journey.cls !== "UNVERIFIED_FEED")) return;
+    var list = savedJourneys().filter(function (j) { return !sameJourney(j, journey); });
+    if (on) list.unshift(journey);
+    storage.set(PREFIX + "favJourneys", JSON.stringify(list.slice(0, 20)));
+    toast(t(on ? "journey.saved" : "journey.unsaved"));
+    if (on) {
+      node.disabled = true;
+      node.textContent = t("journey.saved");
+    } else {
+      render();
+    }
+  }
+
+  function planSavedJourney(node) {
+    var journey = journeyFromNode(node);
+    state.pendingJourney = journey;
+    if (journey.cls === "OFFICIAL_VERIFIED" || journey.cls === "UNVERIFIED_FEED") {
+      state.classification = journey.cls;
+      storage.set(PREFIX + "classification", journey.cls);
+    }
+    if (location.hash === "#/journey") render();
+    else location.hash = "#/journey";
+  }
+
+  function savedJourneysHtml() {
+    var list = savedJourneys();
+    if (!list.length) return '<div class="empty">' + esc(t("fav.journeys_none")) + "</div>";
+    return '<ul class="list">' + list.map(function (j) {
+      var attrs = ' data-from="' + esc(j.from) + '" data-to="' + esc(j.to) + '" data-modes="' + esc(j.modes) + '" data-cls="' + esc(j.cls) + '"';
+      return '<li><div><div class="title">' + esc(t("fav.journey_name", { from: j.from, to: j.to })) + "</div>" +
+        '<div class="muted">' + esc(t(JOURNEY_MODE_KEYS[j.modes])) + "</div></div>" +
+        '<div class="row-actions">' + badge(j.cls) +
+        '<button type="button" class="secondary" data-action="plan-fav-journey"' + attrs + ">" + esc(t("fav.plan_again")) + "</button>" +
+        '<button type="button" class="danger" data-action="unfav-journey"' + attrs + ">" + esc(t("common.remove")) + "</button></div></li>";
+    }).join("") + "</ul>";
   }
 
   function optionHtml(option, number) {
@@ -1095,8 +1581,12 @@
     var changes = option.changes === 0 ? t("journey.changes_none")
       : option.changes === 1 ? t("journey.changes_one")
       : t("journey.changes_many", { n: fmtNum(option.changes) });
+    // The wait is for the first ride, so its wording follows that ride's mode: a Metro train is not a bus.
+    var firstRide = (option.legs || []).filter(function (leg) { return leg.type === "ride"; })[0];
+    var firstMode = firstRide ? firstRide.mode : "bus";
+    var waitKey = firstMode === "metro" ? "journey.wait_metro" : firstMode === "bus" ? "journey.wait" : "journey.wait_other";
     var wait = option.wait_minutes > 0
-      ? "<li>" + esc(t("journey.wait", { n: fmtNum(option.wait_minutes) })) + "</li>" : "";
+      ? "<li>" + esc(t(waitKey, { n: fmtNum(option.wait_minutes) })) + "</li>" : "";
     return '<li class="option">' +
       '<h3 class="option-title">' + esc(t("journey.option", { n: fmtNum(number) })) + " " + labels + "</h3>" +
       '<p class="option-summary">' + esc(t("journey.summary", {
@@ -1122,6 +1612,7 @@
       return t("journey.fare_several", { list: list });
     }
     if (fare.code === "CHANGES_NOT_PRICED") return t("journey.fare_changes");
+    if (fare.code === "NOT_VERIFIED") return t("journey.fare_not_verified");
     return t("journey.fare_not_in_feed");
   }
 
@@ -1136,14 +1627,17 @@
         '<span class="muted">' + esc(t("journey.leg_walk_time", { minutes: fmtNum(leg.duration_minutes) })) + "</span></li>";
     }
     var towards = leg.headsign ? ' <span class="muted">' + esc(t("journey.leg_towards", { headsign: leg.headsign })) + "</span>" : "";
-    return '<li class="leg ride"><span class="leg-title">' +
+    var mode = MODES.indexOf(leg.mode) !== -1 ? leg.mode : "other";
+    return '<li class="leg ride mode-' + mode + '"><span class="mode-tag">' + esc(t("mode." + mode)) + "</span> " + '<span class="leg-title">' +
       esc(t("journey.leg_ride", { route: leg.route_number || "", from: leg.from.name, to: leg.to.name })) + "</span>" + towards + "<br>" +
       '<span class="muted">' + esc(t("journey.leg_times", {
         dep: formatClockTime(leg.departs_at),
         arr: formatClockTime(leg.arrives_at),
         minutes: fmtNum(leg.duration_minutes)
       })) + "</span> " + badge(leg.source.classification) +
-      ' <span class="muted">' + esc(leg.source.name) + "</span></li>";
+      ' <span class="muted">' + esc(leg.source.name) + "</span>" +
+      (leg.timing === "approximate" ? '<br><span class="muted small">' + esc(t("journey.timing_approximate")) + "</span>" : "") +
+      "</li>";
   }
 
   function sourcesHtml(data) {
@@ -1165,7 +1659,7 @@
     setView(
       '<section class="card"><div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + " " + esc(t("scn.permanent")) + "</strong>" +
       esc(t("scn.notice")) + "</div>" +
-      '<p class="muted" style="margin-top:10px">' + esc(t("scn.device_note")) + "</p>" +
+      '<p class="mt-10 muted">' + esc(t("scn.device_note")) + "</p>" +
       '<div class="toolbar"><label class="field">' + esc(t("scn.year_filter")) +
       '<select id="scnYearFilter"><option value="">' + esc(t("scn.all_years")) + "</option>" + yearOptions + "</select></label>" +
       '<button type="button" data-action="scn-new">' + esc(t("scn.new")) + "</button>" +
@@ -1246,8 +1740,8 @@
       "<h3>" + esc(t("scn.stops_title", { max: MAX_SCENARIO_STOPS })) + "</h3>" +
       '<div id="scnStops"></div>' +
       '<div class="toolbar"><button type="button" class="secondary" data-action="scn-add-stop">' + esc(t("scn.add_stop")) + "</button></div>" +
-      '<label class="field" style="margin-top:12px">' + esc(t("scn.notes")) + '<textarea name="description" maxlength="1000">' + esc(v.description || "") + "</textarea></label>" +
-      '<div class="toolbar" style="margin-top:14px"><button type="submit">' + esc(t(s ? "scn.save_changes" : "scn.create")) + "</button>" +
+      '<label class="mt-12 field">' + esc(t("scn.notes")) + '<textarea name="description" maxlength="1000">' + esc(v.description || "") + "</textarea></label>" +
+      '<div class="mt-14 toolbar"><button type="submit">' + esc(t(s ? "scn.save_changes" : "scn.create")) + "</button>" +
       '<button type="button" class="secondary" data-action="scn-cancel">' + esc(t("common.cancel")) + "</button></div>" +
       '<div id="scnError" class="banner error" role="alert" hidden></div>' +
       "</form>";
@@ -1263,13 +1757,13 @@
     box.innerHTML = '<div class="form-grid">' + state.scenarioStops.map(function (stop, i) {
       var lat = stop.lat === null || stop.lat === undefined ? "" : String(stop.lat);
       var lon = stop.lon === null || stop.lon === undefined ? "" : String(stop.lon);
-      return '<div class="card" style="margin:0">' +
+      return '<div class="m-0 card">' +
         '<label class="field">' + esc(t("scn.stop_name", { n: i + 1 })) + '<input data-stop="' + i + '" data-field="name" maxlength="200" value="' + esc(stop.name || "") + '"></label>' +
-        '<div class="form-grid" style="margin-top:8px">' +
+        '<div class="mt-8 form-grid">' +
         '<label class="field">' + esc(t("scn.lat")) + '<input data-stop="' + i + '" data-field="lat" type="number" step="any" min="-90" max="90" value="' + esc(lat) + '"></label>' +
         '<label class="field">' + esc(t("scn.lon")) + '<input data-stop="' + i + '" data-field="lon" type="number" step="any" min="-180" max="180" value="' + esc(lon) + '"></label>' +
         "</div>" +
-        '<button type="button" class="danger" data-action="scn-remove-stop" data-index="' + i + '" style="margin-top:8px">' + esc(t("scn.remove_stop")) + "</button></div>";
+        '<button type="button" class="mt-8 danger" data-action="scn-remove-stop" data-index="' + i + '">' + esc(t("scn.remove_stop")) + "</button></div>";
     }).join("") + "</div>";
   }
 
@@ -1413,13 +1907,13 @@
   async function renderCompare(args, token) {
     setView(
       '<section class="card"><div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + "</strong>" + esc(t("scn.notice")) + "</div>" +
-      '<h2 style="margin-top:12px">' + esc(t("cmp.title")) + "</h2>" +
+      '<h class="mt-12"2>' + esc(t("cmp.title")) + "</h2>" +
       '<div class="toolbar">' +
       '<label class="field">' + esc(t("cmp.a")) + '<select id="cmpA"></select></label>' +
       '<label class="field">' + esc(t("cmp.b")) + '<select id="cmpB"></select></label>' +
       '<button type="button" data-action="cmp-run">' + esc(t("cmp.run")) + "</button>" +
       '<button type="button" class="secondary" data-action="cmp-pdf">' + esc(t("cmp.pdf")) + "</button></div>" +
-      '<div id="cmpResult" style="margin-top:12px"></div></section>' +
+      '<div class="mt-12" id="cmpResult"></div></section>' +
       '<section class="card"><h2>' + esc(t("cmp.years_title")) + '</h2><div id="yearsCompare"></div></section>'
     );
     await Promise.all([
@@ -1456,7 +1950,7 @@
         return "<tr><td><strong>" + esc(y.year) + "</strong></td><td>" + cell(y.official) + "</td><td>" + cell(y.unverified) +
           '</td><td class="num">' + esc(fmtNum(y.your_scenarios)) + "</td></tr>";
       }).join("");
-      return '<div class="table-wrap"><table><thead><tr><th>' + esc(t("cmp.col_year")) + "</th><th>" + esc(t("cmp.col_official")) +
+      return '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.years") })) + '"><table><thead><tr><th>' + esc(t("cmp.col_year")) + "</th><th>" + esc(t("cmp.col_official")) +
         "</th><th>" + esc(t("cmp.col_unverified")) + '</th><th class="num">' + esc(t("cmp.col_yours")) + "</th></tr></thead><tbody>" +
         rows + "</tbody></table></div>";
     });
@@ -1480,7 +1974,7 @@
           '</td><td class="num">' + estimateText(data.b.estimate[key], unitKey) +
           '</td><td class="num">' + estimateText(data.difference_b_minus_a[key], unitKey) + "</td></tr>";
       };
-      result.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("cmp.col_estimate")) + '</th><th class="num">' +
+      result.innerHTML = '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.comparison") })) + '"><table><thead><tr><th>' + esc(t("cmp.col_estimate")) + '</th><th class="num">' +
         esc(data.a.scenario.name) + '</th><th class="num">' + esc(data.b.scenario.name) + '</th><th class="num">' + esc(t("cmp.col_diff")) +
         "</th></tr></thead><tbody>" +
         row(t("cmp.row_distance"), "estimated_distance_km", "unit.km") +
@@ -1552,23 +2046,37 @@
       return;
     }
     if (token !== state.viewToken) return;
-    if (!meta.admin_enabled) {
+    var status = await loadAccountStatus();
+    if (token !== state.viewToken) return;
+    var accountsOn = !!status.available;
+    var staff = staffSession();
+    if (!meta.admin_enabled && !accountsOn) {
       setView('<section class="card"><h2>' + esc(t("admin.title")) + '</h2><div class="banner error" role="alert">' + esc(t("admin.disabled")) + "</div></section>");
       return;
     }
-    setView(
-      '<section class="card"><h2>' + esc(t("admin.sign_in")) + "</h2>" +
-      '<p class="muted">' + esc(t("admin.key_note")) + "</p>" +
-      '<form id="adminKeyForm" class="toolbar" autocomplete="off">' +
-      '<label class="field" style="flex:1 1 260px">' + esc(t("admin.key_label")) +
+    var keyForm = '<form id="adminKeyForm" class="toolbar" autocomplete="off">' +
+      '<label class="field grow">' + esc(t("admin.key_label")) +
       '<input name="key" type="password" autocomplete="new-password" spellcheck="false"></label>' +
       '<button type="submit">' + esc(t("admin.key_save")) + "</button>" +
-      '<button type="button" class="secondary" data-action="admin-key-clear">' + esc(t("admin.key_forget")) + "</button></form></section>" +
-      '<div id="adminBody"></div>'
-    );
-    if (state.adminKey) {
-      await loadAdmin(token);
+      '<button type="button" class="secondary" data-action="admin-key-clear">' + esc(t("admin.key_forget")) + "</button></form>";
+    var head;
+    if (staff) {
+      head = '<section class="card"><h2>' + esc(t("admin.title")) + "</h2><p>" +
+        esc(t("admin.signed_in", { email: staff.user.email, role: t("account.role." + staff.user.role) })) + "</p>" +
+        (staff.user.role === "editor" ? '<p class="muted">' + esc(t("admin.editor_note")) + "</p>" : "") + "</section>";
+    } else if (accountsOn) {
+      head = '<section class="card"><h2>' + esc(t("admin.sign_in")) + "</h2><p>" + esc(t("admin.accounts_note")) + "</p>" +
+        '<p><a class="button-link" href="#/account">' + esc(t("account.go_sign_in")) + "</a></p></section>" +
+        (meta.admin_enabled ? '<section class="card"><h2>' + esc(t("admin.bootstrap_title")) + "</h2>" +
+          '<p class="muted">' + esc(t("admin.bootstrap_note")) + "</p>" + keyForm + "</section>" : "");
     } else {
+      head = '<section class="card"><h2>' + esc(t("admin.sign_in")) + "</h2>" +
+        '<p class="muted">' + esc(t("admin.key_note")) + "</p>" + keyForm + "</section>";
+    }
+    setView(head + '<div id="adminBody"></div>');
+    if (staff || state.adminKey) {
+      await loadAdmin(token);
+    } else if (!accountsOn) {
       document.getElementById("adminBody").innerHTML = '<div class="empty">' + esc(t("admin.key_needed")) + "</div>";
     }
   }
@@ -1578,11 +2086,12 @@
     if (!body) return;
     body.innerHTML =
       '<div id="adminNotice" role="alert"></div>' +
+      '<section class="card"><h2>' + esc(t("admin.users_title")) + '</h2><div id="adminUsers">' + loadingInline() + "</div></section>" +
       '<section class="card"><h2>' + esc(t("admin.sources")) + '</h2><div id="adminSources">' + loadingInline() + "</div>" +
       '<form id="sourceDecisionForm" class="form-grid" hidden aria-labelledby="decisionQuestion">' +
       '<label class="field"><span id="decisionQuestion"></span><input name="note" required maxlength="500" autocomplete="off"></label>' +
       '<input type="hidden" name="source_id"><input type="hidden" name="verified">' +
-      '<div class="row-actions" style="align-self:end"><button type="submit" id="decisionSubmit"></button>' +
+      '<div class="align-end row-actions"><button type="submit" id="decisionSubmit"></button>' +
       '<button type="button" class="secondary" data-action="decision-cancel">' + esc(t("common.cancel")) + "</button></div></form>" +
       "<h3>" + esc(t("admin.add_source")) + "</h3>" +
       '<form id="sourceForm" class="form-grid">' +
@@ -1593,18 +2102,60 @@
       '<label class="field">' + esc(t("admin.src_kind")) + '<select name="kind">' +
       '<option value="OFFICIAL">OFFICIAL</option><option value="COMMUNITY">COMMUNITY</option>' +
       '<option value="SYNTHETIC_DEMO">SYNTHETIC_DEMO</option><option value="UNKNOWN" selected>UNKNOWN</option></select></label>' +
-      '<div style="align-self:end"><button type="submit">' + esc(t("admin.src_add")) + "</button></div></form></section>" +
+      '<div class="align-end"><button type="submit">' + esc(t("admin.src_add")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("admin.upcoming_title")) + "</h2>" +
+      '<p class="muted">' + esc(t("admin.upcoming_help")) + "</p>" +
+      '<form id="upcomingForm" class="form-grid">' +
+      '<label class="field">' + esc(t("admin.upcoming_entry")) + '<select name="entry" id="upcomingEntry"></select></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_id")) + '<input name="entry_id" maxlength="60" pattern="[a-z0-9_]{2,60}" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_name")) + '<input name="name" required minlength="3" maxlength="200"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_type")) + '<select name="transport_type" id="upcomingType"></select></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_location")) + '<input name="location" maxlength="300"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_text")) + '<textarea name="announcement" rows="2" maxlength="2000"></textarea></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_status")) + '<select name="status" id="upcomingStatus"></select></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_kind")) + '<select name="source_kind" id="upcomingKind"></select></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_announced")) + '<input name="announced_on" maxlength="10" pattern="\\d{4}(-\\d{2}(-\\d{2})?)?" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_expected")) + '<input name="expected_start" maxlength="10" pattern="\\d{4}(-\\d{2}(-\\d{2})?)?" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_opened")) + '<input name="opened_on" type="date"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_sources")) + '<textarea name="sources" rows="3" required maxlength="3000"></textarea></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_verified")) + '<input name="verified_on" type="date" required></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_note")) + '<input name="note" maxlength="300"></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_reason")) + '<input name="reason" required minlength="3" maxlength="500" autocomplete="off"></label>' +
+      '<div class="align-end"><button type="submit">' + esc(t("admin.upcoming_save")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("admin.notices_title")) + "</h2>" +
+      '<p class="muted">' + esc(t("admin.notices_help")) + "</p>" +
+      '<div id="adminNotices">' + loadingInline() + "</div>" +
+      '<form id="noticeWithdrawForm" class="form-grid" hidden>' +
+      '<label class="field">' + esc(t("admin.notice_withdraw_reason")) + '<input name="reason" required minlength="3" maxlength="500" autocomplete="off"></label>' +
+      '<input type="hidden" name="notice_id">' +
+      '<div class="row-actions align-end"><button type="submit" class="danger">' + esc(t("admin.notice_withdraw")) + "</button>" +
+      '<button type="button" class="secondary" data-action="notice-withdraw-cancel">' + esc(t("common.cancel")) + "</button></div></form>" +
+      "<h3>" + esc(t("admin.notice_new")) + "</h3>" +
+      '<form id="noticeForm" class="form-grid">' +
+      '<label class="field">' + esc(t("admin.notice_title")) + '<input name="title" required minlength="5" maxlength="120" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("admin.notice_body")) + '<textarea name="body" rows="2" maxlength="600"></textarea></label>' +
+      '<label class="field">' + esc(t("admin.notice_kind")) + '<select name="kind">' +
+      ["DISRUPTION", "DIVERSION", "INFORMATION"].map(function (k) { return '<option value="' + k + '">' + esc(t("notices.kind." + k)) + "</option>"; }).join("") + "</select></label>" +
+      '<label class="field">' + esc(t("admin.notice_mode")) + '<select name="mode">' +
+      ["BUS", "METRO", "ALL"].map(function (m) { return '<option value="' + m + '">' + esc(t("notices.mode." + m)) + "</option>"; }).join("") + "</select></label>" +
+      '<label class="field">' + esc(t("admin.notice_source_title")) + '<input name="source_title" required minlength="3" maxlength="200"></label>' +
+      '<label class="field">' + esc(t("admin.notice_source_url")) + '<input name="source_url" type="url" required maxlength="500" placeholder="https://"></label>' +
+      '<label class="field">' + esc(t("admin.notice_starts")) + '<input name="starts_on" type="date" required></label>' +
+      '<label class="field">' + esc(t("admin.notice_ends")) + '<input name="ends_on" type="date" required></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_reason")) + '<input name="reason" required minlength="3" maxlength="500" autocomplete="off"></label>' +
+      '<div class="align-end"><button type="submit">' + esc(t("admin.notice_save")) + "</button></div></form></section>" +
       '<section class="card"><h2>' + esc(t("admin.upload_title")) + "</h2>" +
       '<p class="muted">' + esc(t("admin.upload_help")) + "</p>" +
       '<form id="uploadForm" class="form-grid">' +
       '<label class="field">' + esc(t("admin.upload_source")) + '<select name="data_source_id" id="uploadSource" required></select></label>' +
       '<label class="field">' + esc(t("admin.upload_file")) + '<input name="file" type="file" accept=".zip,application/zip" required></label>' +
-      '<div style="align-self:end"><button type="submit">' + esc(t("admin.upload_submit")) + "</button></div></form>" +
-      '<div id="uploadResult" style="margin-top:12px"></div></section>' +
+      '<div class="align-end"><button type="submit">' + esc(t("admin.upload_submit")) + "</button></div></form>" +
+      '<div class="mt-12" id="uploadResult"></div></section>' +
       '<section class="card"><h2>' + esc(t("admin.imports")) + '</h2><div id="adminImports">' + loadingInline() + "</div></section>" +
       '<section class="card"><h2>' + esc(t("admin.db_title")) + '</h2><div id="adminStats">' + loadingInline() + "</div>" +
-      '<div class="toolbar" style="margin-top:8px"><button type="button" class="secondary" data-action="backup">' + esc(t("admin.backup")) + "</button></div></section>" +
+      '<div class="mt-8 toolbar"><button type="button" class="secondary" data-action="backup">' + esc(t("admin.backup")) + "</button></div></section>" +
       '<section class="card"><h2>' + esc(t("admin.audit")) + '</h2><div id="adminAudit">' + loadingInline() + "</div></section>";
+    applyAdminScope();
 
     try {
       await refreshAdminData(token);
@@ -1683,7 +2234,7 @@
     var box = document.getElementById("adminSources");
     if (box) {
       box.innerHTML = sources.length
-        ? '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.col_name")) +
+        ? '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.sources") })) + '"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.col_name")) +
           "</th><th>" + esc(t("admin.col_kind")) + "</th><th>" + esc(t("admin.col_class")) + "</th><th>" + esc(t("admin.col_status")) +
           "</th></tr></thead><tbody>" + sources.map(adminSourceRow).join("") + "</tbody></table></div>"
         : '<div class="empty">' + esc(t("admin.sources_none")) + "</div>";
@@ -1724,7 +2275,7 @@
         '<button type="button" class="danger" data-action="import-delete" data-id="' + esc(imp.id) + '" aria-label="' +
         esc(t("admin.import_delete", { id: imp.id })) + '">' + esc(t("common.delete")) + "</button></td></tr>";
     }).join("");
-    box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.upload_file")) +
+    box.innerHTML = '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.imports") })) + '"><table><thead><tr><th>' + esc(t("admin.col_id")) + "</th><th>" + esc(t("admin.upload_file")) +
       "</th><th>" + esc(t("admin.col_class")) + "</th><th>" + esc(t("admin.col_status")) + '</th><th><span class="sr-only">' +
       esc(t("common.delete")) + "</span></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
@@ -1760,7 +2311,7 @@
       return "<tr><td>" + esc(utcText(entry.time)) + "</td><td>" + esc(entry.actor) + "</td><td>" + esc(entry.action) +
         "</td><td>" + esc(entity) + '</td><td class="muted">' + esc(detail) + "</td></tr>";
     }).join("");
-    box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>' + esc(t("admin.audit_time")) + "</th><th>" + esc(t("admin.audit_actor")) +
+    box.innerHTML = '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.audit") })) + '"><table><thead><tr><th>' + esc(t("admin.audit_time")) + "</th><th>" + esc(t("admin.audit_actor")) +
       "</th><th>" + esc(t("admin.audit_action")) + "</th><th>" + esc(t("admin.audit_entity")) + "</th><th>" + esc(t("admin.audit_detail")) +
       "</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
@@ -1797,7 +2348,7 @@
     if (err && err.status === 401) {
       state.adminKey = "";
       if (token === state.viewToken) {
-        toast(t("admin.key_rejected"));
+        toast(err.message || t("admin.key_rejected"));
         render();
       }
       return;
@@ -1808,18 +2359,174 @@
   }
 
   async function refreshAdminData(token) {
+    var scope = adminScope();
+    var full = scope === "admin" || scope === "admin-key";
+    var editing = scope !== "bootstrap";
     var results = await Promise.all([
-      api("/api/admin/data-sources", { admin: true }),
-      api("/api/admin/imports", { admin: true }),
-      api("/api/admin/stats", { admin: true }),
-      api("/api/admin/audit-logs?limit=50", { admin: true }),
+      full ? api("/api/admin/data-sources", { admin: true }) : null,
+      full ? api("/api/admin/imports", { admin: true }) : null,
+      full ? api("/api/admin/stats", { admin: true }) : null,
+      full ? api("/api/admin/audit-logs?limit=50", { admin: true }) : null,
+      editing ? api("/api/upcoming") : null,
+      editing ? api("/api/admin/notices", { admin: true }) : null,
+      scope === "admin" || scope === "bootstrap" ? api("/api/admin/users", { admin: true }) : null,
     ]);
     if (token !== state.viewToken || !document.getElementById("adminBody")) return;
     setAdminNotice("");
-    renderAdminSources(results[0].sources);
-    renderAdminImports(results[1].imports);
-    renderAdminStats(results[2]);
-    renderAdminAudit(results[3].entries);
+    if (results[0]) renderAdminSources(results[0].sources);
+    if (results[1]) renderAdminImports(results[1].imports);
+    if (results[2]) renderAdminStats(results[2]);
+    if (results[3]) renderAdminAudit(results[3].entries);
+    if (results[4]) renderAdminUpcoming(results[4]);
+    if (results[5]) renderAdminNotices(results[5]);
+    if (results[6]) renderAdminUsers(results[6].users);
+  }
+
+  // ---------------------------------------------------------------- administration: service notices
+  function renderAdminNotices(data) {
+    var box = document.getElementById("adminNotices");
+    var form = document.getElementById("noticeForm");
+    if (!box) return;
+    box.innerHTML = data.notices.length ? '<ul class="list">' + data.notices.map(function (n) {
+      var open = n.status === "ACTIVE" || n.status === "SCHEDULED";
+      return '<li><div><div class="title">' + esc(n.title) + '</div><div class="muted">' +
+        esc(t("notices.kind." + n.kind)) + " · " + esc(t("notices.mode." + n.mode)) + " · " +
+        esc(formatCalendarDate(n.starts_on)) + " – " + esc(formatCalendarDate(n.ends_on)) + "</div></div>" +
+        '<div class="row-actions"><span class="badge ' + (n.status === "ACTIVE" ? "official" : "neutral") + '">' + esc(t("notices.status." + n.status)) + "</span>" +
+        (open ? '<button type="button" class="danger" data-action="notice-withdraw" data-id="' + esc(n.id) + '">' + esc(t("admin.notice_withdraw")) + "</button>" : "") +
+        "</div></li>";
+    }).join("") + "</ul>" : '<div class="empty">' + esc(t("admin.notice_none")) + "</div>";
+    if (form && !form.elements.starts_on.value) {
+      form.elements.starts_on.value = data.today;
+      var end = new Date(data.today + "T00:00:00Z");
+      end.setUTCDate(end.getUTCDate() + 7);
+      form.elements.ends_on.value = end.toISOString().slice(0, 10);
+    }
+  }
+
+  async function submitNotice(form, token) {
+    var body = {};
+    ["title", "body", "kind", "mode", "source_title", "source_url", "starts_on", "ends_on", "reason"].forEach(function (f) {
+      body[f] = String(form.elements[f].value || "").trim();
+    });
+    busy(form, true);
+    try {
+      await api("/api/admin/notices", { admin: true, method: "POST", json: body });
+      form.reset();
+      toast(t("admin.notice_saved"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  function withdrawNotice(node) {
+    var form = document.getElementById("noticeWithdrawForm");
+    if (!form) return;
+    form.elements.notice_id.value = node.getAttribute("data-id") || "";
+    form.elements.reason.value = "";
+    form.hidden = false;
+    form.elements.reason.focus();
+  }
+
+  async function submitNoticeWithdrawal(form, token) {
+    busy(form, true);
+    try {
+      await api("/api/admin/notices/" + encodeURIComponent(form.elements.notice_id.value),
+        { admin: true, method: "PATCH", json: { withdrawn: true, reason: String(form.elements.reason.value || "").trim() } });
+      form.hidden = true;
+      toast(t("admin.notice_withdrawn"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  // ---------------------------------------------------------------- administration: upcoming transport
+  function optionList(values, prefix, selected) {
+    return values.map(function (v) {
+      return '<option value="' + esc(v) + '"' + (v === selected ? " selected" : "") + ">" + esc(t(prefix + v)) + "</option>";
+    }).join("");
+  }
+
+  function renderAdminUpcoming(data) {
+    var form = document.getElementById("upcomingForm");
+    if (!form) return;
+    state.adminUpcoming = data;
+    var current = form.elements.entry.value;
+    form.elements.entry.innerHTML = '<option value="">' + esc(t("admin.upcoming_new")) + "</option>" +
+      data.projects.map(function (p) {
+        return '<option value="' + esc(p.id) + '"' + (p.id === current ? " selected" : "") + ">" + esc(p.name) + "</option>";
+      }).join("");
+    fillUpcomingForm(form);
+  }
+
+  function fillUpcomingForm(form) {
+    var data = state.adminUpcoming;
+    if (!data) return;
+    var key = form.elements.entry.value;
+    var p = data.projects.filter(function (x) { return x.id === key; })[0] || {};
+    form.elements.transport_type.innerHTML = optionList(data.transport_types, "upcoming.type.", p.transport_type);
+    form.elements.status.innerHTML = optionList(data.statuses, "upcoming.status.", p.status || "ANNOUNCED");
+    form.elements.source_kind.innerHTML = optionList(data.source_kinds, "upcoming.kind.", p.source_kind || "OFFICIAL");
+    // The field is "entry_id", not "id": a control named "id" would hide form.id, which the submit handler reads.
+    form.elements.entry_id.value = p.id || "";
+    form.elements.entry_id.disabled = Boolean(p.id);
+    ["name", "location", "announcement", "announced_on", "expected_start", "opened_on", "verified_on", "note"].forEach(function (f) {
+      form.elements[f].value = p[f] || "";
+    });
+    form.elements.sources.value = (p.sources || []).map(function (s) { return s.title + " | " + s.url; }).join("\n");
+    form.elements.reason.value = "";
+  }
+
+  // Each line is "Title | full https address". Returns null when a line does not follow that form.
+  function parseSources(text) {
+    var sources = [];
+    var lines = String(text || "").split("\n").map(function (l) { return l.trim(); }).filter(Boolean);
+    for (var i = 0; i < lines.length; i++) {
+      var cut = lines[i].lastIndexOf("|");
+      var title = cut > 0 ? lines[i].slice(0, cut).trim() : "";
+      var url = cut > 0 ? lines[i].slice(cut + 1).trim() : "";
+      if (!title || !/^https:\/\/\S+$/.test(url)) return null;
+      sources.push({ title: title, url: url });
+    }
+    return sources.length ? sources : null;
+  }
+
+  async function submitUpcoming(form, token) {
+    var sources = parseSources(form.elements.sources.value);
+    if (!sources) {
+      toast(t("admin.upcoming_bad_sources"));
+      return;
+    }
+    var body = { sources: sources, reason: String(form.elements.reason.value || "").trim() };
+    ["name", "transport_type", "location", "announcement", "status", "source_kind", "verified_on", "note"].forEach(function (f) {
+      body[f] = String(form.elements[f].value || "").trim();
+    });
+    ["announced_on", "expected_start", "opened_on"].forEach(function (f) {
+      body[f] = String(form.elements[f].value || "").trim() || null;
+    });
+    var key = form.elements.entry.value;
+    busy(form, true);
+    try {
+      if (key) {
+        await api("/api/admin/upcoming/" + encodeURIComponent(key), { admin: true, method: "PATCH", json: body });
+      } else {
+        body.id = String(form.elements.entry_id.value || "").trim();
+        await api("/api/admin/upcoming", { admin: true, method: "POST", json: body });
+        form.elements.entry.value = "";
+      }
+      toast(t("admin.upcoming_saved"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    } finally {
+      busy(form, false);
+    }
   }
 
   // ---------------------------------------------------------------- administration: actions
@@ -1830,8 +2537,9 @@
   }
 
   function adminHeaders() {
-    if (!state.adminKey) throw new Error(t("admin.key_needed"));
-    return { Accept: "application/json", "X-Client-Key": clientKey(), "X-Admin-Key": state.adminKey };
+    var headers = { Accept: "application/json", "X-Client-Key": clientKey() };
+    addAuth(headers, true);
+    return headers;
   }
 
   function saveAdminKey(input) {
@@ -1984,7 +2692,1452 @@
   }
 
   // ---------------------------------------------------------------- routing table
+  // ---------------------------------------------------------------- 4.0 app sections
+  // Home, Nearby, Live tracking, Tickets, Metro, Favourites, My account and More services. Every section reads what
+  // the server says works right now (/api/features), so a feature that needs data or an authorisation explains
+  // itself instead of pretending to work.
+  var BENGALURU = [12.9716, 77.5946];
+  var METRO_TYPES = [1, 400, 401, 402];
+  var NEW_SECTIONS = ["home", "nearby", "live", "tickets", "metro", "favourites", "account", "more", "upcoming", "assistant", "providers"];
+
+  // Small line icons, drawn for this app.
+  var ICONS = {
+    nearby: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
+    plan: '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h6a3 3 0 0 0 0-6h-4a3 3 0 0 1 0-6h6"/>',
+    live: '<path d="M5 12a7 7 0 0 1 14 0"/><path d="M8.5 12a3.5 3.5 0 0 1 7 0"/><circle cx="12" cy="12" r="1.3"/><path d="M12 13.5V20"/>',
+    routes: '<rect x="5" y="4" width="14" height="13" rx="3"/><path d="M5 11h14M8 20l1-3M16 20l-1-3"/><circle cx="8.5" cy="14" r=".8"/><circle cx="15.5" cy="14" r=".8"/>',
+    metro: '<rect x="6" y="3" width="12" height="14" rx="3"/><path d="M6 10h12M9 21l2-4M15 21l-2-4"/>',
+    tickets: '<path d="M4 8a2 2 0 0 0 0 4v4h16v-4a2 2 0 0 0 0-4V4H4z"/><path d="M14 4v12" stroke-dasharray="2 2"/>',
+    favourites: '<path d="M12 20l-7-7a4.2 4.2 0 0 1 6-6l1 1 1-1a4.2 4.2 0 0 1 6 6z"/>',
+    airport: '<path d="M3 14l18-5-2-2-6 1-5-5-2 1 3 5-4 1-2-2-1 1 2 4z"/>',
+    sos: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
+    more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+    assist: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+    upcoming: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M9 15l2 2 4-4"/>',
+  };
+
+  function icon(name) {
+    return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (ICONS[name] || "") + "</svg>";
+  }
+
+  async function loadFeatures() {
+    try {
+      var data = await api("/api/features");
+      var map = {};
+      data.features.forEach(function (f) {
+        map[f.id] = f;
+      });
+      state.features = map;
+      state.version = data.version;
+      state.serverStoragePersistent = data.server_storage_persistent !== false;
+      var banner = document.getElementById("demoBanner");
+      if (banner) {
+        banner.textContent = data.demo_mode ? t("demo.banner") : "";
+        banner.hidden = !data.demo_mode;
+      }
+      var version = document.getElementById("splashVersion");
+      if (version) version.textContent = t("more.version", { version: data.version });
+    } catch (_) {
+      /* Without the list, tiles simply show no status chip. */
+    }
+    return state.features || {};
+  }
+
+  function featureChip(id) {
+    var feature = state.features && state.features[id];
+    if (!feature) return "";
+    return '<span class="chip state-' + esc(feature.state.toLowerCase()) + '">' + esc(t("feature.state." + feature.state)) + "</span>";
+  }
+
+  function featureReason(id) {
+    var feature = state.features && state.features[id];
+    return feature && feature.reason ? t("feature.reason." + feature.reason) : "";
+  }
+
+  function tile(href, iconName, label, featureId, tone) {
+    return '<a class="tile tone-' + tone + '" href="' + href + '">' +
+      '<span class="tile-icon">' + icon(iconName) + "</span>" +
+      '<span class="tile-label">' + esc(label) + "</span>" + (featureId ? featureChip(featureId) : "") + "</a>";
+  }
+
+  async function renderHome(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      '<section class="hero card">' +
+      '<form id="homeSearch" class="home-search" role="search">' +
+      '<label class="sr-only" for="homeQuery">' + esc(t("home.search_label")) + "</label>" +
+      '<input id="homeQuery" name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("home.search_placeholder")) + '">' +
+      '<div class="home-search-actions">' +
+      '<button type="submit" name="kind" value="routes">' + esc(t("home.find_route")) + "</button>" +
+      '<button type="submit" name="kind" value="stops" class="secondary">' + esc(t("home.find_stop")) + "</button></div></form>" +
+      recentHtml() + "</section>" +
+      '<section class="card" id="homeNotices"><h2>' + esc(t("notices.title")) + '</h2><div id="homeNoticesBody" aria-live="polite">' +
+      loadingInline() + "</div></section>" +
+      '<section class="card" id="homeQuick" hidden><h2>' + esc(t("home.quick_title")) + "</h2>" +
+      '<p class="muted">' + esc(t("home.quick_help")) + '</p><div class="chips" id="homeQuickChips"></div></section>' +
+      '<section class="card map-card"><div class="card-head"><h2>' + esc(t("home.map_title")) + "</h2>" +
+      '<button type="button" class="secondary" data-action="home-nearby">' + esc(t("home.near_me")) + "</button></div>" +
+      '<div id="homeMap" class="map home-map" role="region" aria-label="' + esc(t("home.map_title")) + '"></div></section>' +
+      '<section class="tiles" aria-label="' + esc(t("home.services")) + '">' +
+      tile("#/nearby", "nearby", t("nav.nearby"), "nearby_stops", "red") +
+      tile("#/journey", "plan", t("nav.journey"), "journey_planner", "amber") +
+      tile("#/live", "live", t("nav.live"), "live_tracking", "blue") +
+      tile("#/routes", "routes", t("home.timetables"), "bus_timetables", "teal") +
+      tile("#/metro", "metro", t("nav.metro"), "metro", "violet") +
+      tile("#/tickets", "tickets", t("nav.tickets"), "bus_tickets", "orange") +
+      tile("#/favourites", "favourites", t("nav.favourites"), "favourites", "pink") +
+      tile("#/more/airport", "airport", t("home.airport"), null, "sky") +
+      tile("#/assistant", "assist", t("nav.assistant"), "ai_assistant", "blue") +
+      tile("#/upcoming", "upcoming", t("nav.upcoming"), "upcoming_transport", "violet") +
+      tile("#/more/sos", "sos", t("home.sos"), "sos_call", "danger") +
+      tile("#/more", "more", t("nav.more"), null, "slate") +
+      "</section>"
+    );
+    if (state.lowData) {
+      var holder = document.getElementById("homeMap");
+      if (holder) {
+        holder.innerHTML = '<div class="map-placeholder"><p>' + esc(t("home.map_lowdata")) + "</p>" +
+          '<button type="button" class="secondary" data-action="show-map">' + esc(t("home.show_map")) + "</button></div>";
+      }
+    } else {
+      showHomeMap();
+    }
+    loadHomeNotices(token);
+    loadQuickDestinations(token);
+  }
+
+  // ---------------------------------------------------------------- service notices (official sources only)
+  // The app has no live alerts feed. A notice appears only if an administrator copied it from an official source,
+  // which it links to; it ends on its stated date.
+  async function loadHomeNotices(token) {
+    var box = document.getElementById("homeNoticesBody");
+    if (!box) return;
+    try {
+      var data = await api("/api/notices");
+      if (token !== state.viewToken || !box.isConnected) return;
+      box.innerHTML = noticesHtml(data.notices || []);
+    } catch (err) {
+      if (token === state.viewToken && box.isConnected) box.innerHTML = '<p class="muted">' + esc(t("notices.unavailable")) + "</p>";
+    }
+  }
+
+  function noticesHtml(list) {
+    if (!list.length) return '<p class="muted">' + esc(t("notices.none")) + "</p>";
+    return '<ul class="list notices">' + list.map(function (n) {
+      var href = safeHref(n.source && n.source.url);
+      var source = esc(t("notices.source", { title: n.source ? n.source.title : "" }));
+      return '<li class="notice-item"><div>' +
+        '<span class="badge ' + (n.kind === "DISRUPTION" ? "alert" : "neutral") + '">' + esc(t("notices.kind." + n.kind)) + "</span> " +
+        '<span class="badge neutral">' + esc(t("notices.mode." + n.mode)) + "</span>" +
+        '<div class="title">' + esc(n.title) + "</div>" + (n.body ? "<p>" + esc(n.body) + "</p>" : "") +
+        '<p class="muted">' + esc(t("notices.until", { date: formatCalendarDate(n.ends_on) })) + " · " +
+        (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + source + "</a>" : source) +
+        "</p></div></li>";
+    }).join("") + '</ul><p class="muted small-print">' + esc(t("notices.footnote")) + "</p>";
+  }
+
+  // ---------------------------------------------------------------- quick destinations (major Metro stations)
+  // Shown only for stations that exist in the loaded timetable, with that timetable's label.
+  var QUICK_DESTINATIONS = [
+    ["Majestic", "Nadaprabhu Kempegowda Station, Majestic"], ["MG Road", "Mahatma Gandhi Road"],
+    ["Indiranagar", "Indiranagar"], ["Whitefield", "Whitefield (Kadugodi)"], ["Electronic City", "Electronic City"],
+    ["Jayanagar", "Jayanagar"], ["Cubbon Park", "Cubbon Park"], ["Vidhana Soudha", "Dr. B. R. Ambedkar Station, Vidhana Soudha"],
+    ["Silk Board", "Central Silk Board"], ["Banashankari", "Banashankari"], ["RV Road", "Rashtreeya Vidyalaya Road"],
+    ["Baiyappanahalli", "Baiyappanahalli"]
+  ];
+
+  async function loadQuickDestinations(token) {
+    var section = document.getElementById("homeQuick");
+    var chips = document.getElementById("homeQuickChips");
+    if (!section || !chips) return;
+    try {
+      var cls = state.classification;
+      var data = await api("/api/metro/stations?classification=" + encodeURIComponent(cls) + "&limit=500");
+      if (!data.stations.length && cls === "OFFICIAL_VERIFIED") {
+        cls = "UNVERIFIED_FEED";
+        data = await api("/api/metro/stations?classification=" + cls + "&limit=500");
+      }
+      if (token !== state.viewToken || !chips.isConnected) return;
+      var names = {};
+      data.stations.forEach(function (st) { names[st.name] = true; });
+      var found = QUICK_DESTINATIONS.filter(function (q) { return names[q[1]]; });
+      if (!found.length) return;
+      chips.innerHTML = badge(cls) + " " + found.map(function (q) {
+        return '<button type="button" class="chip-button" data-action="quick-dest" data-name="' + esc(q[1]) + '" data-cls="' + esc(cls) + '">' + esc(q[0]) + "</button>";
+      }).join("");
+      section.hidden = false;
+    } catch (err) {
+      // Without the station list the card stays hidden; nothing is guessed.
+    }
+  }
+
+  function useClassification(cls) {
+    if (cls === "OFFICIAL_VERIFIED" || cls === "UNVERIFIED_FEED") {
+      state.classification = cls;
+      storage.set(PREFIX + "classification", cls);
+    }
+  }
+
+  function showHomeMap() {
+    var map = makeMap("homeMap");
+    if (map) map.setView(BENGALURU, 11);
+  }
+
+  async function renderNearby(args, token) {
+    await renderStops([], token);
+    if (state.autoNearby && token === state.viewToken) {
+      state.autoNearby = false;
+      nearbyStops();
+    }
+  }
+
+  async function officialLinks(categoryIds) {
+    var data = await loadServices();
+    var cats = data.categories.filter(function (c) {
+      return !categoryIds || categoryIds.indexOf(c.id) !== -1;
+    });
+    return cats.map(function (c) {
+      return '<h3 id="svc-' + esc(c.id) + '">' + esc(t("svc.cat." + c.id)) + '</h3><ul class="list links">' + c.items.map(serviceItem).join("") + "</ul>";
+    }).join("") + '<p class="muted small">' + esc(t("more.checked", { date: formatCalendarDate(data.checked) })) + "</p>";
+  }
+
+  async function loadServices() {
+    if (!state.services) state.services = await api("/api/services");
+    return state.services;
+  }
+
+  function serviceItem(item) {
+    var actions = "";
+    if (item.tel && /^[0-9]{3,12}$/.test(item.tel)) {
+      actions += '<a class="button-link" href="tel:' + esc(item.tel) + '">' + esc(t("more.call", { number: item.tel })) + "</a>";
+    }
+    var href = safeHref(item.url);
+    if (href) {
+      actions += '<a class="button-link secondary" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(t("more.open_site")) + "</a>";
+    }
+    return '<li><div><div class="title">' + esc(item.name) + '</div><div class="muted small">' + esc(item.source) + "</div></div>" +
+      '<div class="row-actions">' + actions + "</div></li>";
+  }
+
+  function unavailableCard(titleKey, bodyKey, featureId) {
+    var reason = featureReason(featureId);
+    return '<section class="card unavailable"><div class="card-head"><h2>' + esc(t(titleKey)) + "</h2>" + featureChip(featureId) + "</div>" +
+      "<p>" + esc(t(bodyKey)) + "</p>" + (reason ? '<p class="muted">' + esc(reason) + "</p>" : "") + "</section>";
+  }
+
+  // ---------------------------------------------------------------- live vehicles (only from an authorised feed)
+  // Every live item comes from the operator's GTFS-Realtime feed through /api/live. Without a connected feed this
+  // screen says so and shows no vehicle. A scheduled time is always labelled "Scheduled", never shown as live.
+  var LIVE_REFRESH_MS = 20000;
+
+  function liveBanner(status) {
+    if (!status || status.official) return "";
+    return '<div class="banner demo-mode" role="alert"><strong>' + esc(t("live.test_title")) + "</strong>" + esc(t("live.test_body")) + "</div>";
+  }
+
+  function ageText(seconds) {
+    if (seconds === null || seconds === undefined) return t("common.na");
+    if (seconds < 60) return t("live.age_seconds", { n: fmtNum(seconds) });
+    return t("live.age_minutes", { n: fmtNum(Math.round(seconds / 60)) });
+  }
+
+  function freshnessBadge(freshness) {
+    return '<span class="badge ' + (freshness === "FRESH" ? "official" : "unverified") + '">' + esc(t("live.fresh." + freshness)) + "</span>";
+  }
+
+  function liveStateCard(status) {
+    return '<section class="card"><h2>' + esc(t("live.feed_title")) + "</h2><p>" + esc(t("live.state." + status.state)) + "</p>" +
+      (status.reason && status.state !== "NOT_CONNECTED" ? '<p class="muted small">' + esc(t("live.reason_code", { code: status.reason })) + "</p>" : "") +
+      (status.official && status.available ? "" : '<p class="muted small">' + esc(t("live.needs_text")) + "</p>") + "</section>";
+  }
+
+  function scheduledCardsHtml() {
+    return '<section class="card"><h2>' + esc(t("live.scheduled_title")) + "</h2><p>" + esc(t("live.scheduled_body")) + "</p>" +
+      '<p><a class="button-link" href="#/nearby">' + esc(t("live.scheduled_link")) + "</a></p></section>" +
+      '<section class="card"><h2>' + esc(t("live.official_title")) + '</h2><div id="liveLinks"></div></section>';
+  }
+
+  function routeLabel(route) {
+    return route ? String(route.number || "") : t("live.not_matched");
+  }
+
+  async function renderLive(args, token) {
+    await loadFeatures();
+    var status;
+    try {
+      status = await api("/api/live/status");
+    } catch (err) {
+      if (token === state.viewToken) setView(panelError(err, "rerender"));
+      return;
+    }
+    if (token !== state.viewToken) return;
+    if (!status.available) {
+      setView(unavailableCard("live.unavailable_title", "live.body", "live_tracking") + liveStateCard(status) + scheduledCardsHtml());
+    } else if (args[0] === "vehicle" && args[1]) {
+      await renderLiveVehicle(decodeURIComponent(args[1]), token);
+      return;
+    } else {
+      setView(liveBanner(status) +
+        '<section class="card"><div class="card-head"><h2>' + esc(t("live.title")) + '</h2><span id="liveState"></span></div>' +
+        '<p class="muted small" id="liveFeedLine"></p>' +
+        '<form id="liveFilter" class="toolbar" role="search"><label class="field grow-240">' + esc(t("live.route_filter")) +
+        '<input name="route" maxlength="40" autocomplete="off" value="' + esc(state.liveRoute || "") + '"></label>' +
+        '<div class="align-end"><button type="submit">' + esc(t("live.filter")) + "</button></div></form>" +
+        '<div id="liveMap" class="map mt-12"></div><div id="liveList" class="mt-12" aria-live="polite">' + loadingInline() + "</div></section>" +
+        liveStateCard(status) + scheduledCardsHtml());
+      var map = makeMap("liveMap");
+      if (map) map.setView(BENGALURU, 11);
+      await refreshLive(token, true);
+    }
+    await fillPanel(document.getElementById("liveLinks"), token, function () {
+      return officialLinks(["bus"]);
+    });
+  }
+
+  function liveVehicleHtml(v) {
+    return '<li><div><div class="title">' + esc(routeLabel(v.route)) + (v.headsign ? " &rarr; " + esc(v.headsign) : "") + "</div>" +
+      '<div class="muted">' + esc(v.label) + (v.next_stop ? " · " + esc(t("live.next_stop", { name: v.next_stop.name })) : "") +
+      " · " + esc(t("live.updated_ago", { age: ageText(v.age_seconds) })) + "</div>" +
+      (v.progress ? '<progress max="100" value="' + esc(v.progress.percent) + '" aria-label="' +
+        esc(t("live.progress", { n: v.progress.stop_number, total: v.progress.stops_total })) + '"></progress>' : "") +
+      '</div><div class="row-actions">' + freshnessBadge(v.freshness) +
+      '<a class="button secondary" href="#/live/vehicle/' + esc(encodeURIComponent(v.vehicle_id)) + '">' + esc(t("live.details")) + "</a></div></li>";
+  }
+
+  async function refreshLive(token, fit) {
+    var list = document.getElementById("liveList");
+    if (!list) return;
+    var data;
+    try {
+      data = await api("/api/live/vehicles?" + new URLSearchParams({ route: state.liveRoute || "" }).toString());
+    } catch (err) {
+      if (token === state.viewToken && document.getElementById("liveList")) list.innerHTML = panelError(err, "rerender");
+      return;
+    }
+    if (token !== state.viewToken || !document.getElementById("liveList")) return;
+    var status = data.status;
+    document.getElementById("liveState").innerHTML = status.available ? freshnessBadge(status.state === "LIVE" ? "FRESH" : "STALE") : "";
+    document.getElementById("liveFeedLine").textContent = t("live.feed_line", { age: ageText(status.feed_age_seconds), poll: status.poll_seconds });
+    if (!data.available) {
+      list.innerHTML = '<div class="empty">' + esc(t("live.state." + status.state)) + "</div>";
+    } else {
+      list.innerHTML = (data.vehicles.length ? '<ul class="list">' + data.vehicles.map(liveVehicleHtml).join("") + "</ul>"
+        : '<div class="empty">' + esc(t(state.liveRoute ? "live.none_route" : "live.none")) + "</div>") +
+        (data.hidden_old ? '<p class="muted small">' + esc(t("live.hidden_old", { n: data.hidden_old })) + "</p>" : "");
+    }
+    var L = window.L;
+    if (state.map && state.markers && L) {
+      state.markers.clearLayers();
+      var points = [];
+      data.vehicles.forEach(function (v) {
+        points.push([v.lat, v.lon]);
+        L.circleMarker([v.lat, v.lon], { radius: 8, weight: 3, color: v.freshness === "FRESH" ? "#1d4ed8" : "#6b7280" })
+          .bindTooltip(esc(routeLabel(v.route) + " · " + v.label))
+          .on("click", function () { location.hash = "#/live/vehicle/" + encodeURIComponent(v.vehicle_id); })
+          .addTo(state.markers);
+      });
+      // No animation: the screen may be re-rendered (a filter, a refresh) while an animated zoom is still running,
+      // and Leaflet fails if its map is removed mid-animation.
+      if (fit && points.length) state.map.fitBounds(points, { maxZoom: 14, padding: [24, 24], animate: false });
+    }
+    setTimeout(function () {
+      if (token === state.viewToken && document.getElementById("liveList")) refreshLive(token, false);
+    }, LIVE_REFRESH_MS);
+  }
+
+  async function renderLiveVehicle(id, token) {
+    var data;
+    try {
+      data = await api("/api/live/vehicles/" + encodeURIComponent(id));
+    } catch (err) {
+      if (token !== state.viewToken) return;
+      setView('<section class="card"><p><a href="#/live">&larr; ' + esc(t("live.back")) + '</a></p><div class="banner error" role="alert">' +
+        esc(err.status === 404 ? t("live.vehicle_gone") : err.message) + "</div></section>");
+      return;
+    }
+    if (token !== state.viewToken) return;
+    if (!data.available) {
+      render();
+      return;
+    }
+    var v = data.vehicle;
+    var rows = data.upcoming.map(function (u) {
+      return "<tr><td>" + esc(u.stop.name) + "</td><td>" + esc(u.scheduled ? formatClockTime(u.scheduled) : t("common.na")) + "</td><td>" +
+        esc(u.estimate ? formatClockTime(u.estimate) : "—") + '</td><td><span class="badge ' + (u.kind === "LIVE_ESTIMATE" ? "official" : "neutral") + '">' +
+        esc(t("live.kind." + u.kind)) + "</span></td></tr>";
+    }).join("");
+    setView(liveBanner(data.status) +
+      '<section class="card"><p><a href="#/live">&larr; ' + esc(t("live.back")) + "</a></p>" +
+      "<h2>" + esc(routeLabel(v.route)) + (v.headsign ? " &rarr; " + esc(v.headsign) : "") + "</h2>" +
+      "<p>" + freshnessBadge(v.freshness) + " " + esc(t("live.updated_ago", { age: ageText(v.age_seconds) })) + "</p>" +
+      '<ul class="facts"><li>' + esc(t("live.vehicle")) + ": " + esc(v.label) + "</li>" +
+      (v.current_stop ? "<li>" + esc(t("live.current_stop", { name: v.current_stop.name })) + "</li>" : "") +
+      (v.next_stop ? "<li>" + esc(t("live.next_stop", { name: v.next_stop.name })) + "</li>" : "") +
+      (v.speed_kmph !== null && v.speed_kmph !== undefined ? "<li>" + esc(t("live.speed", { n: v.speed_kmph })) + "</li>" : "") +
+      (v.progress ? "<li>" + esc(t("live.progress", { n: v.progress.stop_number, total: v.progress.stops_total })) +
+        ' <progress max="100" value="' + esc(v.progress.percent) + '" aria-hidden="true"></progress></li>' : "") +
+      "</ul>" +
+      '<div class="toolbar"><button type="button" class="secondary" data-action="rerender">' + esc(t("common.refresh")) + "</button></div>" +
+      '<div id="liveVehicleMap" class="map mt-12"></div>' +
+      "<h3>" + esc(t("live.upcoming_title")) + "</h3>" +
+      (rows ? '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("live.upcoming_title")) + '"><table><thead><tr><th>' +
+        esc(t("live.col_stop")) + "</th><th>" + esc(t("live.col_scheduled")) + "</th><th>" + esc(t("live.col_estimate")) + "</th><th></th></tr></thead><tbody>" +
+        rows + "</tbody></table></div>" : '<div class="empty">' + esc(t("live.not_matched")) + "</div>") +
+      '<p class="muted small mt-8">' + esc(t("live.estimate_note")) + "</p></section>");
+    var map = makeMap("liveVehicleMap");
+    if (map && window.L) {
+      map.setView([v.lat, v.lon], 15);
+      window.L.circleMarker([v.lat, v.lon], { radius: 9, weight: 3, color: "#1d4ed8" }).bindTooltip(esc(v.label)).addTo(state.markers);
+    }
+  }
+
+  async function loadStopLive(stopId, token) {
+    var data;
+    try {
+      data = await api("/api/live/stops/" + encodeURIComponent(stopId) + "/arrivals");
+    } catch (_) {
+      return;
+    }
+    var card = document.getElementById("stopLiveCard");
+    if (token !== state.viewToken || !card || !data.available) return;
+    card.hidden = false;
+    document.getElementById("stopLive").innerHTML = liveBanner(data.status) + (data.arrivals.length
+      ? '<ul class="list">' + data.arrivals.map(function (a) {
+        return '<li><div><div class="title">' + esc(routeLabel(a.route)) + (a.headsign ? " &rarr; " + esc(a.headsign) : "") + "</div>" +
+          '<div class="muted">' + esc(formatClockTime(a.estimate)) + " · " + esc(t("live.in_minutes", { n: fmtNum(a.minutes) })) +
+          (a.vehicle_label ? " · " + esc(a.vehicle_label) : "") + "</div></div>" +
+          '<div class="row-actions"><span class="badge official">' + esc(t("live.kind." + a.kind)) + "</span></div></li>";
+      }).join("") + "</ul>"
+      : '<div class="empty">' + esc(t("live.stop_none")) + "</div>");
+  }
+
+  // ---------------------------------------------------------------- tickets and payments
+  // Nothing is sold here until authorised ticketing and payment providers are connected. The screen says what each
+  // product needs and shows the account's history, which stays empty until then. The app never makes a ticket, a QR
+  // code or a receipt by itself, and never asks for a UPI PIN, card number, CVV or OTP.
+  var TICKET_NEEDS = ["NEEDS_TICKETING_AGREEMENT", "NEEDS_ONDC_REGISTRATION", "NEEDS_PAYMENT_GATEWAY", "NEEDS_OPERATOR_WALLET", "NEEDS_BANK_INTEGRATION"];
+
+  function rupees(paise) {
+    return "₹" + (Number(paise || 0) / 100).toFixed(2);
+  }
+
+  function ticketRow(title, available, code) {
+    return '<li><div><div class="title">' + esc(title) + "</div>" +
+      (code && TICKET_NEEDS.indexOf(code) !== -1 ? '<div class="muted">' + esc(t("tickets.needs." + code)) + "</div>" : "") + "</div>" +
+      '<div class="row-actions"><span class="badge ' + (available ? "official" : "unverified") + '">' +
+      esc(t(available ? "tickets.can_buy" : "tickets.awaiting")) + "</span></div></li>";
+  }
+
+  function sandboxBanner() {
+    return '<div class="banner demo-mode" role="alert"><strong>' + esc(t("tickets.sandbox_title")) + "</strong>" + esc(t("tickets.sandbox_body")) + "</div>";
+  }
+
+  function buyCardHtml(status, accounts) {
+    var products = status.products.filter(function (row) { return row.available; });
+    if (!products.length) return "";
+    var title = "<h2>" + esc(t(status.sandbox ? "tickets.buy_test_title" : "tickets.buy_title")) + "</h2>";
+    if (!accounts.available || !state.session) {
+      return '<section class="card">' + title + '<p class="muted">' + esc(t("tickets.buy_sign_in")) + '</p><p><a class="button-link" href="#/account">' + esc(t("account.go_sign_in")) + "</a></p></section>";
+    }
+    var count = function (name, label, value) {
+      return '<label class="field">' + esc(t(label)) + '<input name="' + name + '" type="number" min="0" max="9" step="1" value="' + value + '" required></label>';
+    };
+    return '<section class="card">' + title + '<form id="buyForm" class="form-grid">' +
+      '<label class="field">' + esc(t("tickets.product_label")) + '<select name="product">' + products.map(function (row) {
+        return '<option value="' + esc(row.product) + '">' + esc(t("tickets.product." + row.product)) + "</option>";
+      }).join("") + "</select></label>" +
+      count("adult", "tickets.adults", 1) + count("child", "tickets.children", 0) +
+      '<label class="field">' + esc(t("tickets.method_label")) + '<select name="pay_method">' + status.payments.methods.map(function (m) {
+        return '<option value="' + esc(m) + '">' + esc(t("tickets.method." + m)) + "</option>";
+      }).join("") + "</select></label>" +
+      '<div class="align-end"><button type="submit">' + esc(t("tickets.continue")) + "</button></div></form>" +
+      '<p class="muted small">' + esc(t("tickets.verify_note")) + "</p></section>";
+  }
+
+  async function renderTickets(args, token) {
+    await loadFeatures();
+    if (args[0] === "order" && args[1]) {
+      await renderOrder(args[1], token);
+      return;
+    }
+    var status;
+    try {
+      status = await api("/api/commerce/status");
+    } catch (err) {
+      if (token === state.viewToken) setView(panelError(err, "rerender"));
+      return;
+    }
+    var accounts = await loadAccountStatus();
+    if (token !== state.viewToken) return;
+    setView(
+      (status.sandbox ? sandboxBanner() : "") + buyCardHtml(status, accounts) +
+      unavailableCard("tickets.title", "tickets.body", "bus_tickets") +
+      '<section class="card"><h2>' + esc(t("tickets.status_title")) + '</h2><p class="muted">' + esc(t("tickets.status_intro")) + "</p>" +
+      '<ul class="list" id="ticketStatus">' +
+      status.products.map(function (row) { return ticketRow(t("tickets.product." + row.product), row.available, row.code); }).join("") +
+      ticketRow(t("tickets.payments"), status.payments.available, status.payments.code) +
+      ticketRow(t("tickets.wallet"), status.wallet.available, status.wallet.code) +
+      ticketRow(t("tickets.ncmc_title"), status.ncmc.available, status.ncmc.code) +
+      '</ul><p class="muted small">' + esc(t("tickets.no_secrets")) + "</p></section>" +
+      '<section class="card"><h2>' + esc(t("tickets.history_title")) + '</h2><div id="ticketHistory"></div></section>' +
+      '<section class="card"><h2>' + esc(t("tickets.where")) + "</h2>" +
+      "<p>" + esc(t("tickets.bus_channels")) + "</p><p>" + esc(t("tickets.metro_channels")) + '</p><div id="ticketLinks"></div></section>' +
+      unavailableCard("tickets.ncmc_title", "tickets.ncmc_body", "ncmc_cards")
+    );
+    var box = document.getElementById("ticketHistory");
+    if (!accounts.available) {
+      box.innerHTML = '<p class="muted">' + esc(t("tickets.history_no_accounts")) + "</p>";
+    } else if (!state.session) {
+      box.innerHTML = '<p class="muted">' + esc(t("tickets.history_sign_in")) + '</p><p><a class="button-link" href="#/account">' + esc(t("account.go_sign_in")) + "</a></p>";
+    } else {
+      await loadTicketHistory(token);
+    }
+    await fillPanel(document.getElementById("ticketLinks"), token, function () {
+      return officialLinks(["bus", "metro"]);
+    });
+  }
+
+  function orderHtml(order) {
+    var demo = order.environment === "sandbox";
+    var tickets = order.tickets.map(function (tk) {
+      return "<li>" + esc(demo ? t("tickets.demo_record", { id: tk.provider_ticket_id })
+        : t("tickets.order_ticket", { id: tk.provider_ticket_id, until: tk.valid_until ? utcText(tk.valid_until) : t("common.na") })) + "</li>";
+    }).join("");
+    var refunds = order.refunds.map(function (r) {
+      return "<li>" + esc(t("tickets.order_refund", { status: t("tickets.refund_status." + r.status), amount: rupees(r.amount_paise) })) + "</li>";
+    }).join("");
+    return '<li><div><div class="title">' + esc(t("tickets.product." + order.product)) + " · " + esc(rupees(order.amount_paise)) + "</div>" +
+      '<div class="muted">' + esc(t("tickets.order_status." + order.status)) + " · " + esc(utcText(order.created_at)) + "</div>" +
+      (tickets || refunds ? '<ul class="facts">' + tickets + refunds + "</ul>" : "") +
+      (order.refundable ? '<form id="refundForm-' + esc(order.id) + '" class="toolbar"><label class="field grow-240">' + esc(t("tickets.refund_reason")) +
+        '<input name="reason" required minlength="3" maxlength="300" autocomplete="off"></label><div class="align-end"><button type="submit" class="secondary">' +
+        esc(t("tickets.refund")) + "</button></div></form>" : "") +
+      "</div>" + '<div class="row-actions">' + (demo ? '<span class="badge alert">' + esc(t("tickets.demo_badge")) + "</span>" : "") +
+      '<a class="button secondary" href="#/tickets/order/' + esc(encodeURIComponent(order.id)) + '">' + esc(t("tickets.open")) + "</a>" +
+      (order.receipt_available ? '<button type="button" class="secondary" data-action="order-receipt" data-id="' +
+        esc(order.id) + '">' + esc(t("tickets.receipt")) + "</button>" : "") + "</div></li>";
+  }
+
+  async function loadTicketHistory(token) {
+    var box = document.getElementById("ticketHistory");
+    if (!box) return;
+    box.innerHTML = loadingInline();
+    var data;
+    try {
+      data = await api("/api/commerce/orders", { auth: true });
+    } catch (err) {
+      if (token === state.viewToken && document.getElementById("ticketHistory")) box.innerHTML = panelError(err, "rerender");
+      return;
+    }
+    if (token !== state.viewToken || !document.getElementById("ticketHistory")) return;
+    box.innerHTML = data.orders.length ? '<ul class="list">' + data.orders.map(orderHtml).join("") + "</ul>"
+      : '<div class="empty">' + esc(t("tickets.history_empty")) + "</div>";
+  }
+
+  // ---------------------------------------------------------------- one order: the return from the payment page
+  // Coming back from the provider's page or a UPI app proves nothing. The order page asks this server, which asks the
+  // payment provider server to server; only that answer (or the provider's signed webhook) marks an order paid.
+  function orderDetailHtml(order) {
+    var demo = order.environment === "sandbox";
+    var payments = order.payments.map(function (pay) {
+      return "<li>" + esc(t("tickets.transaction", { id: pay.transaction_id || pay.reference, method: t("tickets.method." + pay.method),
+        status: t("tickets.payment_status." + pay.status) })) + "</li>";
+    }).join("");
+    return (demo ? sandboxBanner() : "") +
+      '<section class="card"><p><a href="#/tickets">&larr; ' + esc(t("tickets.back")) + "</a></p>" +
+      "<h2>" + esc(t("tickets.order_title", { id: order.id })) + "</h2>" +
+      '<ul class="list" id="orderSummary">' + orderHtml(order) + "</ul>" +
+      (payments ? '<ul class="facts" id="orderPayments">' + payments + "</ul>" : "") +
+      '<div class="toolbar mt-8">' +
+      (order.checkable ? '<button type="button" data-action="order-verify" data-id="' + esc(order.id) + '">' + esc(t("tickets.check_status")) + "</button>" : "") +
+      (order.payable ? '<button type="button" data-action="order-pay" data-id="' + esc(order.id) + '" data-method="' + esc((order.payments[0] || {}).method || "UPI") + '">' + esc(t("tickets.pay_again")) + "</button>" : "") +
+      (demo ? '<a class="button secondary" href="/sandbox">' + esc(t("tickets.sandbox_console")) + "</a>" : "") +
+      '</div><p class="muted small" id="orderNote">' + esc(t("tickets.verify_note")) + "</p></section>";
+  }
+
+  async function renderOrder(id, token, skipCheck) {
+    setView(loadingCard(t("tickets.checking")));
+    var order;
+    var note = "";
+    try {
+      order = await api("/api/commerce/orders/" + encodeURIComponent(id), { auth: true });
+      if (order.checkable && !skipCheck) {
+        try {
+          order = await api("/api/commerce/orders/" + encodeURIComponent(id) + "/verify", { method: "POST", auth: true });
+        } catch (err) {
+          if (err.status !== 504) throw err;
+          note = t("tickets.timeout");
+        }
+      }
+    } catch (err) {
+      if (token === state.viewToken) setView(panelError(err, "rerender"));
+      return;
+    }
+    if (token !== state.viewToken) return;
+    setView(orderDetailHtml(order));
+    if (note) {
+      var box = document.getElementById("orderNote");
+      if (box) box.textContent = note;
+      toast(note);
+    }
+  }
+
+  function newOrderKey() {
+    var bytes = new Uint8Array(12);
+    window.crypto.getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+  }
+
+  async function goToPayment(orderId, method) {
+    var paying = await api("/api/commerce/orders/" + encodeURIComponent(orderId) + "/pay", { method: "POST", auth: true, json: { method: method } });
+    var next = paying.next_action || {};
+    // Only the provider's own page (or this server's sandbox gateway) is opened; the app never shows a payment form.
+    if (next.url && (/^https:\/\//.test(next.url) || /^\/sandbox\/pay\/[A-Za-z0-9_]+$/.test(next.url))) {
+      location.assign(next.url);
+      return;
+    }
+    location.hash = "#/tickets/order/" + encodeURIComponent(orderId);
+  }
+
+  async function submitBuy(form) {
+    var adult = Number(formValue(form, "adult")) || 0;
+    var child = Number(formValue(form, "child")) || 0;
+    if (adult + child < 1) {
+      toast(t("tickets.need_passenger"));
+      return;
+    }
+    busy(form, true);
+    try {
+      var order = await api("/api/commerce/orders", { method: "POST", auth: true, json: {
+        product: formValue(form, "product"), details: { passengers: { adult: adult, child: child } }, idempotency_key: newOrderKey()
+      } });
+      await goToPayment(order.id, formValue(form, "pay_method"));
+    } catch (err) {
+      fail(err);
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  async function verifyOrder(id, token) {
+    try {
+      await api("/api/commerce/orders/" + encodeURIComponent(id) + "/verify", { method: "POST", auth: true });
+    } catch (err) {
+      toast(err.status === 504 ? t("tickets.timeout") : err.message);
+    }
+    if (token === state.viewToken) await renderOrder(id, token, true);
+  }
+
+  async function downloadReceipt(id) {
+    var data;
+    try {
+      data = await api("/api/commerce/orders/" + encodeURIComponent(id) + "/receipt", { auth: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    await saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "receipt-" + data.receipt_number + ".json");
+  }
+
+  async function requestRefund(form, token) {
+    var id = form.id.replace("refundForm-", "");
+    try {
+      await accountRequest(form, "/api/commerce/orders/" + encodeURIComponent(id) + "/refund", "POST",
+        { reason: formValue(form, "reason").trim() }, { auth: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    toast(t("tickets.refund_sent"));
+    if (document.getElementById("orderSummary")) await renderOrder(id, token, true);
+    else await loadTicketHistory(token);
+  }
+
+  async function renderMetro(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      '<section class="card"><div class="card-head"><h2>' + esc(t("metro.title")) + "</h2>" + featureChip("metro") + "</div>" +
+      '<p class="muted">' + esc(t("metro.intro")) + "</p>" + segmentedClassification() +
+      '<div class="mt-12" id="metroLines"></div></section>' +
+      '<section class="card"><h2>' + esc(t("metro.stations")) + "</h2>" +
+      '<form id="metroSearch" class="toolbar" role="search">' +
+      '<label class="grow-240 field">' + esc(t("metro.search_label")) +
+      '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("metro.search_placeholder")) + '"></label>' +
+      '<button type="submit">' + esc(t("common.search")) + '</button></form><div id="metroStations"></div></section>' +
+      '<section class="card"><h2>' + esc(t("metro.tickets_title")) + "</h2><p>" + esc(t("tickets.metro_channels")) + "</p>" +
+      '<p><a class="button-link secondary" href="#/tickets">' + esc(t("nav.tickets")) + "</a></p></section>"
+    );
+    await fillPanel(document.getElementById("metroLines"), token, async function () {
+      var params = new URLSearchParams({ classification: state.classification, limit: "500" });
+      var data = await api("/api/routes?" + params.toString());
+      var lines = data.results.filter(function (r) {
+        return METRO_TYPES.indexOf(Number(r.route_type)) !== -1;
+      });
+      if (!lines.length) return '<div class="empty">' + esc(t("metro.no_data")) + "</div>";
+      return '<h3>' + esc(t("metro.lines")) + '</h3><ul class="list">' + lines.map(routeItem).join("") + "</ul>";
+    });
+    await loadMetroStations("", token);
+  }
+
+  async function loadMetroStations(query, token) {
+    var seq = ++state.searchToken;
+    await fillPanel(document.getElementById("metroStations"), token, async function () {
+      var params = new URLSearchParams({ classification: state.classification, q: query });
+      var data = await api("/api/metro/stations?" + params.toString());
+      return metroStationsHtml(data, query);
+    }, seq);
+  }
+
+  function metroStationsHtml(data, query) {
+    if (!data.stations.length) {
+      return '<div class="empty">' + esc(query ? t("metro.no_stations_match") : messageFor(data.message_code)) + "</div>";
+    }
+    return '<ul class="list">' + data.stations.map(function (st) {
+        var lines = st.lines.map(function (line) {
+          var colour = /^[0-9A-Fa-f]{6}$/.test(line.color || "") ? "#" + line.color : "var(--scenario)";
+          return '<span class="line-chip" data-colour="' + esc(colour) + '">' + esc(line.route_number) + "</span>";
+        }).join(" ");
+        return '<li><div><div class="title">' + esc(st.name) + '</div><div class="muted">' + lines + "</div></div>" +
+          '<div class="row-actions"><a class="button secondary" href="#/stops/' + esc(encodeURIComponent(st.id)) + '">' + esc(t("stops.departures")) + "</a></div></li>";
+      }).join("") + "</ul>";
+  }
+
+  async function renderFavourites(args, token) {
+    setView(
+      '<section class="card"><h2>' + esc(t("fav.title")) + '</h2><p class="muted">' + esc(t("fav.intro")) + "</p>" +
+      "<h3>" + esc(t("routes.saved_title")) + '</h3><div id="savedRoutes"></div>' +
+      "<h3>" + esc(t("fav.journeys_title")) + "</h3>" + savedJourneysHtml() +
+      "<h3>" + esc(t("fav.stops_title")) + "</h3>" + favouriteStopsHtml() + "</section>"
+    );
+    await loadSaved(document.getElementById("savedRoutes"), token);
+  }
+
+  function favouriteStopsHtml() {
+    var list = favouriteStops();
+    if (!list.length) return '<div class="empty">' + esc(t("fav.stops_none")) + "</div>";
+    return '<ul class="list">' + list.map(function (f) {
+      return '<li><div><div class="title">' + esc(f.name) + '</div><div class="muted">' + esc(f.gtfs) + "</div></div>" +
+        '<div class="row-actions">' + badge(f.cls) +
+        '<button type="button" class="secondary" data-action="open-fav-stop" data-gtfs="' + esc(f.gtfs) + '" data-cls="' + esc(f.cls) + '">' + esc(t("common.open")) + "</button>" +
+        '<button type="button" class="danger" data-action="unfav-stop" data-gtfs="' + esc(f.gtfs) + '" data-cls="' + esc(f.cls) + '">' + esc(t("common.remove")) + "</button></div></li>";
+    }).join("") + "</ul>";
+  }
+
+  function radio(name, value, current, labelKey) {
+    return '<label class="choice"><input type="radio" name="' + name + '" value="' + value + '"' + (current === value ? " checked" : "") + "> " + esc(t(labelKey)) + "</label>";
+  }
+
+  // ---------------------------------------------------------------- accounts
+  // A passenger's sign-in is kept on this device so it survives a reload. An editor's or administrator's sign-in stays
+  // in this page's memory only, like the admin key, and the server ends it after 12 hours.
+  var STAFF_ROLES = ["admin", "editor"];
+  var ACCOUNT_REASONS = ["ACCOUNTS_DISABLED", "NEEDS_PERSISTENT_DATABASE"];
+
+  function loadSession() {
+    var raw = storage.get(PREFIX + "session");
+    if (!raw) return null;
+    try {
+      var saved = JSON.parse(raw);
+      if (saved && typeof saved.token === "string" && saved.user && typeof saved.user.email === "string" &&
+          STAFF_ROLES.indexOf(saved.user.role) === -1 && Date.parse(saved.expires_at) > Date.now()) return saved;
+    } catch (_) {
+      /* unreadable: treated as signed out */
+    }
+    storage.set(PREFIX + "session", "");
+    return null;
+  }
+
+  function setSession(data) {
+    state.session = data && data.token ? { token: data.token, user: data.user, expires_at: data.expires_at } : null;
+    var keep = state.session && STAFF_ROLES.indexOf(state.session.user.role) === -1;
+    storage.set(PREFIX + "session", keep ? JSON.stringify(state.session) : "");
+  }
+
+  function isStaff(session) {
+    return !!(session && STAFF_ROLES.indexOf(session.user.role) !== -1);
+  }
+
+  function staffSession() {
+    return state.accounts && state.accounts.available && isStaff(state.session) ? state.session : null;
+  }
+
+  // Adds the right credential to a request. Returns "session" or "key" so a refusal can be explained.
+  function addAuth(headers, admin) {
+    if (admin) {
+      var staff = staffSession();
+      if (staff) {
+        headers.Authorization = "Bearer " + staff.token;
+        return "session";
+      }
+      if (!state.adminKey) throw new Error(t(state.accounts && state.accounts.available ? "admin.accounts_note" : "admin.key_needed"));
+      headers["X-Admin-Key"] = state.adminKey;
+      return "key";
+    }
+    if (!state.session) throw new Error(t("account.sign_in_first"));
+    headers.Authorization = "Bearer " + state.session.token;
+    return "session";
+  }
+
+  async function loadAccountStatus() {
+    if (state.accounts) return state.accounts;
+    try {
+      state.accounts = await api("/api/account/status");
+      return state.accounts;
+    } catch (_) {
+      return { available: false, reason: null };
+    }
+  }
+
+  function emailField() {
+    return '<label class="field">' + esc(t("account.email")) +
+      '<input name="email" type="email" required maxlength="254" autocomplete="email" spellcheck="false"></label>';
+  }
+
+  function passwordField(labelKey, name, autocomplete, isNew) {
+    return '<label class="field">' + esc(t(labelKey)) + '<input name="' + name + '" type="password" required maxlength="128"' +
+      (isNew ? ' minlength="10"' : "") + ' autocomplete="' + autocomplete + '">' +
+      (isNew ? '<span class="muted small">' + esc(t("account.password_hint")) + "</span>" : "") + "</label>";
+  }
+
+  function recoveryHtml(code) {
+    return '<div class="banner unverified" role="alert"><strong>' + esc(t("account.recovery_title")) + "</strong>" +
+      "<p>" + esc(t("account.recovery_keep")) + '</p><p><code class="recovery-code">' + esc(code) + "</code></p>" +
+      '<button type="button" class="secondary" data-action="account-code-done">' + esc(t("account.recovery_done")) + "</button></div>";
+  }
+
+  function journeyHash(origin, destination, modes, cls) {
+    return "#/journey/" + [origin, destination, modes, cls].map(function (x) { return encodeURIComponent(x || ""); }).join("/");
+  }
+
+  function signedOutHtml() {
+    return "<p>" + esc(t("account.guest")) + "</p>" +
+      "<h3>" + esc(t("account.sign_in")) + '</h3><form id="accountSignInForm" class="form-grid">' +
+      emailField() + passwordField("account.password", "password", "current-password", false) +
+      '<div class="align-end"><button type="submit">' + esc(t("account.sign_in")) + "</button></div></form>" +
+      '<details class="mt-12"><summary>' + esc(t("account.register")) + '</summary><form id="accountRegisterForm" class="form-grid">' +
+      emailField() + passwordField("account.password", "password", "new-password", true) +
+      '<div class="align-end"><button type="submit">' + esc(t("account.register_submit")) + "</button></div></form></details>" +
+      '<details class="mt-12"><summary>' + esc(t("account.recover")) + '</summary><form id="accountRecoverForm" class="form-grid">' +
+      emailField() + '<label class="field">' + esc(t("account.recovery_code")) +
+      '<input name="recovery_code" required minlength="8" maxlength="40" autocomplete="off" spellcheck="false"></label>' +
+      passwordField("account.password_new", "new_password", "new-password", true) +
+      '<div class="align-end"><button type="submit">' + esc(t("account.recover_submit")) + "</button></div></form></details>";
+  }
+
+  function signedInHtml(s) {
+    var until = formatter({ day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(Date.parse(s.expires_at)));
+    return "<p>" + esc(t("account.signed_in_as", { email: s.user.email })) + ' <span class="badge">' + esc(t("account.role." + s.user.role)) + "</span></p>" +
+      '<p class="muted small">' + esc(t("account.session_until", { time: until })) + "</p>" +
+      (isStaff(s) ? '<p class="muted small">' + esc(t("account.staff_memory")) + '</p><p><a class="button-link" href="#/admin">' + esc(t("nav.admin")) + "</a></p>" : "") +
+      '<div class="toolbar"><button type="button" class="secondary" data-action="account-sign-out">' + esc(t("account.sign_out")) + "</button></div></section>" +
+      '<section class="card"><h2>' + esc(t("account.journeys_title")) + '</h2><div id="accountJourneys">' + loadingInline() + "</div>" +
+      '<div class="toolbar mt-8"><button type="button" class="secondary" data-action="account-copy-journeys">' + esc(t("account.journeys_copy")) + "</button></div></section>" +
+      '<section class="card"><h2>' + esc(t("account.notify_title")) + '</h2><form id="accountNotifyForm" class="settings">' +
+      '<label class="switch"><input type="checkbox" name="service_notices"> ' + esc(t("account.notify_notices")) + "</label>" +
+      '<label class="switch"><input type="checkbox" name="upcoming_changes"> ' + esc(t("account.notify_upcoming")) + "</label>" +
+      '<p class="muted small">' + esc(t("account.notify_note")) + "</p>" +
+      '<div><button type="submit">' + esc(t("account.notify_save")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("account.data_title")) + '</h2><div class="toolbar">' +
+      '<button type="button" class="secondary" data-action="account-export">' + esc(t("account.export")) + "</button></div></section>" +
+      '<section class="card"><h2>' + esc(t("account.password_title")) + '</h2><form id="accountPasswordForm" class="form-grid">' +
+      passwordField("account.password_current", "current_password", "current-password", false) +
+      passwordField("account.password_new", "new_password", "new-password", true) +
+      '<div class="align-end"><button type="submit">' + esc(t("account.password_title")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("account.delete_title")) + "</h2><p>" + esc(t("account.delete_body")) + "</p>" +
+      '<form id="accountDeleteForm" class="form-grid">' + passwordField("account.password", "password", "current-password", false) +
+      '<div class="align-end"><button type="submit" class="danger">' + esc(t("account.delete_submit")) + "</button></div></form>";
+  }
+
+  function accountCardHtml(status) {
+    var head = '<section class="card"><div class="card-head"><h2>' + esc(t("account.title")) + "</h2>" + featureChip("accounts") + "</div>";
+    if (!status.available) {
+      var reason = ACCOUNT_REASONS.indexOf(status.reason) !== -1 ? "account.reason." + status.reason : "account.unreachable";
+      return head + "<p>" + esc(t("account.guest")) + '</p><p class="muted">' + esc(t(reason)) + "</p></section>";
+    }
+    var code = state.recoveryCode ? recoveryHtml(state.recoveryCode) : "";
+    return head + code + (state.session ? signedInHtml(state.session) : signedOutHtml()) + "</section>";
+  }
+
+  async function renderAccount(args, token) {
+    await loadFeatures();
+    var status = await loadAccountStatus();
+    if (token !== state.viewToken) return;
+    if (!status.available) setSession(null);
+    setView(
+      accountCardHtml(status) +
+      '<section class="card"><h2>' + esc(t("settings.title")) + "</h2>" +
+      '<form id="settingsForm" class="settings">' +
+      '<fieldset><legend>' + esc(t("settings.theme")) + "</legend>" +
+      radio("theme", "system", state.theme, "settings.theme_system") + radio("theme", "light", state.theme, "settings.theme_light") +
+      radio("theme", "dark", state.theme, "settings.theme_dark") + "</fieldset>" +
+      '<label class="switch"><input type="checkbox" name="lowData"' + (state.lowData ? " checked" : "") + "> " + esc(t("settings.lowdata")) + "</label>" +
+      '<p class="muted small">' + esc(t("settings.lowdata_hint")) + "</p>" +
+      '<label class="switch"><input type="checkbox" name="largeText"' + (state.largeText ? " checked" : "") + "> " + esc(t("settings.largetext")) + "</label>" +
+      '<p class="muted small">' + esc(t("settings.language_hint")) + "</p></form></section>" +
+      '<section class="card"><h2>' + esc(t("erase.title")) + "</h2><p>" + esc(t("erase.body")) + "</p>" +
+      '<div id="eraseBox"><button type="button" class="danger" data-action="erase-ask">' + esc(t("erase.button")) + "</button></div></section>"
+    );
+    if (status.available && state.session) await loadAccountDetails(token);
+  }
+
+  async function loadAccountDetails(token) {
+    var results;
+    try {
+      results = await Promise.all([api("/api/account/journeys", { auth: true }), api("/api/account/notifications", { auth: true })]);
+    } catch (err) {
+      if (token !== state.viewToken) return;
+      fail(err);
+      if (err && err.status === 401) render();
+      return;
+    }
+    if (token !== state.viewToken) return;
+    state.accountJourneys = results[0].journeys;
+    renderAccountJourneys(results[0].journeys);
+    var form = document.getElementById("accountNotifyForm");
+    if (form) {
+      form.elements.service_notices.checked = !!results[1].service_notices;
+      form.elements.upcoming_changes.checked = !!results[1].upcoming_changes;
+    }
+  }
+
+  function renderAccountJourneys(list) {
+    var box = document.getElementById("accountJourneys");
+    if (!box) return;
+    box.innerHTML = list.length ? '<ul class="list">' + list.map(function (j) {
+      return '<li><div><div class="title">' + esc(j.origin) + " &rarr; " + esc(j.destination) + '</div><div class="muted">' +
+        esc(t(JOURNEY_MODE_KEYS[j.modes] || "journey.modes_all")) + " · " + esc(t("cls." + j.classification)) + "</div></div>" +
+        '<div class="row-actions"><a class="button secondary" href="' + esc(journeyHash(j.origin, j.destination, j.modes, j.classification)) + '">' + esc(t("account.journey_plan")) + "</a>" +
+        '<button type="button" class="secondary" data-action="account-journey-remove" data-id="' + esc(j.id) + '">' + esc(t("account.journey_remove")) + "</button></div></li>";
+    }).join("") + "</ul>" : '<div class="empty">' + esc(t("account.journeys_none")) + "</div>";
+  }
+
+  function formValue(form, name) {
+    return String(new FormData(form).get(name) || "");
+  }
+
+  async function accountRequest(form, path, method, body, extra) {
+    busy(form, true);
+    try {
+      return await api(path, Object.assign({ method: method, json: body }, extra || {}));
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  async function signIn(form) {
+    var result;
+    try {
+      result = await accountRequest(form, "/api/account/sign-in", "POST",
+        { email: formValue(form, "email").trim(), password: formValue(form, "password") });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    setSession(result);
+    toast(t("account.welcome"));
+    render();
+  }
+
+  async function registerAccount(form) {
+    var email = formValue(form, "email").trim();
+    var password = formValue(form, "password");
+    var made;
+    var result;
+    try {
+      made = await accountRequest(form, "/api/account/register", "POST", { email: email, password: password });
+      result = await api("/api/account/sign-in", { method: "POST", json: { email: email, password: password } });
+    } catch (err) {
+      fail(err);
+      if (made) {
+        state.recoveryCode = made.recovery_code;
+        render();
+      }
+      return;
+    }
+    state.recoveryCode = made.recovery_code;
+    setSession(result);
+    toast(t("account.created"));
+    render();
+  }
+
+  async function recoverAccount(form) {
+    var result;
+    try {
+      result = await accountRequest(form, "/api/account/recover", "POST", {
+        email: formValue(form, "email").trim(), recovery_code: formValue(form, "recovery_code").trim(),
+        new_password: formValue(form, "new_password")
+      });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    state.recoveryCode = result.recovery_code;
+    toast(t("account.recovered"));
+    render();
+  }
+
+  async function saveNotifications(form) {
+    try {
+      await accountRequest(form, "/api/account/notifications", "PUT", {
+        service_notices: form.elements.service_notices.checked, upcoming_changes: form.elements.upcoming_changes.checked
+      }, { auth: true });
+    } catch (err) {
+      fail(err);
+      if (err && err.status === 401) render();
+      return;
+    }
+    toast(t("account.notify_saved"));
+  }
+
+  async function changePassword(form) {
+    try {
+      await accountRequest(form, "/api/account/password", "POST", {
+        current_password: formValue(form, "current_password"), new_password: formValue(form, "new_password")
+      }, { auth: true, keepSession: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    setSession(null);
+    toast(t("account.password_changed"));
+    render();
+  }
+
+  async function deleteAccount(form) {
+    try {
+      await accountRequest(form, "/api/account/delete", "POST", { password: formValue(form, "password") },
+        { auth: true, keepSession: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    setSession(null);
+    toast(t("account.deleted"));
+    render();
+  }
+
+  async function signOut() {
+    try {
+      await api("/api/account/sign-out", { method: "POST", auth: true });
+    } catch (_) {
+      /* the server may already have ended the session; this device forgets it either way */
+    }
+    setSession(null);
+    toast(t("account.signed_out"));
+    render();
+  }
+
+  async function copyJourneysToAccount(token) {
+    var have = (state.accountJourneys || []).map(function (j) {
+      return { from: j.origin, to: j.destination, modes: j.modes, cls: j.classification };
+    });
+    var copied = 0;
+    try {
+      var device = savedJourneys();
+      for (var i = 0; i < device.length; i += 1) {
+        var j = device[i];
+        if (have.some(function (h) { return sameJourney(h, j); })) continue;
+        await api("/api/account/journeys", { method: "POST", auth: true, json: {
+          origin: j.from, destination: j.to, modes: j.modes, classification: j.cls, label: (j.from + " - " + j.to).slice(0, 100)
+        } });
+        have.push(j);
+        copied += 1;
+      }
+    } catch (err) {
+      fail(err);
+    }
+    toast(t("account.journeys_copied", { count: copied }));
+    if (token === state.viewToken) await loadAccountDetails(token);
+  }
+
+  async function removeAccountJourney(id, token) {
+    try {
+      await api("/api/account/journeys/" + encodeURIComponent(id), { method: "DELETE", auth: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    if (token === state.viewToken) await loadAccountDetails(token);
+  }
+
+  async function exportAccount() {
+    var data;
+    try {
+      data = await api("/api/account/export", { auth: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    await saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "my-account-data.json");
+  }
+
+  // ---------------------------------------------------------------- administration: accounts and roles
+  var ADMIN_FULL = ["adminSources", "upcomingForm", "adminNotices", "uploadForm", "adminImports", "adminStats", "adminAudit"];
+  var ADMIN_SECTIONS = {
+    admin: ADMIN_FULL.concat(["adminUsers"]),
+    "admin-key": ADMIN_FULL,
+    editor: ["upcomingForm", "adminNotices"],
+    bootstrap: ["adminUsers"],
+  };
+
+  // What the person on this page may manage: an account's role, the key on a server without accounts, or, with
+  // accounts running and only the key, the first administrator's role.
+  function adminScope() {
+    var staff = staffSession();
+    if (staff) return staff.user.role;
+    return state.accounts && state.accounts.available ? "bootstrap" : "admin-key";
+  }
+
+  function applyAdminScope() {
+    var allowed = ADMIN_SECTIONS[adminScope()];
+    ADMIN_SECTIONS.admin.forEach(function (id) {
+      var node = document.getElementById(id);
+      var section = node && node.closest ? node.closest("section") : null;
+      if (section) section.hidden = allowed.indexOf(id) === -1;
+    });
+  }
+
+  function renderAdminUsers(users) {
+    var box = document.getElementById("adminUsers");
+    if (!box) return;
+    var me = state.session ? state.session.user.id : null;
+    box.innerHTML = users.length ? '<ul class="list">' + users.map(function (u) {
+      return '<li><div><div class="title">' + esc(u.email) + '</div><div class="muted">' + esc(t("account.role." + u.role)) +
+        (u.id === me ? " · " + esc(t("admin.user_you")) : "") + "</div></div>" +
+        '<div class="row-actions"><select id="role-' + esc(u.id) + '" aria-label="' + esc(t("admin.user_role_label", { email: u.email })) + '">' +
+        ["passenger", "editor", "admin"].map(function (r) {
+          return '<option value="' + r + '"' + (r === u.role ? " selected" : "") + ">" + esc(t("account.role." + r)) + "</option>";
+        }).join("") + "</select>" +
+        '<button type="button" class="secondary" data-action="user-role" data-id="' + esc(u.id) + '">' + esc(t("admin.user_role_save")) + "</button></div></li>";
+    }).join("") + "</ul>" : '<div class="empty">' + esc(t("admin.users_none")) + "</div>";
+  }
+
+  async function changeRole(id, token) {
+    var select = document.getElementById("role-" + id);
+    if (!select) return;
+    try {
+      await api("/api/admin/users/" + encodeURIComponent(id) + "/role", { method: "PUT", admin: true, json: { role: select.value } });
+    } catch (err) {
+      adminFailure(err, token);
+      return;
+    }
+    toast(t("admin.user_role_saved"));
+    if (state.session && String(state.session.user.id) === String(id)) {
+      setSession(null);
+      render();
+      return;
+    }
+    try {
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    }
+  }
+
+  // Erasure: the server deletes everything linked to this device's key; this browser forgets its lists and its key.
+  function askErase() {
+    var box = document.getElementById("eraseBox");
+    if (!box) return;
+    box.innerHTML = '<p class="banner error" role="alert">' + esc(t("erase.confirm")) + "</p>" +
+      '<div class="toolbar"><button type="button" class="danger" data-action="erase-do">' + esc(t("erase.yes")) + "</button>" +
+      '<button type="button" class="secondary" data-action="erase-cancel">' + esc(t("erase.no")) + "</button></div>";
+  }
+
+  async function eraseMyData() {
+    try {
+      await api("/api/my-data", { method: "DELETE" });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    storage.set(PREFIX + "favStops", "[]");
+    storage.set(PREFIX + "favJourneys", "[]");
+    storage.set(PREFIX + "recent", "[]");
+    storage.set(PREFIX + "clientKey", "");
+    memoryClientKey = "";
+    toast(t("erase.done"));
+    render();
+  }
+
+  async function renderMore(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView(
+      '<section class="card sos-card" id="svc-sos"><h2>' + esc(t("sos.title")) + "</h2><p>" + esc(t("sos.body")) + "</p>" +
+      '<p><a class="button-link danger-link" href="tel:112">' + esc(t("sos.call")) + "</a></p></section>" +
+      '<section class="card"><h2>' + esc(t("more.official")) + '</h2><div id="moreLinks"></div></section>' +
+      '<section class="card"><h2>' + esc(t("more.tools")) + '</h2><ul class="list">' +
+      [["#/assistant", "nav.assistant"], ["#/upcoming", "nav.upcoming"], ["#/providers", "nav.providers"], ["#/routes", "nav.routes"], ["#/stops", "nav.stops"], ["#/scenarios", "nav.scenarios"], ["#/compare", "nav.compare"], ["#/sources", "nav.sources"], ["#/admin", "nav.admin"]]
+        .map(function (pair) {
+          return '<li><a href="' + pair[0] + '">' + esc(t(pair[1])) + "</a></li>";
+        }).join("") + "</ul></section>" +
+      '<section class="card"><h2>' + esc(t("more.status")) + '</h2><p class="muted">' + esc(t("more.status_intro")) + "</p>" + featureTable() + "</section>" +
+      '<section class="card"><h2>' + esc(t("more.about")) + "</h2><p>" + esc(t("app.disclaimer")) + "</p>" +
+      '<p class="muted">' + esc(t("more.version", { version: state.version || "" })) + "</p></section>"
+    );
+    await fillPanel(document.getElementById("moreLinks"), token, function () {
+      return officialLinks(null);
+    });
+    if (args[0]) {
+      var target = document.getElementById("svc-" + args[0]);
+      if (target && target.scrollIntoView) target.scrollIntoView({ block: "start" });
+    }
+  }
+
+  function featureTable() {
+    var features = state.features || {};
+    var ids = Object.keys(features);
+    if (!ids.length) return '<div class="empty">' + esc(t("common.na")) + "</div>";
+    return '<ul class="list feature-list">' + ids.map(function (id) {
+      return '<li><div><div class="title">' + esc(t("feature.name." + id)) + "</div>" +
+        (features[id].reason ? '<div class="muted small">' + esc(featureReason(id)) + "</div>" : "") + "</div>" + featureChip(id) + "</li>";
+    }).join("") + "</ul>";
+  }
+
+  // ---------------------------------------------------------------- settings: theme, low data, large text
+  function applySettings() {
+    var root = document.documentElement;
+    if (state.theme === "light" || state.theme === "dark") root.setAttribute("data-theme", state.theme);
+    else root.removeAttribute("data-theme");
+    root.classList.toggle("large-text", !!state.largeText);
+  }
+
+  function loadSettings() {
+    var theme = storage.get(PREFIX + "theme");
+    state.theme = theme === "light" || theme === "dark" ? theme : "system";
+    var low = storage.get(PREFIX + "lowData");
+    var saveData = !!(navigator.connection && navigator.connection.saveData);
+    state.lowData = low === null ? saveData : low === "1";
+    state.largeText = storage.get(PREFIX + "largeText") === "1";
+    applySettings();
+  }
+
+  function saveSetting(target) {
+    if (target.name === "theme") {
+      state.theme = target.value === "light" || target.value === "dark" ? target.value : "system";
+      storage.set(PREFIX + "theme", state.theme);
+    } else if (target.name === "lowData") {
+      state.lowData = !!target.checked;
+      storage.set(PREFIX + "lowData", state.lowData ? "1" : "0");
+    } else if (target.name === "largeText") {
+      state.largeText = !!target.checked;
+      storage.set(PREFIX + "largeText", state.largeText ? "1" : "0");
+    } else {
+      return;
+    }
+    applySettings();
+    toast(t("settings.saved"));
+  }
+
+  function hideSplash() {
+    var splash = document.getElementById("splash");
+    if (!splash || splash.classList.contains("done")) return;
+    var wait = Math.max(0, 900 - (Date.now() - startedAt));
+    setTimeout(function () {
+      splash.classList.add("done");
+      setTimeout(function () {
+        splash.hidden = true;
+      }, 450);
+    }, wait);
+  }
+
+  // ---------------------------------------------------------------- upcoming transport (information only)
+  var PROJECT_CHIP = { OPERATING: "available", ANNOUNCED: "planned", PLANNED: "planned", UNDER_CONSTRUCTION: "planned", DELAYED: "no_data", AWAITING_CONFIRMATION: "no_data" };
+
+  function historyLine(change) {
+    var c = change.changes || {};
+    var what = c.created ? t("upcoming.history_created")
+      : c.status ? t("upcoming.history_status", { from: t("upcoming.status." + c.status[0]), to: t("upcoming.status." + c.status[1]) })
+      : t("upcoming.history_details");
+    return "<li>" + esc(formatCalendarDate(String(change.at || "").slice(0, 10))) + ": " + esc(what) + ". " + esc(change.reason || "") + "</li>";
+  }
+
+  function projectItem(p) {
+    var chip = PROJECT_CHIP[p.status] || "unavailable";
+    var mode = MODES.indexOf(p.mode) !== -1 ? p.mode : "other";
+    var dates = [];
+    if (p.announced_on) dates.push(t("upcoming.announced", { date: formatPartialDate(p.announced_on) }));
+    if (p.status === "OPERATING" && p.opened_on) dates.push(t("upcoming.opened", { date: formatCalendarDate(p.opened_on) }));
+    // An expected start is shown only when it comes from an official announcement.
+    if (p.expected_start && p.official_announcement) dates.push(t("upcoming.expected", { text: formatPartialDate(p.expected_start) }));
+    var links = (p.sources || []).map(function (s) {
+      var href = safeHref(s.url);
+      return href ? '<li><a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title) + "</a></li>" : "";
+    }).join("");
+    var history = p.history || [];
+    return '<li class="project"><div><div class="title">' + esc(p.name) + "</div>" +
+      '<div class="muted small"><span class="mode-tag">' + esc(t("mode." + mode)) + "</span> " +
+      '<span class="mode-tag">' + esc(t("upcoming.type." + p.transport_type)) + "</span> " +
+      "<strong>" + esc(t("upcoming.kind." + p.source_kind)) + "</strong></div>" +
+      (p.location ? '<div class="small">' + esc(t("upcoming.location", { text: p.location })) + "</div>" : "") +
+      "<p>" + esc(p.announcement || "") + "</p>" +
+      (dates.length ? '<div class="small">' + esc(dates.join(" · ")) + "</div>" : "") +
+      '<div class="muted small">' + esc(t("upcoming.sources")) + '</div><ul class="plain-links">' + links + "</ul>" +
+      '<div class="muted small">' + esc(t("upcoming.verified", { date: formatCalendarDate(p.verified_on), note: p.note || "" })) + "</div>" +
+      (history.length ? '<details class="small"><summary>' + esc(t("upcoming.history", { count: history.length })) + "</summary><ul>" + history.map(historyLine).join("") + "</ul></details>" : "") +
+      "</div>" +
+      '<span class="chip state-' + chip + '">' + esc(t("upcoming.status." + p.status)) + "</span></li>";
+  }
+
+  async function renderUpcoming(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView('<section class="card"><div class="card-head"><h2>' + esc(t("upcoming.title")) + "</h2>" + featureChip("upcoming_transport") + "</div>" +
+      '<p class="muted">' + esc(t("upcoming.intro")) + '</p><div id="upcomingList"></div></section>');
+    await fillPanel(document.getElementById("upcomingList"), token, async function () {
+      var data = await api("/api/upcoming");
+      return '<p class="notice" role="note">' + esc(t("upcoming.note")) + "</p>" +
+        '<ul class="list project-list">' + data.projects.map(projectItem).join("") + "</ul>" +
+        '<p class="muted small">' + esc(t("more.checked", { date: formatCalendarDate(data.checked) })) + "</p>";
+    });
+  }
+
+  // ---------------------------------------------------------------- travel assistant (rule-based)
+  // The server only says which of the app's own requests answers the question; the answer shown is that request's
+  // result, with its classification and source. Nothing here is written by a language model.
+  var ASSIST_EXAMPLES = ["Demo Central to Demo Junction", "Demo Lake View to Demo Metro Hub", "route DEMO-1", "metro stations", "stops near me", "When will my bus arrive?"];
+
+  async function renderAssistant(args, token) {
+    await loadFeatures();
+    if (token !== state.viewToken) return;
+    setView('<section class="card"><div class="card-head"><h2>' + esc(t("assist.title")) + "</h2>" + featureChip("ai_assistant") + "</div>" +
+      '<p class="muted">' + esc(t("assist.intro")) + "</p>" +
+      '<form id="assistForm" class="toolbar" role="search">' +
+      '<label class="grow-280 field">' + esc(t("assist.label")) +
+      '<input name="q" type="search" required maxlength="200" autocomplete="off" placeholder="' + esc(t("assist.placeholder")) + '"></label>' +
+      '<button type="submit">' + esc(t("assist.ask")) + "</button></form>" +
+      '<p class="muted small">' + esc(t("assist.english_only")) + "</p>" +
+      '<div class="chips" aria-label="' + esc(t("assist.examples")) + '">' + ASSIST_EXAMPLES.map(function (q) {
+        return '<button type="button" class="chip-button" data-action="assist-example" data-q="' + esc(q) + '">' + esc(q) + "</button>";
+      }).join(" ") + "</div>" +
+      segmentedClassification() +
+      '<div class="mt-12" id="assistAnswer" aria-live="polite"></div></section>');
+  }
+
+  function assistLink(href, key) {
+    return '<p><a class="button-link secondary" href="' + href + '">' + esc(t(key)) + "</a></p>";
+  }
+
+  async function assistAnswer(intent, params) {
+    var cls = state.classification;
+    switch (intent) {
+      case "journey": {
+        var data = await api("/api/plan?" + new URLSearchParams({ origin: params.origin, destination: params.destination, classification: cls, modes: params.modes || "all" }).toString());
+        return "<p>" + esc(t("assist.journey_intro", { from: params.origin, to: params.destination })) + "</p>" + journeyHtml(data);
+      }
+      case "route": {
+        var routes = await api("/api/routes?" + new URLSearchParams({ classification: cls, q: params.q, limit: "20" }).toString());
+        return "<p>" + esc(t("assist.route_intro", { q: params.q })) + "</p>" + routeListHtml(routes);
+      }
+      case "stop": {
+        var stops = await api("/api/stops?" + new URLSearchParams({ classification: cls, q: params.q, limit: "20" }).toString());
+        return "<p>" + esc(t("assist.stop_intro", { q: params.q })) + "</p>" + stopListHtml(stops.results, false);
+      }
+      case "metro": {
+        var stations = await api("/api/metro/stations?" + new URLSearchParams({ classification: cls, q: params.q || "" }).toString());
+        return "<p>" + esc(t("assist.metro_intro")) + "</p>" + metroStationsHtml(stations, params.q || "");
+      }
+      case "nearby":
+        return "<p>" + esc(t("assist.nearby")) + '</p><p><button type="button" data-action="home-nearby">' + esc(t("home.near_me")) + "</button></p>";
+      case "live":
+        return '<p class="notice" role="note">' + esc(t("assist.live")) + "</p>" + assistLink("#/live", "nav.live");
+      case "tickets":
+        return '<p class="notice" role="note">' + esc(t("assist.tickets")) + "</p>" + assistLink("#/tickets", "nav.tickets");
+      case "emergency":
+        return '<p class="notice" role="alert">' + esc(t("assist.emergency")) + '</p><p><a class="button-link danger-link" href="tel:112">' + esc(t("sos.call")) + "</a></p>";
+      default:
+        return "<p>" + esc(t("assist.help")) + "</p>";
+    }
+  }
+
+  async function submitAssist(question, token) {
+    var box = document.getElementById("assistAnswer");
+    if (!box || !question) return;
+    var seq = ++state.searchToken;
+    box.innerHTML = loadingInline();
+    try {
+      var parsed = await api("/api/assistant?" + new URLSearchParams({ q: question }).toString());
+      var html = await assistAnswer(parsed.intent, parsed.params || {});
+      if (seq !== state.searchToken || token !== state.viewToken || !box.isConnected) return;
+      box.innerHTML = '<p class="muted small">' + esc(t("assist.you_asked", { q: question })) + "</p>" + html +
+        '<p class="muted small">' + esc(t("assist.footer")) + "</p>";
+    } catch (err) {
+      if (seq === state.searchToken && token === state.viewToken && box.isConnected) box.innerHTML = panelError(err, "rerender");
+    }
+  }
+
+  // ---------------------------------------------------------------- data and providers
+  var FEED_CHIP = { CURRENT: "available", EXPIRED: "unavailable", NOT_STARTED: "no_data", UNKNOWN_DATES: "no_data" };
+  var INTEGRATION_CHIP = { CONNECTED: "available", NOT_CONNECTED: "no_data", BLOCKED: "unavailable" };
+
+  function feedItem(f) {
+    var coverage = f.feed_start_date && f.feed_end_date
+      ? t("providers.coverage", { from: formatCalendarDate(f.feed_start_date), to: formatCalendarDate(f.feed_end_date) }) : "";
+    return '<li><div><div class="title">' + esc(f.source) + " " + badge(f.classification) + "</div>" +
+      '<div class="muted small">' + esc(coverage) + (f.expires_soon ? " · " + esc(t("providers.expires_soon")) : "") + "</div>" +
+      (f.demo ? '<div class="muted small">' + esc(t("providers.demo_feed")) + "</div>" : "") +
+      (f.community ? '<div class="muted small">' + esc(t("providers.community_feed", { licence: f.license || "" })) + "</div>" : "") + "</div>" +
+      '<span class="chip state-' + (FEED_CHIP[f.state] || "no_data") + '">' + esc(t("providers.feed_state." + f.state)) + "</span></li>";
+  }
+
+  function providerItem(p) {
+    var href = safeHref(p.url);
+    var updated = !p.loads_data ? "" : p.last_successful_update ? t("providers.last_update", { date: utcText(p.last_successful_update) }) : t("providers.never");
+    return '<li><div><div class="title">' + esc(p.provider) + "</div>" +
+      '<div class="muted">' + esc(p.dataset) + "</div>" +
+      '<div class="muted small">' + esc(t("providers.licence", { text: p.licence })) + "</div>" +
+      '<div class="muted small">' + esc(t("providers.permission." + p.permission)) + (updated ? " · " + esc(updated) : "") + "</div>" +
+      '<div class="small">' + esc(p.limitations) + "</div>" +
+      (href ? '<div class="small"><a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(t("more.open_site")) + "</a></div>" : "") + "</div>" +
+      '<span class="chip state-' + (INTEGRATION_CHIP[p.integration] || "no_data") + '">' + esc(t("providers.integration." + p.integration)) + "</span></li>";
+  }
+
+  function integrationItem(i) {
+    var href = safeHref(i.official_url);
+    return '<li><div><div class="title">' + esc(t("integ.cap." + i.capability)) + "</div>" +
+      '<div class="muted small">' + esc(t("providers.needs", { text: i.needs })) + "</div>" +
+      (href ? '<div class="small"><a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(t("more.open_site")) + "</a></div>" : "") + "</div>" +
+      '<span class="chip state-unavailable">' + esc(t("providers.awaiting")) + "</span></li>";
+  }
+
+  async function renderProviders(args, token) {
+    setView('<section class="card"><h2>' + esc(t("providers.feeds")) + '</h2><div id="feedStatus"></div></section>' +
+      '<section class="card"><h2>' + esc(t("providers.integrations_title")) + '</h2><div id="integrationList"></div></section>' +
+      '<section class="card"><h2>' + esc(t("providers.list_title")) + '</h2><p class="muted">' + esc(t("providers.intro")) + '</p><div id="providerList"></div></section>');
+    await Promise.all([
+      fillPanel(document.getElementById("feedStatus"), token, async function () {
+        var data = await api("/api/data-status");
+        var html = '<p class="notice" role="note">' + esc(t("providers.no_live")) + "</p>";
+        if (data.demo_only) html += '<div class="banner unverified">' + esc(t("providers.demo_only")) + "</div>";
+        if (!data.feeds.length) return html + '<div class="empty">' + esc(t("providers.no_feeds")) + "</div>";
+        return html + '<ul class="list">' + data.feeds.map(feedItem).join("") + "</ul>";
+      }),
+      fillPanel(document.getElementById("integrationList"), token, async function () {
+        var data = await api("/api/integrations");
+        return '<ul class="list">' + data.integrations.map(integrationItem).join("") + "</ul>";
+      }),
+      fillPanel(document.getElementById("providerList"), token, async function () {
+        var data = await api("/api/providers");
+        return '<ul class="list">' + data.providers.map(providerItem).join("") + "</ul>" +
+          '<p class="muted small">' + esc(t("more.checked", { date: formatCalendarDate(data.checked) })) + "</p>";
+      })
+    ]);
+  }
+
   var ROUTES = {
+    home: renderHome,
+    nearby: renderNearby,
+    live: renderLive,
+    tickets: renderTickets,
+    metro: renderMetro,
+    favourites: renderFavourites,
+    account: renderAccount,
+    more: renderMore,
+    upcoming: renderUpcoming,
+    assistant: renderAssistant,
+    providers: renderProviders,
     routes: renderRoutes,
     stops: renderStops,
     journey: renderJourney,
@@ -2122,6 +4275,28 @@
       case "cls":
         setClassification(node.getAttribute("data-cls"));
         break;
+      case "cls-search":
+        state.pendingQuery = node.getAttribute("data-q") || "";
+        setClassification(node.getAttribute("data-cls"));
+        break;
+      case "recent":
+        state.pendingQuery = node.getAttribute("data-q") || "";
+        location.hash = node.getAttribute("data-kind") === "stops" ? "#/stops" : "#/routes";
+        break;
+      case "recent-clear":
+        storage.set(PREFIX + "recent", "[]");
+        toast(t("recent.cleared"));
+        render();
+        break;
+      case "fav-stop":
+        setFavouriteStop(node, true);
+        break;
+      case "unfav-stop":
+        setFavouriteStop(node, false);
+        break;
+      case "open-fav-stop":
+        openFavouriteStop(node);
+        break;
       case "tt-load":
         loadTimetable(id, token);
         break;
@@ -2188,6 +4363,107 @@
       case "admin-key-clear":
         forgetAdminKey();
         break;
+      case "assist-example": {
+        var assistForm = document.getElementById("assistForm");
+        if (assistForm) assistForm.elements.q.value = node.getAttribute("data-q") || "";
+        submitAssist(node.getAttribute("data-q") || "", token);
+        break;
+      }
+      case "save-journey":
+        setSavedJourney(node, true);
+        break;
+      case "unfav-journey":
+        setSavedJourney(node, false);
+        break;
+      case "plan-fav-journey":
+        planSavedJourney(node);
+        break;
+      case "quick-dest":
+        useClassification(node.getAttribute("data-cls"));
+        state.pendingJourney = { from: "", to: node.getAttribute("data-name") || "", modes: "metro" };
+        if (location.hash === "#/journey") render();
+        else location.hash = "#/journey";
+        break;
+      case "map-pick":
+        toggleMapPicker(node);
+        break;
+      case "map-centre":
+        pickAtCentre();
+        break;
+      case "pick-origin":
+        pickPlace("origin", node.getAttribute("data-name"));
+        break;
+      case "pick-destination":
+        pickPlace("destination", node.getAttribute("data-name"));
+        break;
+      case "swap-journey": {
+        var jf = document.getElementById("journeyForm");
+        if (jf) {
+          var before = jf.elements.origin.value;
+          jf.elements.origin.value = jf.elements.destination.value;
+          jf.elements.destination.value = before;
+          jf.elements.origin.focus();
+        }
+        break;
+      }
+      case "locate-origin":
+        locateOrigin(node);
+        break;
+      case "share-journey":
+        shareJourney(node);
+        break;
+      case "notice-withdraw":
+        withdrawNotice(node);
+        break;
+      case "notice-withdraw-cancel": {
+        var withdrawForm = document.getElementById("noticeWithdrawForm");
+        if (withdrawForm) withdrawForm.hidden = true;
+        break;
+      }
+      case "home-nearby":
+        state.autoNearby = true;
+        location.hash = "#/nearby";
+        break;
+      case "show-map":
+        showHomeMap();
+        break;
+      case "erase-ask":
+        askErase();
+        break;
+      case "account-sign-out":
+        signOut();
+        break;
+      case "account-code-done":
+        state.recoveryCode = "";
+        render();
+        break;
+      case "account-copy-journeys":
+        copyJourneysToAccount(token);
+        break;
+      case "account-journey-remove":
+        removeAccountJourney(id, token);
+        break;
+      case "account-export":
+        exportAccount();
+        break;
+      case "user-role":
+        changeRole(id, token);
+        break;
+      case "order-receipt":
+        downloadReceipt(id);
+        break;
+      case "order-verify":
+        verifyOrder(id, token);
+        break;
+      case "order-pay":
+        goToPayment(id, node.getAttribute("data-method") || "UPI").catch(fail);
+        break;
+      case "erase-cancel":
+        render();
+        break;
+      case "erase-do":
+        eraseMyData();
+        break;
       default:
         break;
     }
@@ -2206,13 +4482,21 @@
     var handled = true;
     switch (form.id) {
       case "routeSearch":
+        addRecent("routes", String(form.elements.q.value || "").trim());
         loadRouteResults(String(form.elements.q.value || "").trim(), document.getElementById("routeResults"), token);
         break;
       case "stopSearch":
+        addRecent("stops", String(form.elements.q.value || "").trim());
         loadStops(String(form.elements.q.value || "").trim(), token);
+        break;
+      case "metroSearch":
+        loadMetroStations(String(form.elements.q.value || "").trim(), token);
         break;
       case "journeyForm":
         submitJourney(form, token);
+        break;
+      case "assistForm":
+        submitAssist(String(form.elements.q.value || "").trim(), token);
         break;
       case "scenarioForm":
         submitScenario(form, token);
@@ -2223,14 +4507,56 @@
       case "sourceForm":
         submitSource(form, token);
         break;
+      case "upcomingForm":
+        submitUpcoming(form, token);
+        break;
+      case "noticeForm":
+        submitNotice(form, token);
+        break;
+      case "noticeWithdrawForm":
+        submitNoticeWithdrawal(form, token);
+        break;
       case "uploadForm":
         submitUpload(form, token);
         break;
       case "adminKeyForm":
         saveAdminKey(form.elements.key);
         break;
+      case "buyForm":
+        submitBuy(form);
+        break;
+      case "liveFilter":
+        state.liveRoute = String(form.elements.route.value || "").trim().slice(0, 40);
+        render();
+        break;
+      case "accountSignInForm":
+        signIn(form);
+        break;
+      case "accountRegisterForm":
+        registerAccount(form);
+        break;
+      case "accountRecoverForm":
+        recoverAccount(form);
+        break;
+      case "accountNotifyForm":
+        saveNotifications(form);
+        break;
+      case "accountPasswordForm":
+        changePassword(form);
+        break;
+      case "accountDeleteForm":
+        deleteAccount(form);
+        break;
+      case "homeSearch":
+        state.pendingQuery = String(form.elements.q.value || "").trim();
+        addRecent(event.submitter && event.submitter.value === "stops" ? "stops" : "routes", state.pendingQuery);
+        location.hash = event.submitter && event.submitter.value === "stops" ? "#/stops" : "#/routes";
+        break;
+      case "settingsForm":
+        break;
       default:
-        handled = false;
+        if (form.id.indexOf("refundForm-") === 0) requestRefund(form, token);
+        else handled = false;
     }
     if (handled) event.preventDefault();
   });
@@ -2243,7 +4569,11 @@
   el.view.addEventListener("change", function (event) {
     var target = event.target;
     if (!target) return;
-    if (target.id === "scnYearFilter") {
+    if (target.form && target.form.id === "settingsForm") {
+      saveSetting(target);
+    } else if (target.id === "upcomingEntry") {
+      fillUpcomingForm(target.form);
+    } else if (target.id === "scnYearFilter") {
       loadScenarioList(document.getElementById("scnList"), state.viewToken);
     } else if (target.name === "when" && target.form && target.form.elements.date) {
       // Leave now is the default; the date is used only when "On a date" is chosen.
@@ -2291,6 +4621,7 @@
   // ---------------------------------------------------------------- startup
   function init() {
     state.lang = pickInitialLanguage();
+    loadSettings();
     populateLanguages();
     var savedYear = Number(storage.get(PREFIX + "year"));
     if (PLANNING_YEARS.indexOf(savedYear) !== -1) state.year = savedYear;
@@ -2299,6 +4630,7 @@
     if (savedClass === "OFFICIAL_VERIFIED" || savedClass === "UNVERIFIED_FEED") state.classification = savedClass;
     setLanguage(state.lang);
     syncOnlineState();
+    loadFeatures();
     // The skip link moves focus to the page content without changing the address. Following it as a plain link
     // would change the route, and the visitor would lose the page they were on.
     var skip = document.querySelector(".skip-link");
@@ -2310,7 +4642,8 @@
         main.focus();
       });
     }
-    if (!location.hash) history.replaceState(null, "", "#/routes");
+    state.session = loadSession();
+    if (!location.hash) history.replaceState(null, "", "#/home");
     setView(loadingCard());
     // Dates come from the server clock, so the first render waits for it (or for its failure).
     loadClock().then(function () {

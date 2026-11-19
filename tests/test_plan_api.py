@@ -121,7 +121,7 @@ def test_planning_now_uses_the_service_clock_and_says_so(client: TestClient):
 
 def test_the_api_states_that_live_positions_are_not_available(client: TestClient):
     body = client.get("/api/meta").json()
-    assert body["version"] == "3.0.0"
+    assert body["version"] == "4.0.0-beta.1"
     assert body["live_positions_available"] is False
     assert "No verified real-time feed" in body["live_positions_note"]
     assert "Not affiliated with" in body["affiliation"]

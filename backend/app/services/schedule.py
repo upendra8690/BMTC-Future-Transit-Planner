@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from .. import clock
+from .. import clock, demo
 from ..models import (
     CLASS_OFFICIAL,
     STATUS_COMPLETED,
@@ -55,12 +55,23 @@ def contains_pattern(text: str) -> str:
 def fold_column(session: Session, column: Any) -> Any:
     """A case- and form-insensitive view of a text column, for comparing with fold() output.
 
-    SQLite uses the bmtc_fold function registered on each connection. Other databases fall back to lower(), which
-    folds ASCII only; PostgreSQL is not tested in this release.
+    SQLite uses the bmtc_fold function registered on each connection. PostgreSQL uses lower(), which folds letter
+    case (including non-ASCII letters) but not accents; the CI PostgreSQL job checks searches on the real Metro names.
     """
     if session.get_bind().dialect.name == "sqlite":
         return func.bmtc_fold(column)
     return func.lower(column)
+
+
+def name_match(session: Session, term: str, import_ids: list[int]) -> Any:
+    """Condition on Stop: the stops named exactly as the folded term, when any exists in these imports; otherwise the
+    stops whose names contain it. So "Jayanagar" finds Jayanagar and not Vijayanagar, while "jaya" still finds both.
+    """
+    folded = fold_column(session, Stop.name)
+    exact = folded == term
+    if session.scalar(select(Stop.id).where(Stop.import_id.in_(import_ids), exact).limit(1)) is not None:
+        return exact
+    return folded.like(contains_pattern(term), escape=LIKE_ESCAPE)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -97,6 +108,7 @@ def eligible_import_ids(
         GtfsImport.classification == classification,
         GtfsImport.status == STATUS_COMPLETED,
         GtfsImport.is_active.is_(True),
+        demo.served_imports(),
     )
     if year is not None:
         stmt = stmt.where(
@@ -137,6 +149,7 @@ def year_coverage(
             GtfsImport.classification == classification,
             GtfsImport.status == STATUS_COMPLETED,
             GtfsImport.is_active.is_(True),
+            demo.served_imports(),
             GtfsImport.feed_start_date <= year_end,
             GtfsImport.feed_end_date >= year_start,
         )
@@ -195,7 +208,7 @@ def service_zone(session: Session, default_name: str) -> tuple[ZoneInfo, str]:
     name = session.scalar(
         select(Agency.timezone)
         .join(GtfsImport, GtfsImport.id == Agency.import_id)
-        .where(GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True))
+        .where(GtfsImport.status == STATUS_COMPLETED, GtfsImport.is_active.is_(True), demo.served_imports())
         .order_by(GtfsImport.id.desc(), Agency.id)
         .limit(1)
     )
@@ -212,6 +225,7 @@ def feed_status(session: Session, classification: str, today: dt.date) -> dict[s
             GtfsImport.classification == classification,
             GtfsImport.status == STATUS_COMPLETED,
             GtfsImport.is_active.is_(True),
+            demo.served_imports(),
         )
     ).all()
     if not rows:
@@ -341,6 +355,11 @@ def stop_dict(stop: Stop, classification: str) -> dict[str, Any]:
     }
 
 
+# GTFS location_type: 0 stop or platform, 1 station. Entrances (2), generic nodes (3) and boarding areas (4) are not
+# places a journey starts from, so "near me" never lists them.
+BOARDING_LOCATION_TYPES = (0, 1)
+
+
 def nearby_stops(
     session: Session, classification: str, *, lat: float, lon: float, radius_m: int, limit: int
 ) -> list[dict[str, Any]]:
@@ -353,21 +372,36 @@ def nearby_stops(
     candidates = session.scalars(
         select(Stop).where(
             Stop.import_id.in_(import_ids),
+            Stop.location_type.in_(BOARDING_LOCATION_TYPES),
             Stop.lat.is_not(None),
             Stop.lon.is_not(None),
             Stop.lat.between(lat - dlat, lat + dlat),
             Stop.lon.between(lon - dlon, lon + dlon),
         )
     ).all()
-    scored = []
+    # A station can appear as the station itself and as each of its platforms, all with one name. It is listed once,
+    # at its nearest point, and represented by a platform (which has departures) when there is one.
+    places: dict[tuple[int, str], dict[str, Any]] = {}
     for stop in candidates:
         distance = haversine_km(lat, lon, stop.lat, stop.lon) * 1000
-        if distance <= radius_m:
-            item = stop_dict(stop, classification)
-            item["distance_m"] = round(distance)
-            scored.append(item)
-    scored.sort(key=lambda item: item["distance_m"])
-    return scored[:limit]
+        if distance > radius_m:
+            continue
+        key = (stop.import_id, fold(stop.name))
+        rank = (0 if stop.location_type == 0 else 1, distance)
+        place = places.get(key)
+        if place is None:
+            places[key] = {"stop": stop, "rank": rank, "distance": distance}
+            continue
+        place["distance"] = min(place["distance"], distance)
+        if rank < place["rank"]:
+            place["stop"], place["rank"] = stop, rank
+    ordered = sorted(places.values(), key=lambda place: place["distance"])[:limit]
+    results = []
+    for place in ordered:
+        item = stop_dict(place["stop"], classification)
+        item["distance_m"] = round(place["distance"])
+        results.append(item)
+    return results
 
 
 def route_detail(session: Session, route: Route, classification: str) -> dict[str, Any]:
@@ -595,8 +629,8 @@ def direct_journeys(
         result["message_code"] = _no_data_code(classification)
         return result
 
-    origin_term = contains_pattern(origin_key)
-    destination_term = contains_pattern(destination_key)
+    origin_match = name_match(session, origin_key, import_ids)
+    destination_match = name_match(session, destination_key, import_ids)
     found: list[tuple[dt.datetime, dict[str, Any]]] = []
     o_stop = aliased(StopTime)
     d_stop = aliased(StopTime)
@@ -606,10 +640,8 @@ def direct_journeys(
     for import_id in import_ids:
         zone = import_zone(session, import_id)
         days = [on_date] if now is None else clock.candidate_service_dates(zone, now)
-        origin_ids = list(session.scalars(select(Stop.id).where(
-            Stop.import_id == import_id, fold_column(session, Stop.name).like(origin_term, escape=LIKE_ESCAPE))))
-        destination_ids = list(session.scalars(select(Stop.id).where(
-            Stop.import_id == import_id, fold_column(session, Stop.name).like(destination_term, escape=LIKE_ESCAPE))))
+        origin_ids = list(session.scalars(select(Stop.id).where(Stop.import_id == import_id, origin_match)))
+        destination_ids = list(session.scalars(select(Stop.id).where(Stop.import_id == import_id, destination_match)))
         if not origin_ids or not destination_ids:
             continue
         for day in days:
@@ -752,3 +784,77 @@ def database_counts(session: Session) -> dict[str, int]:
         "scenarios": session.scalar(select(func.count(Scenario.id))) or 0,
         "audit_entries": session.scalar(select(func.count(AuditLog.id))) or 0,
     }
+
+
+# ---------------------------------------------------------------- 4.0: routes at a stop, Metro stations
+
+METRO_ROUTE_TYPES = (1, 400, 401, 402, 403, 404, 405)
+
+
+def stop_routes(session: Session, stop: Stop, classification: str) -> dict[str, Any]:
+    """Every route that calls at this stop in the feed, with the directions (headsigns) it runs towards."""
+    rows = session.execute(
+        select(Route.id, Route.short_name, Route.long_name, Route.gtfs_route_id, Route.route_type, Route.color,
+               Trip.headsign)
+        .join(Trip, Trip.route_id == Route.id)
+        .join(StopTime, StopTime.trip_id == Trip.id)
+        .where(StopTime.stop_id == stop.id)
+        .distinct()
+    ).all()
+    routes: dict[int, dict[str, Any]] = {}
+    for route_id, short, long_name, gtfs_route, route_type, color, headsign in rows:
+        entry = routes.setdefault(route_id, {
+            "id": route_id,
+            "route_number": short or gtfs_route,
+            "route_name": long_name,
+            "route_type": route_type,
+            "color": color,
+            "towards": [],
+        })
+        if headsign and headsign not in entry["towards"] and headsign != stop.name:
+            entry["towards"].append(headsign)
+    result = sorted(routes.values(), key=lambda r: (r["route_number"] or "", r["id"]))
+    for entry in result:
+        entry["towards"].sort()
+    return {
+        "classification": classification,
+        "stop": stop_dict(stop, classification),
+        "routes": result,
+        "message_code": None if result else "NO_TRIPS",
+    }
+
+
+def metro_stations(session: Session, classification: str, *, query: str, limit: int) -> dict[str, Any]:
+    """Stops served by a Metro route (GTFS route_type 1 and the extended urban-rail types), with their lines."""
+    import_ids = eligible_import_ids(session, classification)
+    if not import_ids:
+        return {"classification": classification, "stations": [], "message_code": _no_data_code(classification)}
+    stmt = (
+        select(Stop, Route.id, Route.short_name, Route.gtfs_route_id, Route.color)
+        .join(StopTime, StopTime.stop_id == Stop.id)
+        .join(Trip, Trip.id == StopTime.trip_id)
+        .join(Route, Route.id == Trip.route_id)
+        .where(Stop.import_id.in_(import_ids), Route.route_type.in_(METRO_ROUTE_TYPES))
+        .distinct()
+        .order_by(Stop.name)
+    )
+    term = fold(query)
+    if term:
+        stmt = stmt.where(fold_column(session, Stop.name).like(contains_pattern(term), escape=LIKE_ESCAPE))
+    # A feed may list each platform as its own stop with the station's name. They are shown as one station, which
+    # keeps the first platform's identifier and lists every platform in stop_ids.
+    stations: dict[tuple[int, str], dict[str, Any]] = {}
+    for stop, route_id, short, gtfs_route, color in session.execute(stmt).all():
+        key = (stop.import_id, fold(stop.name))
+        entry = stations.get(key)
+        if entry is None:
+            if len(stations) >= limit:
+                continue
+            entry = stations[key] = {**stop_dict(stop, classification), "lines": [], "stop_ids": []}
+        if stop.id not in entry["stop_ids"]:
+            entry["stop_ids"].append(stop.id)
+        if not any(line["id"] == route_id for line in entry["lines"]):
+            entry["lines"].append({"id": route_id, "route_number": short or gtfs_route, "color": color})
+    result = list(stations.values())
+    return {"classification": classification, "stations": result,
+            "message_code": None if result else "NO_METRO_STATIONS"}

@@ -19,11 +19,13 @@ COPY dashboard ./dashboard
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
 COPY scripts ./scripts
+COPY reference_data ./reference_data
 
 # The service runs as an unprivileged user. Only the data folder (database and backups) is writable.
 RUN groupadd --system --gid 10001 planner \
     && useradd --system --uid 10001 --gid planner --home-dir /app --shell /usr/sbin/nologin planner \
     && mkdir -p /app/data/backups \
+    && DATABASE_URL=sqlite:////app/data/planner.db python scripts/load_community_metro.py \
     && chown -R planner:planner /app/data
 
 ENV DATABASE_URL=sqlite:////app/data/planner.db \
@@ -35,7 +37,7 @@ VOLUME ["/app/data"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"]
+    CMD ["python", "-c", "import os, sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/api/health', timeout=4).status == 200 else 1)"]
 
 # exec makes uvicorn the main process, so it receives the stop signal directly. --proxy-headers takes the client
 # address from X-Forwarded-For only when the connection comes from one of the FORWARDED_ALLOW_IPS addresses.

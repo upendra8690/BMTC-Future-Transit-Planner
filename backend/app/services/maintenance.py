@@ -19,7 +19,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
 
 from .. import models  # noqa: F401  (registers every table on Base.metadata)
-from ..database import Base
+from ..database import Base, normalise_url
 from ..models import utcnow
 from ..schema_migrations import head_revision
 
@@ -186,7 +186,7 @@ def check_database(database_url: str) -> dict[str, Any]:
         if missing:
             report["problems"].append("Tables are missing: " + ", ".join(missing))
     else:
-        engine = create_engine(database_url, poolclass=NullPool)
+        engine = create_engine(normalise_url(database_url), poolclass=NullPool)
         try:
             with engine.connect() as connection:
                 connection.exec_driver_sql("SELECT 1")

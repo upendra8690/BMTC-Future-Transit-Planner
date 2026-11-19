@@ -1,19 +1,19 @@
-/* BMTC Future Transit Planner - service worker (v3).
+/* Bengaluru Transit Planner - service worker (v4).
  * The shell (page, scripts, styles, icons) is fetched from the network first and then stored, so a new deployment
  * is used at once, and the app still opens offline with the last copy this device saw.
- * Some public timetable answers are also kept, so a timetable opened once can be read offline. Each kept answer is
+ * Some public timetable answers are also kept, and so is the list of official links and helplines, so a timetable opened once can be read offline. Each kept answer is
  * stamped with the time it was saved, and an offline answer is marked as a saved copy.
  * Answers that depend on the time of day, on journey planning, on nearby search, on scenarios, on saved routes or
  * preferences, and every admin answer, are never kept. A search with typed words (a non-empty q, for a route or stop
  * name) is never kept either. Requests to other origins (map tiles) are left alone.
  */
-var CACHE = "bmtc-planner-shell-v3";
+var CACHE = "bmtc-planner-shell-v7";
 var SHELL_PREFIX = "bmtc-planner-shell-";
 var TIMETABLE_CACHE = "bmtc-planner-timetable-v1";
 var TIMETABLE_PREFIX = "bmtc-planner-timetable-";
 var TIMETABLE_LIMIT = 120;
 // Public answers that depend only on the timetable data, never on the time of day or on the device.
-var SAVED_API = /^\/api\/(routes|routes\/[^\/]+|routes\/[^\/]+\/timetable|stops|data-sources)$/;
+var SAVED_API = /^\/api\/(routes|routes\/[^\/]+|routes\/[^\/]+\/timetable|stops|data-sources|services)$/;
 var SHELL = [
   "/",
   "/index.html",

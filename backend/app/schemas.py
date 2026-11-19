@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import json
 import re
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import KIND_UNKNOWN, WEEKDAY_CODES
 
@@ -103,3 +105,175 @@ class PreferencesIn(BaseModel):
             if not re.fullmatch(r"[a-z_]{1,50}", key) or len(val) > 500:
                 raise ValueError(f"invalid preference '{key}'")
         return value
+
+
+# ---------------------------------------------------------------- upcoming-transport announcements
+# The Literals must match registry.PROJECT_STATUSES, TRANSPORT_TYPES and ANNOUNCEMENT_SOURCE_KINDS (a test checks).
+PARTIAL_DATE = r"^\d{4}(-\d{2}(-\d{2})?)?$"
+FULL_DATE = r"^\d{4}-\d{2}-\d{2}$"
+ProjectStatus = Literal["ANNOUNCED", "PLANNED", "UNDER_CONSTRUCTION", "DELAYED", "AWAITING_CONFIRMATION", "OPERATING"]
+TransportType = Literal["BUS_ROUTE", "ELECTRIC_BUS", "FEEDER", "METRO_EXTENSION", "METRO_STATION", "SUBURBAN_RAIL",
+                        "INTERCHANGE", "INTEGRATED_TICKETING"]
+AnnouncementSourceKind = Literal["OFFICIAL", "PRESS", "SECONDARY", "ESTIMATE", "DEMO"]
+
+
+class AnnouncementSourceIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    url: str = Field(max_length=500, pattern=r"^https://\S+$")
+
+
+class AnnouncementIn(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9_]{2,60}$")
+    name: str = Field(min_length=3, max_length=200)
+    transport_type: TransportType
+    location: str = Field(default="", max_length=300)
+    announcement: str = Field(default="", max_length=2000)
+    status: ProjectStatus
+    source_kind: AnnouncementSourceKind
+    announced_on: str | None = Field(default=None, pattern=PARTIAL_DATE)
+    expected_start: str | None = Field(default=None, pattern=PARTIAL_DATE)
+    opened_on: str | None = Field(default=None, pattern=FULL_DATE)
+    sources: list[AnnouncementSourceIn] = Field(min_length=1, max_length=5)
+    verified_on: str = Field(pattern=FULL_DATE)
+    note: str = Field(default="", max_length=300)
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class AnnouncementUpdateIn(BaseModel):
+    """Only the fields that are sent change. Send null to clear an optional date."""
+
+    name: str | None = Field(default=None, min_length=3, max_length=200)
+    transport_type: TransportType | None = None
+    location: str | None = Field(default=None, max_length=300)
+    announcement: str | None = Field(default=None, max_length=2000)
+    status: ProjectStatus | None = None
+    source_kind: AnnouncementSourceKind | None = None
+    announced_on: str | None = Field(default=None, pattern=PARTIAL_DATE)
+    expected_start: str | None = Field(default=None, pattern=PARTIAL_DATE)
+    opened_on: str | None = Field(default=None, pattern=FULL_DATE)
+    sources: list[AnnouncementSourceIn] | None = Field(default=None, min_length=1, max_length=5)
+    verified_on: str | None = Field(default=None, pattern=FULL_DATE)
+    note: str | None = Field(default=None, max_length=300)
+    reason: str = Field(min_length=3, max_length=500)
+
+
+# ---------------------------------------------------------------- passenger accounts
+class AccountIn(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordIn(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
+
+
+class RecoverIn(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    recovery_code: str = Field(min_length=1, max_length=40)
+    new_password: str = Field(min_length=1, max_length=128)
+
+
+class AccountJourneyIn(BaseModel):
+    origin: str = Field(min_length=2, max_length=80)
+    destination: str = Field(min_length=2, max_length=80)
+    modes: Literal["all", "bus", "metro"] = "all"
+    classification: Literal["OFFICIAL_VERIFIED", "UNVERIFIED_FEED"]
+    label: str = Field(min_length=1, max_length=100)
+
+
+class NotificationIn(BaseModel):
+    service_notices: bool = False
+    upcoming_changes: bool = False
+
+
+class RoleIn(BaseModel):
+    role: Literal["passenger", "editor", "admin"]
+
+
+# ---------------------------------------------------------------- service notices
+NoticeKind = Literal["DISRUPTION", "DIVERSION", "INFORMATION"]
+NoticeMode = Literal["BUS", "METRO", "ALL"]
+
+
+class NoticeIn(BaseModel):
+    """A service notice copied from an official source. The source rules are checked in services/notices.py."""
+
+    title: str = Field(min_length=5, max_length=120)
+    body: str = Field(default="", max_length=600)
+    kind: NoticeKind
+    mode: NoticeMode
+    source_title: str = Field(min_length=3, max_length=200)
+    source_url: str = Field(max_length=500, pattern=r"^https://\S+$")
+    starts_on: dt.date
+    ends_on: dt.date
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class NoticeUpdateIn(BaseModel):
+    """Only the fields that are sent change. Set withdrawn to true to hide a notice at once."""
+
+    title: str | None = Field(default=None, min_length=5, max_length=120)
+    body: str | None = Field(default=None, max_length=600)
+    kind: NoticeKind | None = None
+    mode: NoticeMode | None = None
+    source_title: str | None = Field(default=None, min_length=3, max_length=200)
+    source_url: str | None = Field(default=None, max_length=500, pattern=r"^https://\S+$")
+    starts_on: dt.date | None = None
+    ends_on: dt.date | None = None
+    withdrawn: bool | None = None
+    reason: str = Field(min_length=3, max_length=500)
+
+
+# ---------------------------------------------------------------- tickets and payments
+# Words that would mean payment secrets. A request containing any of them is refused: this app never takes a card
+# number, CVV, UPI PIN, OTP or password for a payment. Payment happens on the provider's page or in the UPI app.
+SECRET_WORDS = ("pin", "cvv", "card", "otp", "password", "passcode")
+
+
+def _no_secrets(value: object, depth: int = 0) -> None:
+    if depth > 4:
+        raise ValueError("details are nested too deeply")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if any(word in str(key).lower() for word in SECRET_WORDS):
+                raise ValueError("payment secrets are never accepted here")
+            _no_secrets(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            _no_secrets(item, depth + 1)
+
+
+class QuoteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    product: Literal["BUS_TICKET", "BUS_PASS", "METRO_QR", "COMBINED"]
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("details")
+    @classmethod
+    def _small_and_secret_free(cls, value: dict[str, Any]) -> dict[str, Any]:
+        _no_secrets(value)
+        if len(json.dumps(value)) > 2000:
+            raise ValueError("details are too long")
+        return value
+
+
+class OrderIn(QuoteIn):
+    idempotency_key: str = Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")
+
+
+class PayIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["UPI", "CARD", "NETBANKING"]
+
+
+class RefundIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=3, max_length=300)

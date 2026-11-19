@@ -13,6 +13,7 @@ from app.models import (
     STATUS_COMPLETED,
     DataSource,
     Route,
+    Stop,
 )
 from app.services import schedule as sched
 from sqlalchemy import select
@@ -179,6 +180,32 @@ def test_nearby_stops_are_closest_first_with_distances(database, settings):
         distances = [r["distance_m"] for r in results]
         assert distances == sorted(distances)
         assert all(d <= 400 for d in distances)
+
+
+def test_nearby_lists_each_station_once_and_never_an_entrance(database, settings):
+    """The community Metro feed lists a station, its platforms and up to seven entrances near one point. Before the
+    fix, "near me" showed them all, and "Use my location" picked an entrance, which no journey can start from."""
+    with database.session() as session:
+        load_demo(session, settings)
+        central = session.scalars(select(Stop).where(Stop.name == "Demo Central")).first()
+        lat, lon = central.lat + 0.004, central.lon + 0.004
+        session.add_all([
+            Stop(import_id=central.import_id, gtfs_stop_id="ST", name="Test Station", lat=lat, lon=lon,
+                 location_type=1),
+            Stop(import_id=central.import_id, gtfs_stop_id="ST_PF1", name="Test Station", lat=lat, lon=lon,
+                 location_type=0),
+            Stop(import_id=central.import_id, gtfs_stop_id="ST_PF2", name="Test Station", lat=lat + 0.0001, lon=lon,
+                 location_type=0),
+            Stop(import_id=central.import_id, gtfs_stop_id="ST_A", name="Test Station - Entrance A", lat=lat,
+                 lon=lon - 0.0001, location_type=2),
+        ])
+        session.commit()
+        results = sched.nearby_stops(session, CLASS_UNVERIFIED, lat=lat, lon=lon - 0.0001, radius_m=400, limit=10)
+        names = [r["name"] for r in results]
+        assert "Test Station - Entrance A" not in names
+        assert names.count("Test Station") == 1
+        station = next(r for r in results if r["name"] == "Test Station")
+        assert station["gtfs_stop_id"] == "ST_PF1"  # a platform, which has departures, at the nearest distance
 
 
 def test_route_and_stop_search_respect_year_and_classification(database, settings):

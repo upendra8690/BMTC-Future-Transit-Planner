@@ -34,6 +34,9 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..models import (
     CLASS_OFFICIAL,
+    KIND_COMMUNITY,
+    KIND_OFFICIAL,
+    KIND_SYNTHETIC,
     Agency,
     DataSource,
     FareAttribute,
@@ -47,6 +50,10 @@ from ..models import (
 from . import schedule as sched
 from .text import fold
 
+# Fares are shown only from an official source, or from the labelled demonstration feed on a demonstration server.
+# Community and unknown sources may carry fares their authors estimated, so those are never shown as prices.
+FARE_SOURCE_KINDS = (KIND_OFFICIAL, KIND_SYNTHETIC)
+
 NEVER = 1 << 62
 DEFAULT_MAX_CHANGES = 2
 MAX_CHANGES_LIMIT = 2
@@ -55,6 +62,12 @@ LOOKBACK_DAYS = 2
 MAX_MATCHES = 200
 METRES_PER_DEGREE = 111_320.0
 CACHE_ENTRIES = 4
+# Travel-mode filters a traveller can choose. None means every mode in the loaded feeds.
+TRAVEL_MODES: dict[str, frozenset[str] | None] = {
+    "all": None,
+    "bus": frozenset({"bus"}),
+    "metro": frozenset({"metro"}),
+}
 ONE_DAY = dt.timedelta(days=1)
 PLAN_NOTE = (
     "Scheduled times from the feeds, with up to two changes. Live bus positions, delays and cancellations are not "
@@ -62,6 +75,24 @@ PLAN_NOTE = (
 )
 _CACHE: OrderedDict[tuple, _Network] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
+
+
+# GTFS route_type (basic and extended) to the travel mode shown with each ride.
+_METRO_TYPES = {1, 400, 401, 402, 403, 404, 405}
+_RAIL_TYPES = {2, 100, 101, 102, 103, 106, 109}
+_TRAM_TYPES = {0, 900, 901, 902}
+
+
+def mode_of(route_type: int | None) -> str:
+    if route_type in _METRO_TYPES:
+        return "metro"
+    if route_type in _RAIL_TYPES:
+        return "rail"
+    if route_type in _TRAM_TYPES:
+        return "tram"
+    if route_type == 3 or (route_type is not None and 700 <= route_type <= 799):
+        return "bus"
+    return "other"
 
 
 @dataclass(frozen=True)
@@ -86,6 +117,7 @@ class _Feed:
     publisher: str
     zone: Any
     agency_name: str | None
+    kind: str = ""
 
 
 class _Network:
@@ -103,7 +135,7 @@ class _Network:
         self.foot: list[list[tuple[int, int, int]]] = []
         self.pat_nodes: list[list[int]] = []
         self.pat_feed: list[int] = []
-        self.pat_route: list[tuple[int, str | None, str | None, str]] = []
+        self.pat_route: list[tuple[int, str | None, str | None, str, int]] = []
         self.pat_trips: list[list[tuple[int, str, str | None, dt.date]]] = []
         self.pat_arr: list[list[list[int]]] = []
         self.pat_dep: list[list[list[int]]] = []
@@ -252,13 +284,13 @@ def _local_iso(zone: Any, epoch: int) -> str:
 
 def _add_import(session: Session, net: _Network, import_id: int, first_day: dt.date, last_day: dt.date) -> None:
     zone = sched.import_zone(session, import_id)
-    source_name, publisher = session.execute(
-        select(DataSource.name, DataSource.publisher)
+    source_name, publisher, kind = session.execute(
+        select(DataSource.name, DataSource.publisher, DataSource.kind)
         .join(GtfsImport, GtfsImport.data_source_id == DataSource.id)
         .where(GtfsImport.id == import_id)
     ).one()
     agency = session.scalar(select(Agency.name).where(Agency.import_id == import_id).order_by(Agency.id).limit(1))
-    feed = net.add_feed(_Feed(import_id, source_name, publisher, zone, agency))
+    feed = net.add_feed(_Feed(import_id, source_name, publisher, zone, agency, kind))
     for stop in session.execute(
         select(Stop.id, Stop.gtfs_stop_id, Stop.name, Stop.lat, Stop.lon)
         .where(Stop.import_id == import_id)
@@ -266,9 +298,10 @@ def _add_import(session: Session, net: _Network, import_id: int, first_day: dt.d
     ):
         net.add_node(feed, stop.id, stop.gtfs_stop_id, stop.name, stop.lat, stop.lon)
     routes = {
-        route.id: (route.id, route.short_name, route.long_name, route.gtfs_route_id)
+        route.id: (route.id, route.short_name, route.long_name, route.gtfs_route_id, route.route_type)
         for route in session.execute(
-            select(Route.id, Route.short_name, Route.long_name, Route.gtfs_route_id).where(Route.import_id == import_id)
+            select(Route.id, Route.short_name, Route.long_name, Route.gtfs_route_id, Route.route_type)
+            .where(Route.import_id == import_id)
         )
     }
     day = first_day
@@ -398,8 +431,15 @@ class _Search:
 
 
 def _search(
-    net: _Network, origins: list[int], start: int, horizon_end: int, rounds: int, change_s: int
+    net: _Network,
+    origins: list[int],
+    start: int,
+    horizon_end: int,
+    rounds: int,
+    change_s: int,
+    allowed: list[bool] | None = None,
 ) -> _Search:
+    """Round-based search. When allowed is given, only patterns marked True may be ridden (travel-mode filter)."""
     count = len(net.nodes)
     brd0 = [NEVER] * count
     brd0_par: list[Any] = [None] * count
@@ -425,6 +465,8 @@ def _search(
         scan: dict[int, int] = {}
         for node in marked:
             for pat, pos in net.node_pats[node]:
+                if allowed is not None and not allowed[pat]:
+                    continue
                 current = scan.get(pat)
                 if current is None or pos < current:
                     scan[pat] = pos
@@ -500,8 +542,11 @@ def _fare_map(session: Session, import_ids: list[int]) -> dict[tuple[int, str | 
             FareAttribute,
             (FareAttribute.import_id == FareRule.import_id) & (FareAttribute.fare_id == FareRule.fare_id),
         )
+        .join(GtfsImport, GtfsImport.id == FareRule.import_id)
+        .join(DataSource, DataSource.id == GtfsImport.data_source_id)
         .where(
             FareRule.import_id.in_(import_ids),
+            DataSource.kind.in_(FARE_SOURCE_KINDS),
             FareRule.origin_id.is_(None),
             FareRule.destination_id.is_(None),
             FareRule.contains_id.is_(None),
@@ -534,7 +579,7 @@ def _fares_for(
 
 
 def _matching_nodes(session: Session, net: _Network, import_ids: list[int], term: str) -> tuple[list[int], bool]:
-    """Stops whose names contain the term, or whose stop code equals it.
+    """Stops named as the term (exactly, if any stop has that name; otherwise containing it), or whose code equals it.
 
     Returns the matching nodes and whether the list was cut at MAX_MATCHES.
     """
@@ -543,7 +588,7 @@ def _matching_nodes(session: Session, net: _Network, import_ids: list[int], term
         .where(
             Stop.import_id.in_(import_ids),
             or_(
-                sched.fold_column(session, Stop.name).like(sched.contains_pattern(term), escape=sched.LIKE_ESCAPE),
+                sched.name_match(session, term, import_ids),
                 sched.fold_column(session, Stop.gtfs_stop_id) == term,
             ),
         )
@@ -570,9 +615,11 @@ def _stop_out(net: _Network, node: int) -> dict[str, Any]:
     }
 
 
-def _fare_summary(ride_fares: list[list[dict[str, Any]]]) -> dict[str, Any]:
+def _fare_summary(ride_fares: list[list[dict[str, Any]]], withheld: bool = False) -> dict[str, Any]:
     if len(ride_fares) > 1:
         return {"code": "CHANGES_NOT_PRICED", "total": None}
+    if withheld:
+        return {"code": "NOT_VERIFIED", "total": None}
     only = ride_fares[0]
     if not only:
         return {"code": "NOT_IN_FEED", "total": None}
@@ -609,13 +656,14 @@ def _format_option(
     first_feed: int | None = None
     last_feed: int | None = None
     ride_fares: list[list[dict[str, Any]]] = []
+    fares_withheld = False
     feeds_used: list[int] = []
     for leg in legs:
         if leg[0] == "ride":
             _, pat, trip, board_pos, alight_pos = leg
             feed_index = net.pat_feed[pat]
             feed = net.feeds[feed_index]
-            _route_db_id, short_name, long_name, gtfs_route = net.pat_route[pat]
+            _route_db_id, short_name, long_name, gtfs_route, route_type = net.pat_route[pat]
             _trip_db_id, gtfs_trip, headsign, service_day = net.pat_trips[pat][trip]
             departs = net.pat_dep[pat][trip][board_pos]
             arrives = net.pat_arr[pat][trip][alight_pos]
@@ -625,11 +673,15 @@ def _format_option(
             if feed_index not in feeds_used:
                 feeds_used.append(feed_index)
             leg_fares = _fares_for(fares, feed.import_id, gtfs_route)
+            fares_withheld = fares_withheld or feed.kind not in FARE_SOURCE_KINDS
             ride_fares.append(leg_fares)
             arrival = arrives
             out_legs.append({
                 "type": "ride",
-                "timing": "scheduled",
+                "mode": mode_of(route_type),
+                "route_type": route_type,
+                # A community feed reconstructs times between the published ones, so they are approximate.
+                "timing": "approximate" if feed.kind == KIND_COMMUNITY else "scheduled",
                 "source": {
                     "import_id": feed.import_id,
                     "name": feed.source_name,
@@ -668,14 +720,16 @@ def _format_option(
             })
     if first_feed is None or last_feed is None:
         raise RuntimeError("planner: a journey was traced without any ride")
+    ride_modes = sorted({leg["mode"] for leg in out_legs if leg["type"] == "ride"})
     option = {
+        "modes": ride_modes,
         "rides": len(ride_fares),
         "changes": len(ride_fares) - 1,
         "departs_at": _local_iso(net.feeds[first_feed].zone, begin),
         "arrives_at": _local_iso(net.feeds[last_feed].zone, arrival),
         "duration_minutes": round((arrival - begin) / 60),
         "wait_minutes": max(0, (first_departs - start - pre_walk) // 60) if now_mode else None,
-        "fare": _fare_summary(ride_fares),
+        "fare": _fare_summary(ride_fares, fares_withheld),
         "labels": [],
         "legs": out_legs,
     }
@@ -713,6 +767,9 @@ def _options(
     formatted[earliest][0]["labels"].append("EARLIEST_ARRIVAL")
     if fewest != earliest:
         formatted[fewest][0]["labels"].append("FEWEST_CHANGES")
+    for item in formatted:
+        if "bus" in item[0]["modes"] and "metro" in item[0]["modes"]:
+            item[0]["labels"].append("BUS_AND_METRO")
     order = sorted(range(len(formatted)), key=lambda i: (formatted[i][1], formatted[i][0]["changes"]))[:limit]
     used: list[int] = []
     for i in order:
@@ -756,13 +813,17 @@ def plan_journeys(
     limit: int = 5,
     on_date: dt.date | None = None,
     now: dt.datetime | None = None,
+    travel_modes: str = "all",
 ) -> dict[str, Any]:
     """Options for a journey from a stop matching origin_query to one matching destination_query.
 
-    Give on_date to plan one service date, or now to plan the next three hours from this instant.
+    Give on_date to plan one service date, or now to plan the next three hours from this instant. travel_modes limits
+    the rides to buses or to Metro; walking between stops is always allowed.
     """
     if (on_date is None) == (now is None):
         raise ValueError("Give either on_date or now, not both and not neither.")
+    if travel_modes not in TRAVEL_MODES:
+        raise ValueError(f"travel_modes must be one of {', '.join(TRAVEL_MODES)}.")
     if not 0 <= max_changes <= MAX_CHANGES_LIMIT:
         raise ValueError(f"max_changes must be between 0 and {MAX_CHANGES_LIMIT}.")
     zone, zone_source = sched.service_zone(session, default_zone)
@@ -773,6 +834,7 @@ def plan_journeys(
         "origin_query": origin_query,
         "destination_query": destination_query,
         "max_changes": max_changes,
+        "travel_modes": travel_modes,
         "options": [],
         "sources": [],
         "message": None,
@@ -845,11 +907,19 @@ def plan_journeys(
     if not any(net.node_pats[node] for node in destinations):
         return _with_message(result, "No scheduled trip serves the destination on this date.", "DESTINATION_NOT_SERVED")
 
-    search = _search(net, origins, start, horizon_end, max_changes + 1, plan.min_transfer_seconds)
+    wanted = TRAVEL_MODES[travel_modes]
+    allowed = None if wanted is None else [mode_of(route[4]) in wanted for route in net.pat_route]
+    search = _search(net, origins, start, horizon_end, max_changes + 1, plan.min_transfer_seconds, allowed)
     fares = _fare_map(session, import_ids)
     options, used = _options(net, search, destinations, start, classification, fares, limit, now_mode=on_date is None)
     result["options"] = options
     result["sources"] = _sources(net, used)
+    if not options and wanted is not None:
+        return _with_message(
+            result,
+            "No journey using only the chosen travel mode was found. Try all modes.",
+            "NO_JOURNEY_FOR_MODE",
+        )
     if not options:
         if on_date is not None:
             text = f"No journey with up to {max_changes} change(s) was found in this timetable for that date."

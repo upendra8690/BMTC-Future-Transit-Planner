@@ -1,359 +1,364 @@
 <div align="center">
 
-<img src="assets/banner.svg" alt="BMTC Future Transit Planner: unofficial Bengaluru bus timetables and 2027 to 2030 scenarios" width="100%">
+<img src="assets/v4/banner.svg" alt="Bengaluru Transit Planner 4.0: an independent, unofficial public preview with real Namma Metro journeys" width="100%">
 
-<br>
-
-<img src="assets/app-icon-preview.png" alt="BMTC Planner app icon" width="112">
-
-# BMTC Future Transit Planner 3.0
-
-**Plan Bengaluru bus journeys today and sketch the network of 2027 to 2030, without ever mixing guesses with facts.**
-
-[![CI](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/ci.yml/badge.svg)](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/ci.yml)
-[![Android APK](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/android-apk.yml/badge.svg)](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/android-apk.yml)
-[![Live demo](https://img.shields.io/badge/live%20demo-online-2EA44F?style=flat-square&logo=render&logoColor=white)](https://bmtc-future-transit-planner-3-0.onrender.com/)
-![Version 3.0.0](https://img.shields.io/badge/version-3.0.0-0B5CAD?style=flat-square)
-![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)
+[![CI (v4)](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/ci.yml/badge.svg?branch=v4)](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/actions/workflows/ci.yml?query=branch%3Av4)
+![Version](https://img.shields.io/badge/version-4.0.0--beta.1-0B5CAD?style=flat-square)
+![Status](https://img.shields.io/badge/status-public%20preview-F59E0B?style=flat-square)
+![Unofficial](https://img.shields.io/badge/BMTC%20%2F%20BMRCL-not%20affiliated-6B7280?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13-3776AB?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
-![SQLite / Alembic](https://img.shields.io/badge/SQLite-Alembic-003B57?style=flat-square&logo=sqlite&logoColor=white)
-![GTFS](https://img.shields.io/badge/data-GTFS-F97316?style=flat-square)
-![PWA](https://img.shields.io/badge/PWA-offline%20ready-5A0FC8?style=flat-square&logo=pwa&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-ready-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![PWA](https://img.shields.io/badge/PWA-installable%20%C2%B7%20offline-5A0FC8?style=flat-square&logo=pwa&logoColor=white)
+![WCAG](https://img.shields.io/badge/axe--core-WCAG%202.1%20AA%200%20violations-2EA44F?style=flat-square)
 
-![Tests](https://img.shields.io/badge/tests-366%20passing-2EA44F?style=flat-square&logo=pytest&logoColor=white)
-![Browser checks](https://img.shields.io/badge/browser%20checks-121%20passing-2EA44F?style=flat-square&logo=googlechrome&logoColor=white)
-![WCAG 2.1 AA](https://img.shields.io/badge/axe--core-WCAG%202.1%20AA-2EA44F?style=flat-square)
-![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?style=flat-square&logo=ruff&logoColor=black)
-![Languages](https://img.shields.io/badge/UI-English%20%C2%B7%20%E0%B2%95%E0%B2%A8%E0%B3%8D%E0%B2%A8%E0%B2%A1%20%C2%B7%20%E0%B0%A4%E0%B1%86%E0%B0%B2%E0%B1%81%E0%B0%97%E0%B1%81%20%C2%B7%20%E0%A4%B9%E0%A4%BF%E0%A4%A8%E0%A5%8D%E0%A4%A6%E0%A5%80-6E40C9?style=flat-square)
-
-<a href="https://bmtc-future-transit-planner-3-0.onrender.com/"><img alt="Try it live" src="https://img.shields.io/badge/%F0%9F%9A%80%20Try%20it%20live-open%20the%20planner-0B5CAD?style=for-the-badge"></a>
+<a href="https://bengaluru-transit-planner-v4.onrender.com"><img alt="Open the 4.0 public preview" src="https://img.shields.io/badge/%F0%9F%9A%87%20Open%204.0%20preview-bengaluru--transit--planner--v4-0B5CAD?style=for-the-badge"></a>
 &nbsp;
-<a href="https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/releases/latest/download/BMTC-Planner.apk"><img alt="Download the Android app" src="https://img.shields.io/badge/%F0%9F%93%B1%20Android%20app-download%20APK-3DDC84?style=for-the-badge&logo=android&logoColor=white"></a>
+<a href="https://bmtc-future-transit-planner-3-0.onrender.com"><img alt="Open the stable 3.0 version" src="https://img.shields.io/badge/Stable%203.0-bmtc--future--transit--planner--3--0-374151?style=for-the-badge"></a>
 
-<sub>Free hosting: the server sleeps when idle, so the first visit can take up to a minute to wake it.</sub>
-
-[**Why**](#-why-this-exists) · [**Screenshots**](#-screenshots) · [**What's new**](#-whats-new-in-30) · [**Quick start**](#-quick-start) · [**Features**](#-features) · [**API**](#-api-in-30-seconds) · [**Architecture**](#%EF%B8%8F-architecture) · [**Quality**](#-quality) · [**Roadmap**](#%EF%B8%8F-roadmap)
-
-<sub>⚠️ Unofficial. Not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro or any transport operator. Ships no official BMTC timetable data.</sub>
+**A free, multilingual journey planner for Bengaluru: Namma Metro today, buses when lawful data exists.**<br>
+English · ಕನ್ನಡ · తెలుగు · हिन्दी · phone, tablet and desktop · works offline for pages already opened
 
 </div>
 
----
+> [!IMPORTANT]
+> **Independent and unofficial.** This project is not affiliated with, endorsed by or approved by BMTC, BMRCL
+> (Namma Metro), DULT or the Government of Karnataka.
+> - **Metro data:** comes from an *unofficial community reconstruction* of BMRCL's published timetables. It is
+>   **not verified by BMRCL**, and times between the published ones are **approximate**.
+> - **No bus data:** there is **no BMTC bus data** yet.
+> - **Not available:** live tracking, tickets, passes and payments.
+>
+> Always check the operator before you travel. In an emergency, call **112**.
 
-## 💡 Why this exists
+<details>
+<summary><b>Contents</b></summary>
 
-Bengaluru is growing fast, and people want to know what the buses will look like in **2027, 2028, 2029 and 2030**. Nobody has official timetables for those years yet. A planning tool that blurs guesses with facts is worse than no tool at all.
+- [Try it](#-try-it)
+- [Version 3.0 and 4.0](#-version-30-and-40)
+- [Screenshots](#-screenshots)
+- [What works today](#-what-works-today)
+- [Real data, honest labels](#%EF%B8%8F-real-data-honest-labels)
+- [Architecture](#%EF%B8%8F-architecture)
+- [Run it yourself](#-run-it-yourself)
+- [Configuration](#%EF%B8%8F-configuration)
+- [Quality and test results](#-quality-and-test-results)
+- [Privacy](#-privacy)
+- [Security](#%EF%B8%8F-security)
+- [Accessibility and languages](#-accessibility-and-languages)
+- [Known limitations](#%EF%B8%8F-known-limitations)
+- [Roadmap](#%EF%B8%8F-roadmap)
+- [Documentation](#-documentation)
+- [Data sources and attribution](#-data-sources-and-attribution)
+- [Licence](#-licence)
 
-This planner keeps **three kinds of information strictly apart**, and labels every screen, every journey and every export:
+</details>
 
-| | Classification | What it means |
-|:---:|---|---|
-| 🟢 | **`OFFICIAL_VERIFIED`** | Timetables from an `OFFICIAL` source that an administrator has checked and verified. Empty until that happens. |
-| 🟡 | **`UNVERIFIED_FEED`** | Any other GTFS feed: community, third-party or demo. Shown separately, always labelled with its source. |
-| 🟣 | **`ESTIMATED_SCENARIO`** | Your own "what if" route for a future year, with journey time worked out from labelled assumptions. **Never** an official announcement. |
+## 🚀 Try it
 
-When there is no verified timetable for a year, the planner says so plainly instead of inventing one:
+| | Address | What you see |
+|---|---|---|
+| **4.0 public preview** | **https://bengaluru-transit-planner-v4.onrender.com** | Real Namma Metro journeys from the community feed; no invented data |
+| 3.0 stable | https://bmtc-future-transit-planner-3-0.onrender.com | The earlier bus planner and 2027–2030 scenarios, on clearly labelled demo data |
 
-> 🗨️ *"No officially verified timetable is available for this future year."*
+**Try a real Metro journey:** open **Plan**, choose **Unverified feed**, and enter **Indiranagar** → **Jayanagar**
+with **Metro only**. You get a Purple Line ride, a 72 m walk at Majestic, then a Green Line ride, each labelled
+"Approximate times".
 
-<div align="center">
+> [!NOTE]
+> Both services run on Render's free plan. They sleep when idle, so the first visit can take up to a minute (3.0 once
+> took about 12 minutes to wake). To install the app, open the 4.0 address in Chrome and choose **Install app** or
+> **Add to Home screen**.
 
-| **366** | **121** | **20 / 20** | **38** | **4** | **2027 – 2030** |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| automated tests | browser checks | broken rules caught by mutation checks | API operations | UI languages | planning years |
+## 🔀 Version 3.0 and 4.0
 
-</div>
+| | **3.0 stable** (`main`) | **4.0 public preview** (`v4`) |
+|---|---|---|
+| Address | bmtc-future-transit-planner-3-0.onrender.com | **bengaluru-transit-planner-v4.onrender.com** |
+| Focus | Bus timetables and 2027–2030 planning scenarios | A passenger app: Metro journeys, stations, upcoming transport, official links |
+| Data shown | An invented demo bus feed, labelled as such | **Real Namma Metro** (unofficial community feed, labelled); no invented data |
+| Metro | — | Purple, Green and Yellow lines: 83 stations, changes at Majestic and RV Road |
+| Interface | Planner dashboard | Mobile-first installable web app (18 screens), dark mode, large text, low-data mode |
+| Upcoming transport | — | 7 projects with status, source and check date; editable by administrators |
+| Accounts | — | Built and tested, **switched off** until a permanent database is configured |
+| Android | APK release `app-latest` | Shell fixed (calls, official links, back button); compiles in CI; **not published** |
+| Status | Stable; unchanged | Preview; under active development |
 
 ## 📸 Screenshots
 
-<table>
-<tr>
-<td width="50%"><img src="assets/screenshot-journey.png" alt="Plan a journey: Demo Central to Demo Lake View on route DEMO-1, labelled as unverified feed data, with the transfer assumptions stated"></td>
-<td width="50%"><img src="assets/screenshot-routes.png" alt="Routes and timetables page with official, unverified and estimated status banners for 2027 and the two demo routes"></td>
-</tr>
-<tr>
-<td align="center"><b>🧭 Journey planner</b><br><sub>Up to two changes, ranked by arrival. Every ride names its feed and every assumption is stated.</sub></td>
-<td align="center"><b>🗓️ Routes and timetables</b><br><sub>Each page opens with the status of the chosen year for each classification.</sub></td>
-</tr>
-<tr>
-<td width="50%"><img src="assets/screenshot-sources.png" alt="Data sources page listing the synthetic demo feed as unverified"></td>
-<td width="50%" align="center"><img src="assets/screenshot-mobile-kn.png" alt="Phone layout of the dashboard in Kannada" width="60%"></td>
-</tr>
-<tr>
-<td align="center"><b>🗂️ Data sources</b><br><sub>Where every timetable came from, and how it is classified.</sub></td>
-<td align="center"><b>📱 Phone layout, in Kannada</b><br><sub>English, ಕನ್ನಡ, తెలుగు and हिन्दी.</sub></td>
-</tr>
-</table>
+All screenshots were taken from the live 4.0 preview on 18 November 2026, in real mode.
 
-<sub>Screenshots show the invented <code>SYNTHETIC_DEMO</code> feed (routes DEMO-1 and DEMO-2). They are not BMTC routes.</sub>
-
-## ✨ What's new in 3.0
-
-| | Feature | Details |
-|:---:|---|---|
-| 🔀 | **Journeys with up to two changes** | `GET /api/plan` returns options ranked by arrival, then by changes, and labels `EARLIEST_ARRIVAL` and `FEWEST_CHANGES`. |
-| 💸 | **Fares from GTFS** | `fare_attributes.txt` and `fare_rules.txt` are imported (migration `0002_fares`). A fare is shown only when exactly one applies. |
-| 📴 | **Offline timetables** | The service worker keeps up to 120 saved API answers, shows an offline banner and retries after reconnecting. |
-| 🌐 | **Telugu** | A fourth language, 344 keys in each. |
-| 🕒 | **Service clock** | `/api/clock` reports the feed's own time zone, with `Asia/Kolkata` as the fallback. |
-| 🛡️ | **Security mapping** | `docs/SECURITY_ASVS.md` maps the planner to OWASP ASVS 5.0.0 and the Top 10:2025, gaps included. |
-| ♿ | **Accessibility engine** | Browser checks run axe-core 4.14.0 against WCAG 2.1 AA. |
-
-Full list in [`CHANGELOG.md`](CHANGELOG.md).
-
-## 🚀 Quick start
-
-### 📱 On your phone (no Play Store needed)
-
-- **Android app:** download [`BMTC-Planner.apk`](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/releases/latest/download/BMTC-Planner.apk) from the [latest release](https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0/releases/latest) and open it. Android asks once to allow installs from your browser; that is normal for apps outside the Play Store.
-- **Any phone (Android or iPhone):** open [bmtc-future-transit-planner-3-0.onrender.com](https://bmtc-future-transit-planner-3-0.onrender.com/) and choose **Install app** (Chrome) or **Share → Add to Home Screen** (Safari). It works offline after the first visit.
-
-The live demo loads the invented `SYNTHETIC_DEMO` feed on every start (`scripts/seed_demo_feed.py`), and anything created there is wiped when the free server restarts.
-
-### 🪟 Windows (two clicks)
-
-```bat
-scripts\setup_windows.bat    :: once: creates .venv, installs packages, prepares the database
-scripts\run_windows.bat      :: then open http://127.0.0.1:8000/
-```
-
-Set `ADMIN_API_KEY` in `.env` to enable the Administration page. Full guide in [`docs/INSTALL_WINDOWS.md`](docs/INSTALL_WINDOWS.md).
-
-### 🐧 Linux / macOS / any Python 3.11+
-
-```bash
-git clone https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0.git
-cd BMTC-Future-Transit-Planner-3.0
-
-python -m venv .venv && . .venv/bin/activate
-python -m pip install -r requirements-dev.txt
-cp .env.example .env
-python scripts/migrate_database.py
-
-# Load the invented demo feed so there is something to explore
-python scripts/make_synthetic_gtfs.py --out data/demo_feed.zip
-python scripts/import_gtfs.py --file data/demo_feed.zip --new-source "Synthetic demo" --kind SYNTHETIC_DEMO
-
-python -m uvicorn app.main:create_app --factory --app-dir backend --host 127.0.0.1 --port 8000
-```
-
-Open **http://127.0.0.1:8000/**, switch to **Unverified feed**, and plan a trip from *Demo Central* to *Demo Lake View*. Interactive API docs are at **/api/docs**.
-
-### 🐳 Docker + Caddy (HTTPS)
-
-```bash
-cp .env.example .env     # set ADMIN_API_KEY and PLANNER_DOMAIN
-docker compose up -d --build
-```
-
-See [`docs/DEPLOY.md`](docs/DEPLOY.md). The Compose file is validated, but the image has not yet been built or run.
-
-## 🧩 Features
+<p align="center">
+  <img src="assets/v4/desktop-journey.png" alt="Desktop: a real Metro journey from Indiranagar to Jayanagar, with a Purple Line ride, a walk at Majestic and a Green Line ride. Each ride is labelled Unverified feed and Approximate times, below the notice that live vehicle information is unavailable" width="100%">
+</p>
 
 <table>
-<tr>
-<td width="50%" valign="top">
-
-**🗺️ Planning**
-- Timetables by route and date, route and stop search
-- Departures from a stop, nearby stops on a Leaflet map
-- Journeys with 0, 1 or 2 changes, walks marked as estimates
-- Fares straight from the feed
-- Saved routes per device
-
-</td>
-<td width="50%" valign="top">
-
-**🔮 Future scenarios**
-- Owner-scoped "what if" routes for 2027 to 2030
-- Distance, journey time and frequency from labelled assumptions
-- Side-by-side comparison
-- CSV and PDF export
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**🛠️ Administration**
-- GTFS import from the CLI or the dashboard, checked before storing
-- Verification and revocation of `OFFICIAL` sources
-- Audit log of every admin action
-- Verified SQLite backups, database check, restore drill
-
-</td>
-<td valign="top">
-
-**📱 Everywhere**
-- Installable PWA with offline shell and saved timetables
-- English, Kannada, Telugu, Hindi
-- Times in the service time zone
-- 38 documented API operations with OpenAPI
-
-</td>
-</tr>
+  <tr>
+    <td align="center" width="25%"><img src="assets/v4/home.png" alt="Home screen with search and a map of Bengaluru" width="100%"><br><sub><b>Home</b></sub></td>
+    <td align="center" width="25%"><img src="assets/v4/journey.png" alt="Metro journey result on a phone, labelled Unverified feed and Approximate times" width="100%"><br><sub><b>Real Metro journey</b></sub></td>
+    <td align="center" width="25%"><img src="assets/v4/metro.png" alt="Metro screen listing the Green, Purple and Yellow lines, each labelled Unverified feed" width="100%"><br><sub><b>Metro lines</b></sub></td>
+    <td align="center" width="25%"><img src="assets/v4/journey-dark.png" alt="Dark mode: Whitefield to Electronic City with two changes" width="100%"><br><sub><b>Dark mode, 2 changes</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="assets/v4/home-kannada.png" alt="The home screen in Kannada" width="100%"><br><sub><b>ಕನ್ನಡ</b></sub></td>
+    <td align="center"><img src="assets/v4/upcoming.png" alt="Upcoming transport, each entry with its status and source" width="100%"><br><sub><b>Upcoming transport</b></sub></td>
+    <td align="center"><img src="assets/v4/data-sources.png" alt="Data and providers screen naming the community source and its ODbL licence" width="100%"><br><sub><b>Data sources</b></sub></td>
+    <td align="center"><img src="assets/app-icon-preview.png" alt="App icon" width="60%"><br><sub><b>App icon</b></sub></td>
+  </tr>
 </table>
 
-## ⚡ API in 30 seconds
+## ✅ What works today
 
-```bash
-curl "http://127.0.0.1:8000/api/plan?origin=Demo%20Central&destination=Demo%20Lake%20View&classification=UNVERIFIED_FEED"
-```
+| | Feature | Status |
+|---|---|---|
+| 🚇 | **Metro journey planner**: Metro only, up to 2 changes, walking transfers | **Works** on the community feed; times approximate |
+| 🟣🟢🟡 | **Purple, Green and Yellow lines**: 83 stations; line and station pages | **Works** (unverified data) |
+| 🔎 | Station and route search; exact names win ("Jayanagar" never becomes "Vijayanagar") | **Works** |
+| 🗺️ | Bengaluru map (OpenStreetMap), stops near me (location only when you tap) | **Works** |
+| 🏗️ | **Upcoming transport**: status, source, check date and public change history | **Works**; administrators update it without code changes |
+| 💾 | Saved journeys and stops on your device; "Delete my data" | **Works** |
+| 🌐 | English, ಕನ್ನಡ, తెలుగు, हिन्दी | **Works**; native-speaker review pending |
+| 📴 | Installable web app; screens and saved items open offline | **Works** |
+| 🆘 | SOS **112**, ambulance 108, fire 101, child helpline 1098, railway enquiry 139, official websites | **Works** |
+| 🛠️ | Administration: GTFS import and validation, verification, upcoming entries, backups (SQLite), audit log | **Works** (admin key) |
+| 🚌 | BMTC bus routes, stops and timetables | ⛔ **Unavailable**: no authorised data source |
+| 📡 | Live tracking and arrival predictions | ⛔ **Unavailable**: "Live vehicle information is currently unavailable. The information shown is scheduled data, not live tracking." |
+| 🎟️ | Tickets, passes, Metro QR, payments, wallet, NCMC | ⛔ **Unavailable**: each needs an operator or provider agreement; links go to official channels |
+| 💰 | Metro fares | ⛔ **Not shown**: the community feed's fares are estimates |
+| 👤 | Passenger accounts, saved journeys across devices, staff roles | ⏸️ **Built, switched off**: needs a permanent PostgreSQL database |
+| 🔔 | Notifications | ⏸️ Preferences stored; nothing is sent (no delivery service) |
+| 🏥 | Hospitals, toilets, water, parking, EV charging, station facilities | ⛔ **Not yet**: no licensed dataset chosen |
 
-```jsonc
-{
-  "classification": "UNVERIFIED_FEED",
-  "max_changes": 2,
-  "options": [{
-    "changes": 0,
-    "departs_at": "2026-11-16T10:30+05:30",
-    "arrives_at": "2026-11-16T10:46+05:30",
-    "duration_minutes": 16,
-    "fare": { "code": "NOT_IN_FEED", "total": null },
-    "labels": ["EARLIEST_ARRIVAL"],
-    "legs": [{ "type": "ride", "timing": "scheduled", "route_number": "DEMO-1", "...": "..." }]
-  }]
-}
-```
+## 🏷️ Real data, honest labels
 
-| Endpoint | What it does |
-|---|---|
-| `GET /api/meta` | Version, classifications, affiliation notice, estimate assumptions |
-| `GET /api/clock` | Service time zone, local time and feed coverage for today |
-| `GET /api/routes` · `GET /api/stops` | Search routes and stops for one classification |
-| `GET /api/plan` | Journeys with up to two changes |
-| `GET /api/docs` | Interactive OpenAPI docs |
+- **Real mode is the default.** The public service never serves invented data, even if a demo feed is loaded. A
+  separate **demonstration server** (`DEMO_MODE=1`) is for development and presentations; it shows a banner on every
+  screen.
+- **Three labels.**
+  - *Officially verified*: only an `OFFICIAL` source, checked by an administrator. There is none today, and the app
+    says so.
+  - *Unverified feed*: real but not confirmed by the operator. This is the community Metro feed.
+  - *Estimated scenario*: the 2027–2030 planning screens.
+- **No invented numbers.** Community fares are never shown as prices, times between published ones are marked
+  "Approximate", and an expected opening date is shown only if an operator announced it.
+- **Every ride names its source.**
 
-All 38 operations are documented in [`docs/API.md`](docs/API.md).
-
-## 🏗️ Architecture
+## 🏛️ Architecture
 
 ```mermaid
 flowchart LR
-    G[GTFS ZIP] -->|CLI or admin upload| I[Importer<br/>checks + audit]
-    I -->|COMPLETED| DB[(SQLite / SQLAlchemy<br/>Alembic migrations)]
-    I -->|REJECTED| X[No rows stored]
-    DB --> API[FastAPI<br/>38 operations]
-    API --> P[Journey planner<br/>0–2 changes, fares]
-    API --> S[Scenarios<br/>labelled estimates]
-    API --> D[Dashboard PWA<br/>4 languages, offline]
-    A[Admin key] -.->|verify OFFICIAL source| DB
+  user["Passenger<br/>phone · tablet · desktop"] --> pwa["Installable web app<br/>plain JavaScript · 4 languages<br/>offline shell"]
+  android["Android shell<br/>Flutter WebView"] --> pwa
+  pwa -- "HTTPS · JSON" --> api["FastAPI server<br/>67 endpoints"]
+  api --> planner["Journey planner<br/>round-based search<br/>bus · Metro · walking"]
+  api --> status["Data status · providers<br/>upcoming transport"]
+  api --> adapters["Provider adapters<br/>live · tickets · payments · NCMC<br/>refuse until authorised"]
+  api --> accounts["Accounts and roles<br/>off until PostgreSQL"]
+  planner --> db[("SQLite: development, free host<br/>PostgreSQL: production")]
+  status --> db
+  accounts --> db
+  feed["Community Namma Metro GTFS<br/>bmrcl-gtfs · ODbL · SHA-256 pinned"] -- "imported into the image" --> db
+  demo["Invented demo feeds"] -. "served only with DEMO_MODE=1" .-> db
 ```
 
-| Layer | Stack |
+| Layer | Technology |
 |---|---|
-| Backend | Python, FastAPI, SQLAlchemy, Alembic, uvicorn |
-| Data | GTFS static feeds, SQLite (PostgreSQL possible but untested) |
-| Frontend | Plain HTML, CSS and JavaScript, Leaflet 1.9.4, service worker |
-| Deploy | Docker, Caddy (automatic HTTPS) |
-| Mobile | Flutter WebView starter in `android/` (not yet built) |
+| Server | Python 3.12 and 3.13, FastAPI, SQLAlchemy 2, Alembic migrations, psycopg 3 |
+| Database | SQLite for development; PostgreSQL for production (proven in CI on PostgreSQL 16) |
+| App | Progressive web app in plain JavaScript (no build step), service worker, Leaflet 1.9.4 with OpenStreetMap tiles |
+| Android | Flutter WebView shell (`android/flutter_app`), built only by GitHub Actions |
+| Packaging | Docker (Python 3.13 slim, unprivileged user), listens on `$PORT`; Render Blueprint in `render.yaml` |
+| Quality | pytest, Playwright with Microsoft Edge, axe-core, ruff, bandit, pip-audit, GitHub Actions |
 
-More in [`docs/architecture.md`](docs/architecture.md).
+<details>
+<summary><b>Project layout</b></summary>
 
-## ✅ Quality
+```text
+backend/app/            FastAPI app: api.py, models.py, security.py, demo.py, config.py
+backend/app/services/   planner, schedule, registry, announcements, accounts, integrations, assistant
+dashboard/              the web app: index.html, app.js, i18n.js (4 languages), styles.css, sw.js
+migrations/             Alembic migrations 0001 to 0004
+reference_data/         the pinned community Namma Metro feed, with its licence and attribution
+scripts/                migrate, import, load_community_metro, verify_deployment, check_persistence, ...
+tests/                  pytest suites; tests/browser and tests/audit hold the browser, accessibility and security checks
+android/flutter_app/    Android WebView shell
+government_submission_2026/   technical-review package (drafts; nothing has been sent)
+```
+</details>
 
-| Check | Result |
-|---|---|
-| 🧪 Automated tests | **366 passed** on Linux, Python 3.13. On Windows with Python 3.12: 361 passed, 5 skipped (the DejaVu Sans font is not installed) |
-| 🌐 Browser checks | **121 passed** in headless Chrome, including axe-core WCAG 2.1 AA |
-| 🧬 Mutation checks | **10 / 10** broken rules caught in each of two harnesses |
-| 💾 Restore drill | **29 / 29** checks passed |
-| 🧹 Lint | `ruff check .` clean |
-| 🔒 Static security | bandit: no issues in the documented scope |
-| 📦 Dependency audit | No known vulnerabilities in the pinned versions |
+## 💻 Run it yourself
 
-Every command and number is in [`docs/TEST_RESULTS.md`](docs/TEST_RESULTS.md). CI runs lint, migrations and tests on Python 3.12 and 3.13 for every push.
+**Linux and macOS** (Python 3.12 or newer):
 
-## 🛡️ Security in brief
+```bash
+git clone -b v4 https://github.com/upendra8690/BMTC-Future-Transit-Planner-3.0.git
+cd BMTC-Future-Transit-Planner-3.0
+python -m venv .venv && source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python scripts/migrate_database.py
+python scripts/load_community_metro.py        # the real Namma Metro feed (checked by SHA-256)
+python -m uvicorn app.main:create_app --factory --app-dir backend --port 8000
+```
 
-- 🔑 Admin functions need `ADMIN_API_KEY`. They return 503 while it is empty and 401 for a wrong key. The key is compared in constant time and never stored in the browser.
-- 🧾 Devices are identified by a random `X-Client-Key`, and only its SHA-256 hash is stored.
-- 🚦 Each client IP is limited to 120 requests a minute by default, with `429` and `Retry-After`.
-- 🧱 A strict Content Security Policy allows scripts only from the planner's own origin.
-- 🌍 Plain HTTP is the default. Use HTTPS (the Docker + Caddy kit) for anything beyond a trusted network.
+Open http://127.0.0.1:8000. The interactive API reference is at http://127.0.0.1:8000/api/docs.
+
+**Windows PowerShell:** the same steps, but activate the environment with `.venv\Scripts\Activate.ps1`.
+
+**Docker:**
+
+```bash
+docker build -t bengaluru-transit-planner .
+docker run -p 8000:8000 bengaluru-transit-planner                  # real mode, as the public service runs
+docker run -p 8000:8000 -e DEMO_MODE=1 bengaluru-transit-planner   # demonstration server, with a banner
+```
+
+**Demonstration mode without Docker:** run `python scripts/seed_demo_feed.py`, then start the server with
+`DEMO_MODE=1`. Try **Demo Central** → **Demo Junction**.
+
+**Deploying to Render:** follow [`docs/launch/DEPLOYMENT_GUIDE.md`](docs/launch/DEPLOYMENT_GUIDE.md). Then check any
+deployment with:
+
+```bash
+python scripts/verify_deployment.py https://bengaluru-transit-planner-v4.onrender.com \
+  --v3 https://bmtc-future-transit-planner-3-0.onrender.com
+```
+
+## ⚙️ Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | SQLite in `data/` | `postgresql://…` for production. Set it only in the hosting dashboard, never in Git or chat |
+| `ADMIN_API_KEY` | not set (admin off) | Administration key; use 32 or more random characters |
+| `DEMO_MODE` | `0` | `1` makes a demonstration server; **never** set it on the public service |
+| `LOAD_COMMUNITY_METRO` | `1` (container) | Loads the community Metro feed at start if missing |
+| `ACCOUNTS_ENABLED` | `0` | `1` turns on accounts, which start only with PostgreSQL |
+| `RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute for each visitor |
+| `PORT` | `8000` (container) | The port the container listens on |
+| `SERVICE_TIMEZONE`, `CORS_ORIGINS`, `LOG_LEVEL`, `MAX_UPLOAD_MB` | see `backend/app/config.py` | Advanced settings |
+
+## 🧪 Quality and test results
+
+Results from the latest verified commit, **`aafdc4f`** (18 November 2026). Live status: the CI badge above.
+
+| Check | Result | Run on |
+|---|---|---|
+| GitHub Actions CI: tests (Python 3.12 and 3.13), container in demo and real mode, PostgreSQL | ✅ **4/4 jobs passed** (push and pull request) | `aafdc4f` |
+| Unit, API, integration, migration and static front-end tests (`pytest`) | ✅ **501 passed**, 5 skipped (PDF tests needing a font), 0 failed | `aafdc4f` |
+| Lint (ruff), static security (bandit), dependency audit (pip-audit) | ✅ clean | `aafdc4f` |
+| Data survives a restart on PostgreSQL 16 (saved route, admin change, account and its journey) | ✅ passed in CI | `aafdc4f` |
+| Public deployment checks (`scripts/verify_deployment.py`, real mode) | ✅ **12/12** | live service, `aafdc4f` |
+| Real-mode browser check on the public site | ✅ **14/14** | live service, `aafdc4f` |
+| Launch screens: 4 languages, phone and desktop | ✅ **268/268** | `aafdc4f` |
+| Accessibility (axe-core, WCAG 2.1 A/AA): 15 screens × light and dark | ✅ **0 violations** | `aafdc4f` |
+| End-to-end crawl: every control on 20 screens, forms, the passenger journey | ✅ **1,028/1,028**; 869 controls, 0 decorative or broken | `fb8d2a2` (no screens added since) |
+| Browser regression, 3.0 and 4.0 screens | ✅ **121/121** | `fb8d2a2` |
+| Security probes (auth, isolation, injection, XSS, limits) | ✅ **34/34** | `fb8d2a2` |
+
+Not yet tested by people: a real Android phone, a screen reader, and native-speaker review of the translations. No
+independent penetration test has been done.
+
+## 🔒 Privacy
+
+- **No accounts in use.** A random device key keeps your saved items apart; the server stores only its SHA-256 hash.
+- **Not stored:** names, phone numbers, emails, locations, searches or payment details.
+- **No tracking:** no analytics, and no access log of searches.
+- **Location:** asked for only when you tap **Stops near me**, and never stored.
+- **Erasure:** **Delete my data** removes everything kept about your device.
+
+Draft policy: [`docs/government/PRIVACY_POLICY.md`](docs/government/PRIVACY_POLICY.md).
+
+## 🛡️ Security
+
+- **Browser hardening:** a strict content security policy (`script-src 'self'`), HSTS and security headers on every
+  response, and a per-visitor rate limit.
+- **Administration:** a secret key compared in constant time. Prepared roles (passenger, editor, admin) name each
+  signed-in staff member in the audit log.
+- **Accounts, when enabled:** scrypt password hashes, hashed bearer sessions (never cookies), lockout after repeated
+  failures and one-time recovery codes.
+- **Provider actions:** every one goes through an adapter that refuses until an agreement exists, so no fake ticket,
+  QR code or payment can be produced.
+- **Releases:** a push to `v4` can never publish an Android release (`tests/test_release_guard.py`).
+
+Self-assessment: [`V4_SECURITY_REPORT.md`](V4_SECURITY_REPORT.md). Open items: one shared admin key until accounts
+run, inline styles in the content security policy, and no independent penetration test.
+
+## ♿ Accessibility and languages
+
+- **Automated checks:** WCAG 2.1 AA scans show 0 violations on every main screen in light and dark themes, and every
+  screen fits a 390-pixel phone without sideways scrolling.
+- **Display settings:** large text, dark mode and low-data mode.
+- **Languages:** the whole interface is in English, Kannada, Telugu and Hindi, and a test fails if any text is missing
+  in any language. Station names appear as the data source publishes them.
+
+## ⚠️ Known limitations
+
+- **Official data:** none. The Metro data is unofficial and approximate, and the **elevated Pink Line** (opened
+  14 Nov 2026 per press reports) is missing from it.
+- **BMTC buses:** no data; no authorised source exists yet.
+- **Live and payments:** no live information, tickets or payments.
+- **Hosting:** the free service sleeps and erases its disk on restart, so saved routes and admin edits on the server
+  are lost until PostgreSQL is configured.
+- **Wording:** a Metro journey says "Wait *n* min for the first **bus**" even when the first ride is a train. This
+  will be fixed in the next code update.
+- **Assistant:** the travel assistant follows fixed rules (not AI) and understands English questions only.
+
+Full list: [`docs/launch/DATA_COVERAGE_REPORT.md`](docs/launch/DATA_COVERAGE_REPORT.md) and
+[`FINAL_IMPLEMENTATION_REPORT.md`](FINAL_IMPLEMENTATION_REPORT.md).
 
 ## 🗺️ Roadmap
 
-- [x] Journeys with up to two changes
-- [x] GTFS fares
-- [x] Offline timetables and installable PWA
-- [x] Telugu translation
-- [ ] Verified official BMTC GTFS feed (needs a reachable source with a clear licence, see [`SOURCES.md`](SOURCES.md))
-- [ ] Namma Metro integration
-- [ ] Live bus positions from a verified GTFS-Realtime feed
-- [ ] Native-speaker review of Kannada, Telugu and Hindi
-- [ ] Android APK build and on-device PWA install test
-- [ ] Production deployment testing
-
-<details>
-<summary><b>⚠️ Known limits of this build (click to expand)</b></summary>
-
-<br>
-
-- No official BMTC timetable is loaded, and none is shown for 2027 to 2030.
-- No Namma Metro data. Journeys ignore route type.
-- No live bus positions or delays.
-- Only the synthetic demo feed has been tested. No real city feed has been tested.
-- Kannada, Telugu and Hindi text is a first draft. Right-to-left languages have not been tested.
-- The Docker image has not been built, and the Android starter has not been compiled.
-- Nothing has been run on a real phone. Phone layout was checked in headless Chrome only.
-- Fares that depend on origin, destination or zone, and transfer fare rules, are not applied.
-- Scenario estimates use placeholder assumptions (15 km/h average speed, 0.5 min dwell per stop, detour factor 1.3) that need calibrating against real data.
-- Not production ready.
-
-</details>
+| When | Item |
+|---|---|
+| **Next** (no permission needed) | Fix the "first bus" wording; administrator service notices with an official source and an expiry date; remove inline styles; phone and screen-reader tests |
+| **After PostgreSQL is configured** | Account screens (sign in, saved journeys across devices, notification choices), per-person admin accounts |
+| **With official data** (requests drafted for DULT, BMTC, BMRCL) | Verified bus and Metro timetables, the Pink Line, official fares, then live data under an agreement |
+| **Only with written agreements** | Tickets, passes, Metro QR, payments, NCMC |
 
 ## 📚 Documentation
 
-| Document | For |
+| Document | What it covers |
 |---|---|
-| [`docs/INSTALL_WINDOWS.md`](docs/INSTALL_WINDOWS.md) | Installing, running, loading data, backups and restore on Windows |
-| [`docs/PHONE_ACCESS.md`](docs/PHONE_ACCESS.md) | Using the planner from phones |
-| [`docs/DEPLOY.md`](docs/DEPLOY.md) | Linux server with Docker and Caddy |
-| [`docs/API.md`](docs/API.md) | The full API |
-| [`docs/architecture.md`](docs/architecture.md) | Components, data flow and the security model |
-| [`docs/SECURITY_ASVS.md`](docs/SECURITY_ASVS.md) | OWASP ASVS 5.0.0 and Top 10:2025 mapping |
-| [`docs/TRANSLATION.md`](docs/TRANSLATION.md) | Adding or reviewing a language |
-| [`docs/PRIVACY.md`](docs/PRIVACY.md) | What data is kept, where and for how long |
-| [`docs/TEST_RESULTS.md`](docs/TEST_RESULTS.md) | Every verification run, with real results |
-| [`database/README.md`](database/README.md) | Tables, migrations, backups |
-| [`SOURCES.md`](SOURCES.md) | Data sources and what official data would need |
+| [`FINAL_IMPLEMENTATION_REPORT.md`](FINAL_IMPLEMENTATION_REPORT.md) | What is done, what is next, what needs the owner |
+| [`FINAL_SUBMISSION_READINESS.md`](FINAL_SUBMISSION_READINESS.md) | Commit, deployment, test results, suitability |
+| [`docs/launch/DATA_COVERAGE_REPORT.md`](docs/launch/DATA_COVERAGE_REPORT.md) | What is real, unverified, missing or restricted |
+| [`docs/launch/POSTGRESQL_PRODUCTION.md`](docs/launch/POSTGRESQL_PRODUCTION.md) | Production database, costs and backups |
+| [`docs/launch/ACCOUNTS_AND_ROLES.md`](docs/launch/ACCOUNTS_AND_ROLES.md) | Accounts, sessions, roles, notifications |
+| [`docs/launch/DEPLOYMENT_GUIDE.md`](docs/launch/DEPLOYMENT_GUIDE.md) | Render setup, environment, checking a deployment |
+| [`government_submission_2026/`](government_submission_2026/) | Technical-review package and draft letters (not sent) |
+| [`CHANGELOG.md`](CHANGELOG.md) | Every change on `v4` |
 
-<details>
-<summary><b>📁 Repository layout</b></summary>
+## 📊 Data sources and attribution
 
-```
-backend/app/        API, journey planner, services, GTFS importer, security, database, service clock
-dashboard/          web dashboard, translations, service worker, manifest, vendored Leaflet
-scripts/            CLI tools, benchmark, restore drill, Windows launchers (.bat)
-migrations/         Alembic: 0001 baseline, 0002 fares
-tests/              pytest suite, browser checks (with vendored axe-core), mutation checks
-docs/               guides, architecture, security mapping, test results
-deploy/             Caddy configuration
-android/            Flutter WebView starter (not built)
-assets/             banner and screenshots
-```
+| Source | Used for | Licence |
+|---|---|---|
+| [bmrcl-gtfs](https://github.com/Vonter/bmrcl-gtfs) community project, commit `f402c4c` (17 Aug 2026) | Namma Metro stations, lines and timetables | ODbL 1.0 |
+| [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors | Map tiles; station positions within the feed above | ODbL |
+| BMRCL published timetables ([bmrc.co.in](https://www.bmrc.co.in/metro-timings/)) | The original timetable information the feed was built from | Operator's content; not republished here |
+| Press and secondary sources, each linked in the app | Upcoming-transport statuses | Cited, not copied |
 
-</details>
+> Contains information from bmrcl-gtfs, which is made available under the Open Database License (ODbL). Contains
+> OpenStreetMap data © OpenStreetMap contributors. Timetable information originally published by Bengaluru Metro
+> Rail Corporation Limited.
 
-## 🤝 Contributing
+Details and the pinned SHA-256:
+[`reference_data/namma_metro_community/README.md`](reference_data/namma_metro_community/README.md).
 
-Issues and pull requests are welcome. Please:
-
-1. Keep the three classifications apart. Never present unverified or estimated data as official.
-2. Run `python -m ruff check .` and `python -m pytest` before opening a PR.
-3. Native speakers of Kannada, Telugu or Hindi: reviews of `dashboard/i18n.js` are especially valuable. See [`docs/TRANSLATION.md`](docs/TRANSLATION.md).
+The community BMTC feed (bmtc-gtfs) is **not used**, because it is built from the Namma BMTC app's own data
+interface.
 
 ## 📄 Licence
 
-No licence has been chosen for this project yet, so default copyright applies. Vendored Leaflet 1.9.4 is BSD 2-Clause (`dashboard/vendor/leaflet/`). axe-core 4.14.0, used only by the browser checks, is MPL 2.0 (`tests/browser/vendor/axe-core/`).
+**No open-source licence has been chosen for this project yet,** so default copyright applies. The code is publicly
+available to read, but not licensed for reuse. Third-party components keep their own licences:
+- Leaflet 1.9.4 (BSD 2-Clause, in `dashboard/vendor/leaflet/`);
+- the Metro feed and OpenStreetMap data (ODbL);
+- axe-core 4.14.0, used only by the tests (MPL 2.0).
+
+---
 
 <div align="center">
 
-<br>
-
-**If this project is useful to you, please ⭐ star the repo!**
-
-<sub>Made for Bengaluru commuters, planners and transit enthusiasts. Unofficial, and proud of saying so.</sub>
+Made in Bengaluru by [Mopuru Upendra Reddy](https://github.com/upendra8690) · an independent project, not an official
+BMTC or BMRCL service · in an emergency, call **112**
 
 </div>

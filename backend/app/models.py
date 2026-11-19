@@ -339,3 +339,229 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class TransportAnnouncement(Base):
+    """An upcoming-transport entry: information only, never read by the journey planner.
+
+    Administrators add and update entries through the API, so no code change is needed when a project's status
+    changes. Each change is kept in ``changes`` with its reason.
+    """
+
+    __tablename__ = "transport_announcements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    transport_type: Mapped[str] = mapped_column(String(40))
+    location: Mapped[str] = mapped_column(String(300), default="")
+    announcement: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40))
+    source_kind: Mapped[str] = mapped_column(String(20))
+    # Partial ISO dates (YYYY, YYYY-MM or YYYY-MM-DD); opened_on is always a full date.
+    announced_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    expected_start: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    opened_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    sources_json: Mapped[str] = mapped_column(Text)
+    verified_on: Mapped[str] = mapped_column(String(10))
+    note: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+    changes: Mapped[list[TransportAnnouncementChange]] = relationship(
+        back_populates="announcement", cascade="all, delete-orphan",
+        order_by="TransportAnnouncementChange.id.desc()",
+    )
+
+
+class TransportAnnouncementChange(Base):
+    """One change to an upcoming-transport entry: who, when, why, and each field's old and new value."""
+
+    __tablename__ = "transport_announcement_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    announcement_id: Mapped[int] = mapped_column(
+        ForeignKey("transport_announcements.id", ondelete="CASCADE"), index=True
+    )
+    changed_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    actor: Mapped[str] = mapped_column(String(100))
+    reason: Mapped[str] = mapped_column(Text)
+    changes_json: Mapped[str] = mapped_column(Text)
+
+    announcement: Mapped[TransportAnnouncement] = relationship(back_populates="changes")
+
+
+# ---------------------------------------------------------------- service notices (written by administrators)
+NOTICE_KINDS = ("DISRUPTION", "DIVERSION", "INFORMATION")
+NOTICE_MODES = ("BUS", "METRO", "ALL")
+
+
+class ServiceNotice(Base):
+    """A short service notice written by an administrator from an official source, shown until its end date.
+
+    It is information only: the journey planner never reads it. Every notice links to the official source it repeats,
+    and ends within a month. Withdrawing a notice hides it at once; it is kept, with the audit log, as a record.
+    """
+
+    __tablename__ = "service_notices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(20))
+    mode: Mapped[str] = mapped_column(String(10))
+    source_title: Mapped[str] = mapped_column(String(200))
+    source_url: Mapped[str] = mapped_column(String(500))
+    starts_on: Mapped[dt.date] = mapped_column(Date)
+    ends_on: Mapped[dt.date] = mapped_column(Date, index=True)
+    withdrawn: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ---------------------------------------------------------------- passenger accounts (off unless storage is permanent)
+ROLE_PASSENGER, ROLE_EDITOR, ROLE_ADMIN = "passenger", "editor", "admin"
+ROLES = (ROLE_PASSENGER, ROLE_EDITOR, ROLE_ADMIN)
+
+
+class User(Base):
+    """A passenger or staff account. Only a salted scrypt hash of the password is stored, never the password."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(20), default=ROLE_PASSENGER)
+    recovery_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class UserSession(Base):
+    """A signed-in session. The token is given to the browser once; only its SHA-256 hash is stored."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime, index=True)
+
+
+class UserSavedJourney(Base):
+    """A journey saved to an account, so it follows the passenger to another device."""
+
+    __tablename__ = "user_saved_journeys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    origin: Mapped[str] = mapped_column(String(80))
+    destination: Mapped[str] = mapped_column(String(80))
+    modes: Mapped[str] = mapped_column(String(10), default="all")
+    classification: Mapped[str] = mapped_column(String(20))
+    label: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class NotificationPreference(Base):
+    """What a passenger would like to be told about. Stored only: no notification is sent (no delivery service)."""
+
+    __tablename__ = "notification_preferences"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    service_notices: Mapped[bool] = mapped_column(Boolean, default=False)
+    upcoming_changes: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ---------------------------------------------------------------- tickets and payments (no provider connected)
+# Rows here exist only when an authorised ticketing provider and payment provider are connected. Until then nothing
+# can be bought and these tables stay empty. See app/services/commerce.py.
+PRODUCTS = ("BUS_TICKET", "BUS_PASS", "METRO_QR", "COMBINED")
+ORDER_STATUSES = ("CREATED", "PAYMENT_PENDING", "PAID", "ISSUED", "FAILED", "REFUND_REQUESTED", "REFUNDED")
+
+
+class Order(Base):
+    """A purchase through an authorised provider. Kept after an account is deleted, as payment records must be."""
+
+    __tablename__ = "orders"
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key", name="uq_orders_user_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    product: Mapped[str] = mapped_column(String(20))
+    ticket_provider: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    amount_paise: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+    details: Mapped[str] = mapped_column(Text)
+    quote: Mapped[str] = mapped_column(Text)
+    idempotency_key: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Payment(Base):
+    """A payment taken by the payment provider. Only the provider's reference is kept: never card or UPI details."""
+
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    provider_ref: Mapped[str] = mapped_column(String(100), unique=True)
+    # This app's own id for the attempt (BTP + date + random), sent to the provider as the receipt.
+    transaction_id: Mapped[str | None] = mapped_column(String(40), nullable=True, unique=True, index=True)
+    method: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20))
+    amount_paise: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TravelTicket(Base):
+    """A ticket or pass issued by the ticketing provider. The QR payload is stored exactly as the provider sent it."""
+
+    __tablename__ = "travel_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    provider_ticket_id: Mapped[str] = mapped_column(String(100))
+    product: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20))
+    valid_from: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    valid_until: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    qr_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Refund(Base):
+    """A refund started with the payment provider; complete only when the provider's signed notification says so."""
+
+    __tablename__ = "refunds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="CASCADE"), index=True)
+    provider_ref: Mapped[str] = mapped_column(String(100), unique=True)
+    amount_paise: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str] = mapped_column(String(300))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PaymentNotification(Base):
+    """Each signed provider notification is processed once: its event id is remembered."""
+
+    __tablename__ = "payment_notifications"
+    __table_args__ = (UniqueConstraint("provider", "event_id", name="uq_payment_notifications_event"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    event_id: Mapped[str] = mapped_column(String(100))
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

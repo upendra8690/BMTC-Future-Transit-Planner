@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi import Path as ApiPath
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,9 @@ from .models import (
     CLASS_SCENARIO,
     CLASS_UNVERIFIED,
     DATA_CLASSIFICATIONS,
+    ROLE_ADMIN,
+    ROLE_EDITOR,
+    ROLES,
     STATUS_COMPLETED,
     WEEKDAY_CODES,
     AuditLog,
@@ -35,12 +38,52 @@ from .models import (
     SavedRoute,
     Scenario,
     Stop,
+    User,
     UserPreference,
     utcnow,
 )
-from .schemas import PLANNING_YEARS, DataSourceIn, PreferencesIn, SavedRouteIn, ScenarioIn, VerificationIn
-from .security import client_ip, optional_client_hash, require_admin, require_client_key, safe_filename
-from .services import planner
+from .schemas import (
+    PLANNING_YEARS,
+    AccountIn,
+    AccountJourneyIn,
+    AnnouncementIn,
+    AnnouncementUpdateIn,
+    DataSourceIn,
+    NoticeIn,
+    NoticeUpdateIn,
+    NotificationIn,
+    OrderIn,
+    PasswordChangeIn,
+    PasswordIn,
+    PayIn,
+    PreferencesIn,
+    QuoteIn,
+    RecoverIn,
+    RefundIn,
+    RoleIn,
+    SavedRouteIn,
+    ScenarioIn,
+    VerificationIn,
+)
+from .security import (
+    bearer_token,
+    client_ip,
+    optional_client_hash,
+    require_admin,
+    require_client_key,
+    safe_filename,
+)
+from .services import (
+    accounts,
+    announcements,
+    assistant,
+    catalogue,
+    commerce,
+    integrations,
+    notices,
+    planner,
+    registry,
+)
 from .services import scenarios as scn
 from .services import schedule as sched
 from .services.audit import record_audit
@@ -49,6 +92,8 @@ from .services.maintenance import MaintenanceError, backup_and_verify, sqlite_fi
 from .services.verification import VerificationError, set_verification
 
 router = APIRouter()
+
+APP_VERSION = "4.0.0-beta.1"
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
@@ -128,6 +173,139 @@ def _scenario_response(scenario: Scenario, request: Request, warnings: list[str]
     return body
 
 
+# ---------------------------------------------------------------- live vehicles (GTFS-Realtime; off until authorised)
+
+def _live_official(request: Request) -> bool:
+    live = request.app.state.live
+    return bool(live.official and live.status(clock.utc_now())["available"])
+
+
+@router.get("/live/status", tags=["live"])
+def live_status(request: Request) -> dict[str, Any]:
+    """Whether a live feed is connected, how fresh it is, and what is needed when it is not."""
+    return request.app.state.live.status(clock.utc_now())
+
+
+@router.get("/live/vehicles", tags=["live"])
+def live_vehicles(request: Request, db: DbSession,
+                  route: str = Query("", max_length=40, description="Route number or GTFS route id")) -> dict[str, Any]:
+    """Vehicles from the live feed, matched with the timetable. Positions older than 10 minutes are left out."""
+    return request.app.state.live.vehicles(db, clock.utc_now(), route)
+
+
+@router.get("/live/vehicles/{vehicle_id}", tags=["live"])
+def live_vehicle(request: Request, db: DbSession,
+                 vehicle_id: str = ApiPath(..., min_length=1, max_length=100)) -> dict[str, Any]:
+    """One vehicle with its route progress and an estimate for each stop still ahead (or the scheduled time)."""
+    found = request.app.state.live.vehicle(db, clock.utc_now(), vehicle_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="That vehicle is not in the live feed now.")
+    return found
+
+
+@router.get("/live/stops/{stop_id}/arrivals", tags=["live"])
+def live_arrivals(stop_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    """Live arrival estimates at one stop. Scheduled departures stay on their own endpoint, under their own label."""
+    stop = db.get(Stop, stop_id)
+    if stop is None:
+        raise HTTPException(status_code=404, detail="Stop not found.")
+    return request.app.state.live.arrivals(db, clock.utc_now(), stop)
+
+
+# ---------------------------------------------------------------- tickets and payments (no provider connected)
+
+def _commerce(call: Any) -> Any:
+    try:
+        return call()
+    except commerce.CommerceError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc),
+                            headers={"X-Error-Code": exc.code}) from exc
+
+
+@router.get("/commerce/status", tags=["tickets"])
+def commerce_status(request: Request) -> dict[str, Any]:
+    """Which products can be bought, which payment methods exist, and what each missing one needs."""
+    return request.app.state.commerce.status()
+
+
+@router.post("/commerce/quotes", tags=["tickets"])
+def commerce_quote(data: QuoteIn, request: Request) -> dict[str, Any]:
+    """The official fare from the ticketing provider. 503 while no provider is connected."""
+    return _commerce(lambda: request.app.state.commerce.quote(data.product, data.details))
+
+
+@router.post("/commerce/orders", status_code=201, tags=["tickets"])
+def commerce_order(data: OrderIn, request: Request, db: DbSession) -> dict[str, Any]:
+    shop = request.app.state.commerce
+    _commerce(lambda: shop.require(data.product))
+    user = _signed_in(request, db)
+    return _commerce(lambda: shop.create_order(db, user, data.product, data.details, data.idempotency_key))
+
+
+@router.post("/commerce/orders/{order_id}/pay", tags=["tickets"])
+def commerce_pay(order_id: int, data: PayIn, request: Request, db: DbSession) -> dict[str, Any]:
+    """Starts a payment with the payment provider and returns where to pay. The app never takes card or UPI secrets."""
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.pay(db, user, order_id, data.method))
+
+
+@router.post("/commerce/orders/{order_id}/verify", tags=["tickets"])
+def commerce_verify(order_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    """Asks the payment provider, server to server, whether the payment arrived. The only way an order becomes paid
+    apart from the provider's signed webhook: returning from a UPI app or a browser redirect proves nothing."""
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.verify(db, user, order_id))
+
+
+@router.post("/admin/payments/reconcile", tags=["admin"])
+def admin_reconcile_payments(request: Request, db: DbSession) -> dict[str, Any]:
+    """Checks every pending payment with the provider, for example after a restart."""
+    require_admin(request)
+    result = request.app.state.commerce.reconcile_pending(db)
+    record_audit(db, actor=request.state.admin_actor, action="payments.reconcile", entity="payments",
+                 detail=result, ip=client_ip(request))
+    db.commit()
+    return result
+
+
+@router.post("/commerce/orders/{order_id}/refund", tags=["tickets"])
+def commerce_refund(order_id: int, data: RefundIn, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.request_refund(db, user, order_id, data.reason))
+
+
+@router.get("/commerce/orders", tags=["tickets"])
+def commerce_history(request: Request, db: DbSession) -> dict[str, Any]:
+    """The signed-in passenger's orders with their payments, tickets and refunds. Empty while nothing can be sold."""
+    user = _signed_in(request, db)
+    return {"orders": request.app.state.commerce.history(db, user)}
+
+
+@router.get("/commerce/orders/{order_id}", tags=["tickets"])
+def commerce_order_detail(order_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.order(db, user, order_id))
+
+
+@router.get("/commerce/orders/{order_id}/receipt", tags=["tickets"])
+def commerce_receipt(order_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    """A record of a payment the provider confirmed. Not a tax invoice and not a ticket."""
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.receipt(db, user, order_id))
+
+
+@router.post("/commerce/notifications/{provider}", tags=["tickets"])
+async def commerce_notification(request: Request,
+                                provider: str = ApiPath(..., pattern="^[a-z0-9-]{2,50}$")) -> dict[str, Any]:
+    """Signed notifications from the payment provider. The signature is checked by the provider's class."""
+    body = await request.body()
+    if len(body) > 64 * 1024:
+        raise HTTPException(status_code=413, detail="Notification too large.")
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    with request.app.state.db.session() as db:
+        return _commerce(lambda: request.app.state.commerce.notification(db, provider, headers, body))
+
+
 # ---------------------------------------------------------------- health and metadata
 
 @router.get("/health", tags=["system"])
@@ -163,13 +341,13 @@ def service_clock(request: Request, db: DbSession) -> dict[str, Any]:
 def meta(request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
     return {
-        "name": "BMTC Future Transit Planner",
-        "version": "3.0.0",
+        "name": "Bengaluru Transit Planner",
+        "version": APP_VERSION,
         "unofficial": True,
         "affiliation": (
             "Not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro or any transport operator."
         ),
-        "live_positions_available": False,
+        "live_positions_available": _live_official(request),
         "live_positions_note": (
             "No verified real-time feed is connected, so no live bus or train positions are shown. "
             "Every time is scheduled."
@@ -194,6 +372,153 @@ def meta(request: Request) -> dict[str, Any]:
         },
         "admin_enabled": bool(settings.admin_api_key),
     }
+
+
+@router.get("/features", tags=["system"])
+def features(request: Request, db: DbSession) -> dict[str, Any]:
+    """What works right now. States: AVAILABLE, NO_DATA, UNAVAILABLE (needs an authorisation), PLANNED.
+
+    `server_storage_persistent` is false when items saved on the server are lost on restart (free hosting), so the
+    app can say so next to them.
+    """
+    settings = request.app.state.settings
+    return {"version": APP_VERSION, "demo_mode": settings.demo_mode,
+            "server_storage_persistent": not settings.ephemeral_storage,
+            "features": catalogue.feature_states(db, accounts_running=request.app.state.accounts_reason is None,
+                                                 live=request.app.state.live.status(clock.utc_now()))}
+
+
+@router.get("/services", tags=["system"])
+def services() -> dict[str, Any]:
+    """Official websites and public helplines, each checked on the stated date. Links only; nothing is booked here."""
+    return catalogue.services_directory()
+
+
+@router.get("/upcoming", tags=["system"])
+def upcoming_transport(db: DbSession) -> dict[str, Any]:
+    """Upcoming transport: status information only, kept in the database and updated by administrators."""
+    return announcements.list_entries(db)
+
+
+_REQUIRED_WHEN_SENT = ("name", "transport_type", "status", "source_kind", "sources", "verified_on")
+
+
+@router.post("/admin/upcoming", status_code=201, tags=["admin"])
+def admin_create_upcoming(data: AnnouncementIn, request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
+    values = data.model_dump(exclude={"id", "reason"})
+    try:
+        return announcements.create(db, data.id, values, reason=data.reason, actor=request.state.admin_actor,
+                                    ip=client_ip(request),
+                                    today=_service_today(request, db))
+    except announcements.AnnouncementError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.patch("/admin/upcoming/{key}", tags=["admin"])
+def admin_update_upcoming(
+    key: Annotated[str, ApiPath(pattern=r"^[a-z0-9_]{2,60}$")], data: AnnouncementUpdateIn, request: Request,
+    db: DbSession,
+) -> dict[str, Any]:
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
+    changes: dict[str, Any] = {}
+    for field in sorted(data.model_fields_set - {"reason"}):
+        value = getattr(data, field)
+        if value is None and field in _REQUIRED_WHEN_SENT:
+            raise HTTPException(status_code=422, detail=f"{field} cannot be empty.")
+        if field == "sources":
+            value = [source.model_dump() for source in data.sources or []]
+        changes[field] = "" if value is None and field in ("location", "announcement", "note") else value
+    try:
+        return announcements.update(db, key, changes, reason=data.reason, actor=request.state.admin_actor,
+                                    ip=client_ip(request),
+                                    today=_service_today(request, db))
+    except announcements.AnnouncementError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.get("/notices", tags=["system"])
+def service_notices(request: Request, db: DbSession) -> dict[str, Any]:
+    """Service notices running today. Each repeats an official source, which it links to; there is no live alerts
+    feed, so this list is empty unless an administrator has posted a notice."""
+    return notices.list_active(db, _service_today(request, db))
+
+
+@router.get("/admin/notices", tags=["admin"])
+def admin_list_notices(request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
+    return notices.list_for_admin(db, _service_today(request, db))
+
+
+@router.post("/admin/notices", status_code=201, tags=["admin"])
+def admin_create_notice(data: NoticeIn, request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
+    values = data.model_dump(exclude={"reason"})
+    values["title"], values["body"] = values["title"].strip(), values["body"].strip()
+    try:
+        return notices.create(db, values, reason=data.reason, actor=request.state.admin_actor, ip=client_ip(request),
+                              today=_service_today(request, db))
+    except notices.NoticeError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.patch("/admin/notices/{notice_id}", tags=["admin"])
+def admin_update_notice(notice_id: Annotated[int, ApiPath(ge=1)], data: NoticeUpdateIn, request: Request,
+                        db: DbSession) -> dict[str, Any]:
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
+    changes: dict[str, Any] = {}
+    for field in sorted(data.model_fields_set - {"reason"}):
+        value = getattr(data, field)
+        if value is None:
+            raise HTTPException(status_code=422, detail=f"{field} cannot be empty.")
+        changes[field] = value.strip() if isinstance(value, str) else value
+    try:
+        return notices.update(db, notice_id, changes, reason=data.reason, actor=request.state.admin_actor,
+                              ip=client_ip(request), today=_service_today(request, db))
+    except notices.NoticeError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.get("/providers", tags=["system"])
+def provider_registry(db: DbSession) -> dict[str, Any]:
+    """Every outside data source or service: licence, permission status, integration status and limitations."""
+    return registry.providers(db)
+
+
+@router.get("/data-status", tags=["system"])
+def data_freshness(request: Request, db: DbSession) -> dict[str, Any]:
+    """Each active feed and whether its calendar covers today (CURRENT, EXPIRED, NOT_STARTED, UNKNOWN_DATES)."""
+    return registry.data_status(db, _service_today(request, db))
+
+
+@router.get("/integrations", tags=["system"])
+def integration_status(request: Request) -> dict[str, Any]:
+    """Provider integrations (live vehicles, tickets, passes, Metro QR, payments, NCMC) and what each one needs."""
+    return integrations.status(live_connected=_live_official(request))
+
+
+@router.post("/integrations/{capability}/request", tags=["system"])
+def integration_request(capability: str = ApiPath(..., pattern="^[a-z_]{2,40}$")) -> JSONResponse:
+    """The single entry point for provider actions. With no authorised provider it always refuses with 503 and the
+    official channel; it never returns a ticket, QR code, receipt, balance, payment result or vehicle position."""
+    try:
+        integrations.adapter(capability).request()
+    except integrations.IntegrationUnavailableError as err:
+        status_code = 404 if err.code == "UNKNOWN_CAPABILITY" else 503
+        return JSONResponse(
+            status_code=status_code,
+            content={"detail": "This feature needs an authorised provider that is not connected.",
+                     "capability": err.capability, "code": err.code, "official_url": err.official_url},
+        )
+    raise HTTPException(status_code=500, detail="Integration adapter returned without refusing.")
+
+
+@router.get("/assistant", tags=["system"])
+def assistant_interpret(q: str = Query(..., min_length=1, max_length=assistant.MAX_QUESTION)) -> dict[str, Any]:
+    """Which of the app's own data requests answers a typed question. Rule-based; it never writes an answer."""
+    result = assistant.interpret(q)
+    result["engine"] = "rules"
+    return result
 
 
 # ---------------------------------------------------------------- years
@@ -345,6 +670,32 @@ def stop_departures(
     return sched.stop_departures(db, stop, cls, now=clock.utc_now(), limit=limit)
 
 
+@router.get("/stops/{stop_id}/routes", tags=["timetables"])
+def stop_routes(
+    stop_id: int,
+    db: DbSession,
+    classification: str = Query(CLASS_OFFICIAL),
+) -> dict[str, Any]:
+    """Every route that calls at this stop, with the places it runs towards."""
+    cls = _classification(classification)
+    stop = db.get(Stop, stop_id)
+    imp = _active_import(db, stop.import_id) if stop is not None else None
+    if stop is None or imp is None or imp.classification != cls:
+        raise HTTPException(status_code=404, detail="Stop not found in this classification's data.")
+    return sched.stop_routes(db, stop, cls)
+
+
+@router.get("/metro/stations", tags=["timetables"])
+def metro_stations(
+    db: DbSession,
+    classification: str = Query(CLASS_OFFICIAL),
+    q: str = Query("", max_length=80),
+    limit: int = Query(200, ge=1, le=500),
+) -> dict[str, Any]:
+    """Stations served by Metro routes (GTFS route_type 1 and urban-rail types), with the lines at each."""
+    return sched.metro_stations(db, _classification(classification), query=q, limit=limit)
+
+
 @router.get("/journey", tags=["timetables"])
 def journey(
     request: Request,
@@ -380,6 +731,7 @@ def plan_journey(
     classification: str = Query(CLASS_OFFICIAL),
     max_changes: int = Query(planner.DEFAULT_MAX_CHANGES, ge=0, le=planner.MAX_CHANGES_LIMIT),
     limit: int = Query(5, ge=1, le=10),
+    modes: str = Query("all", pattern="^(all|bus|metro)$", description="all, bus (buses only) or metro (Metro only)."),
 ) -> dict[str, Any]:
     """Journey options with up to two changes, across every feed of one classification.
 
@@ -399,6 +751,7 @@ def plan_journey(
         limit=limit,
         on_date=on_date,
         now=None if on_date is not None else clock.utc_now(),
+        travel_modes=modes,
     )
 
 
@@ -524,6 +877,25 @@ def export_scenario_pdf(scenario_id: int, request: Request, db: DbSession) -> Re
 
 # ---------------------------------------------------------------- saved routes and preferences (device-scoped)
 
+@router.delete("/my-data", tags=["user"])
+def erase_device_data(request: Request, db: DbSession) -> dict[str, Any]:
+    """Delete everything the server holds for this device: scenarios, saved routes and preferences.
+
+    The audit entry records only the counts and a short hash prefix, never the IP address, so the erasure itself
+    leaves no new personal data behind.
+    """
+    owner = require_client_key(request)
+    scenarios = db.scalars(select(Scenario).where(Scenario.owner_hash == owner)).all()
+    for scenario in scenarios:
+        db.delete(scenario)
+    saved = db.execute(delete(SavedRoute).where(SavedRoute.client_hash == owner)).rowcount
+    prefs = db.execute(delete(UserPreference).where(UserPreference.client_hash == owner)).rowcount
+    counts = {"scenarios": len(scenarios), "saved_routes": saved, "preferences": prefs}
+    record_audit(db, actor=f"device:{owner[:12]}", action="device.erase", entity="device", detail=counts)
+    db.commit()
+    return {"deleted": counts}
+
+
 @router.get("/saved-routes", tags=["user"])
 def list_saved_routes(request: Request, db: DbSession) -> dict[str, Any]:
     owner = optional_client_hash(request)
@@ -631,7 +1003,8 @@ def admin_create_source(data: DataSourceIn, request: Request, db: DbSession) -> 
                         verified=False)
     db.add(source)
     db.flush()
-    record_audit(db, actor="admin", action="data_source.create", entity="data_source", entity_id=source.id,
+    record_audit(db, actor=request.state.admin_actor, action="data_source.create", entity="data_source",
+                 entity_id=source.id,
                  detail={"name": source.name, "kind": source.kind}, ip=client_ip(request))
     db.commit()
     return _public_source(db, source)
@@ -644,7 +1017,7 @@ def admin_verify_source(source_id: int, data: VerificationIn, request: Request, 
     if source is None:
         raise HTTPException(status_code=404, detail="Data source not found.")
     try:
-        changed = set_verification(db, source, verified=data.verified, note=data.note, actor="admin",
+        changed = set_verification(db, source, verified=data.verified, note=data.note, actor=request.state.admin_actor,
                                    ip=client_ip(request))
     except VerificationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -694,7 +1067,8 @@ async def admin_upload_import(
             source = session.get(DataSource, data_source_id)
             if source is None:
                 raise HTTPException(status_code=404, detail="Data source not found.")
-            imp = import_feed(session, data, filename=name, source=source, settings=settings, actor="admin", ip=ip)
+            imp = import_feed(session, data, filename=name, source=source, settings=settings,
+                              actor=request.state.admin_actor, ip=ip)
             fares = fare_counts(session, [imp.id]).get(imp.id, 0)
             return (201 if imp.status == STATUS_COMPLETED else 422), import_summary(imp, fares)
         finally:
@@ -710,7 +1084,7 @@ def admin_delete_import(import_id: int, request: Request, db: DbSession) -> Resp
     imp = db.get(GtfsImport, import_id)
     if imp is None:
         raise HTTPException(status_code=404, detail="Import not found.")
-    record_audit(db, actor="admin", action="gtfs.delete", entity="gtfs_import", entity_id=import_id,
+    record_audit(db, actor=request.state.admin_actor, action="gtfs.delete", entity="gtfs_import", entity_id=import_id,
                  detail={"filename": imp.filename, "classification": imp.classification}, ip=client_ip(request))
     db.delete(imp)
     db.commit()
@@ -745,7 +1119,8 @@ def admin_backup(request: Request, db: DbSession) -> dict[str, Any]:
         report = backup_and_verify(source, settings.backup_dir)
     except MaintenanceError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    record_audit(db, actor="admin", action="database.backup", entity="database", entity_id=report["file"],
+    record_audit(db, actor=request.state.admin_actor, action="database.backup", entity="database",
+                 entity_id=report["file"],
                  detail={"bytes": report["bytes"], "revision": report["revision"]}, ip=client_ip(request))
     db.commit()
     return {"file": report["file"], "bytes": report["bytes"], "directory": report["directory"],
@@ -762,3 +1137,143 @@ def admin_audit_logs(request: Request, db: DbSession, limit: int = Query(100, ge
         for r in rows
     ]}
 
+
+
+
+# ---------------------------------------------------------------- passenger accounts (off unless storage is permanent)
+
+def _accounts_on(request: Request) -> None:
+    reason = request.app.state.accounts_reason
+    if reason == accounts.DISABLED:
+        raise HTTPException(status_code=503, detail="Passenger accounts are switched off on this server.")
+    if reason:
+        raise HTTPException(status_code=503, detail="Passenger accounts are not available on this server: they need "
+                                                    "a permanent database.")
+
+
+def _signed_in(request: Request, db: Session) -> Any:
+    _accounts_on(request)
+    user = accounts.user_for_token(db, bearer_token(request))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sign in first.")
+    return user
+
+
+def _account_call(call: Any) -> Any:
+    try:
+        return call()
+    except accounts.AccountError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.get("/account/status", tags=["account"])
+def account_status(request: Request) -> dict[str, Any]:
+    reason = request.app.state.accounts_reason
+    return {"available": reason is None, "reason": reason, "notification_delivery": "NOT_AVAILABLE",
+            "roles": list(ROLES), "staff_session_hours": accounts.STAFF_SESSION_HOURS,
+            "passenger_session_days": accounts.SESSION_DAYS}
+
+
+@router.post("/account/register", status_code=201, tags=["account"])
+def account_register(data: AccountIn, request: Request, db: DbSession) -> dict[str, Any]:
+    _accounts_on(request)
+    user, code = _account_call(lambda: accounts.register(db, data.email, data.password))
+    return {"user": accounts.public_user(user), "recovery_code": code,
+            "recovery_note": "Keep this code safe. It is shown only once and is the only way to reset the password."}
+
+
+@router.post("/account/sign-in", tags=["account"])
+def account_sign_in(data: AccountIn, request: Request, db: DbSession) -> dict[str, Any]:
+    _accounts_on(request)
+    user, token, expires = _account_call(lambda: accounts.sign_in(db, data.email, data.password))
+    if user.role in accounts.STAFF_ROLES:
+        record_audit(db, actor=f"user:{user.id}", action="account.sign_in", entity="user", entity_id=user.id,
+                     detail={"role": user.role}, ip=client_ip(request))
+        db.commit()
+    return {"user": accounts.public_user(user), "token": token,
+            "expires_at": expires.isoformat(timespec="seconds") + "Z"}
+
+
+@router.post("/account/sign-out", tags=["account"])
+def account_sign_out(request: Request, db: DbSession) -> dict[str, Any]:
+    _signed_in(request, db)
+    accounts.sign_out(db, bearer_token(request))
+    return {"signed_out": True}
+
+
+@router.get("/account/me", tags=["account"])
+def account_me(request: Request, db: DbSession) -> dict[str, Any]:
+    return {"user": accounts.public_user(_signed_in(request, db))}
+
+
+@router.post("/account/password", tags=["account"])
+def account_password(data: PasswordChangeIn, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    _account_call(lambda: accounts.change_password(db, user, data.current_password, data.new_password))
+    return {"changed": True, "note": "Every session was signed out. Sign in again."}
+
+
+@router.post("/account/recover", tags=["account"])
+def account_recover(data: RecoverIn, request: Request, db: DbSession) -> dict[str, Any]:
+    _accounts_on(request)
+    code = _account_call(lambda: accounts.recover(db, data.email, data.recovery_code, data.new_password))
+    return {"recovery_code": code, "recovery_note": "The old code no longer works. Keep this new one safe."}
+
+
+@router.get("/account/export", tags=["account"])
+def account_export(request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    return {**accounts.export(db, user), "orders": request.app.state.commerce.history(db, user)}
+
+
+@router.post("/account/delete", tags=["account"])
+def account_delete(data: PasswordIn, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    _account_call(lambda: accounts.delete_account(db, user, data.password))
+    return {"deleted": True}
+
+
+@router.get("/account/journeys", tags=["account"])
+def account_journeys(request: Request, db: DbSession) -> dict[str, Any]:
+    return {"journeys": accounts.journeys(db, _signed_in(request, db))}
+
+
+@router.post("/account/journeys", status_code=201, tags=["account"])
+def account_add_journey(data: AccountJourneyIn, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    return _account_call(lambda: accounts.add_journey(db, user, data.model_dump()))
+
+
+@router.delete("/account/journeys/{journey_id}", tags=["account"])
+def account_remove_journey(journey_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    _account_call(lambda: accounts.remove_journey(db, user, journey_id))
+    return {"removed": True}
+
+
+@router.get("/account/notifications", tags=["account"])
+def account_notifications(request: Request, db: DbSession) -> dict[str, Any]:
+    return accounts.preferences(db, _signed_in(request, db))
+
+
+@router.put("/account/notifications", tags=["account"])
+def account_set_notifications(data: NotificationIn, request: Request, db: DbSession) -> dict[str, Any]:
+    return accounts.set_preferences(db, _signed_in(request, db), data.model_dump())
+
+
+@router.get("/admin/users", tags=["admin"])
+def admin_users(request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request, bootstrap=True)
+    _accounts_on(request)
+    return {"users": [accounts.public_user(u) for u in db.scalars(select(User).order_by(User.id))]}
+
+
+@router.put("/admin/users/{user_id}/role", tags=["admin"])
+def admin_set_role(user_id: int, data: RoleIn, request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request, bootstrap=True)
+    _accounts_on(request)
+    user = _account_call(lambda: accounts.set_role(db, user_id, data.role))
+    record_audit(db, actor=request.state.admin_actor, action="user.role", entity="user", entity_id=user_id,
+                 detail={"role": data.role}, ip=client_ip(request))
+    db.commit()
+    return {"user": accounts.public_user(user)}

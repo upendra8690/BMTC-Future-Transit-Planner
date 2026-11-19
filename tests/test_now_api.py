@@ -289,7 +289,7 @@ def test_timetable_outside_the_feed_has_a_code(demo_client: TestClient):
 
 
 def test_meta_reports_the_current_version(client: TestClient):
-    assert client.get("/api/meta").json()["version"] == "3.0.0"
+    assert client.get("/api/meta").json()["version"] == "4.0.0-beta.1"
 
 
 def test_the_synthetic_feed_still_covers_the_whole_window(demo_client: TestClient):

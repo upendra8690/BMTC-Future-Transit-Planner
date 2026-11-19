@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import re
 import threading
 import time
@@ -20,6 +21,21 @@ def client_hash(client_key: str) -> str:
 
 
 def client_ip(request: Request) -> str:
+    """The visitor's address, used only to count requests for the rate limit.
+
+    With CLIENT_IP_HEADER set (for example CF-Connecting-IP on Render, whose Cloudflare edge overwrites that header),
+    the address comes from it. Otherwise, or if the header is missing or is not an IP address, the address uvicorn
+    reports is used: the peer, or the X-Forwarded-For entry chosen under FORWARDED_ALLOW_IPS.
+    """
+    settings = getattr(request.app.state, "settings", None)
+    header = getattr(settings, "client_ip_header", "")
+    if header:
+        value = request.headers.get(header, "").strip()
+        if value:
+            try:
+                return str(ipaddress.ip_address(value))
+            except ValueError:
+                pass
     return request.client.host if request.client else "unknown"
 
 
@@ -36,15 +52,51 @@ def optional_client_hash(request: Request) -> str | None:
     return client_hash(key) if CLIENT_KEY_RE.fullmatch(key) else None
 
 
-def require_admin(request: Request) -> str:
-    """Fail closed: administrative routes are disabled unless ADMIN_API_KEY is configured."""
-    expected = request.app.state.settings.admin_api_key
-    if not expected:
-        raise HTTPException(status_code=503, detail="Administrative functions are disabled: ADMIN_API_KEY is not set.")
-    supplied = request.headers.get("x-admin-key", "")
-    if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
-        raise HTTPException(status_code=401, detail="Invalid or missing admin key.")
-    return "admin"
+def bearer_token(request: Request) -> str:
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
+
+
+def require_admin(request: Request, roles: tuple[str, ...] = ("admin",), bootstrap: bool = False) -> str:
+    """Fail closed. Returns who acted, and keeps it in request.state.admin_actor for the audit log.
+
+    With accounts running (a permanent database), administration uses individual accounts: a signed-in account whose
+    role is in ``roles`` is accepted and recorded as "user:<id>". The shared ADMIN_API_KEY then works only on the
+    routes marked ``bootstrap`` (listing accounts and assigning roles), so it can create the first administrator but
+    cannot be used for day-to-day changes.
+
+    Without accounts, the ADMIN_API_KEY holder is accepted and recorded as "admin"; without that key configured,
+    administrative routes are disabled.
+    """
+    token = bearer_token(request)
+    accounts_running = getattr(request.app.state, "accounts_reason", "off") is None
+    if accounts_running and not token and not request.headers.get("x-admin-key"):
+        raise HTTPException(status_code=401, detail="Sign in with an administrator or editor account.")
+    if token and accounts_running:
+        from .services import accounts  # imported here: the account service is optional
+
+        with request.app.state.db.session() as session:
+            user = accounts.user_for_token(session, token)
+            if user is None:
+                raise HTTPException(status_code=401, detail="Your session has ended. Sign in again.")
+            if user.role not in roles:
+                raise HTTPException(status_code=403, detail="Your account does not have permission for this action.")
+            actor = f"user:{user.id}"
+    else:
+        expected = request.app.state.settings.admin_api_key
+        if not expected:
+            raise HTTPException(status_code=503,
+                                detail="Administrative functions are disabled: ADMIN_API_KEY is not set.")
+        supplied = request.headers.get("x-admin-key", "")
+        if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
+            raise HTTPException(status_code=401, detail="Invalid or missing admin key.")
+        if accounts_running and not bootstrap:
+            raise HTTPException(status_code=403, detail=(
+                "Administrator accounts are running on this server, so sign in with your own account. The shared "
+                "admin key can only list accounts and assign roles."))
+        actor = "admin"
+    request.state.admin_actor = actor
+    return actor
 
 
 def safe_filename(name: str | None) -> str:
