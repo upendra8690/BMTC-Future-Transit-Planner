@@ -86,7 +86,8 @@ limits. The only outside service the app calls is the OpenStreetMap tile server 
 | `tests/browser/responsive_check.py` (320 to 1920 px) | 22 of 22 |
 | `tests/browser/upcoming_admin_check.py` | 17 of 17 |
 | `tests/audit/audit_a11y.py` (axe, WCAG 2.1 AA) | No violations on 15 screens in 2 themes |
-| GitHub Actions CI | Recorded after push in `IMPLEMENTATION_ROADMAP.md` |
+| GitHub Actions CI (Python 3.12 and 3.13 with ruff, bandit, pip-audit; containers; PostgreSQL) | 4 of 4 jobs passed on `1646d66`, push and pull request |
+| Public service after deployment (`verify_deployment.py`, `real_mode_check.py`) | All checks passed; 14 of 14; `/api/notices` live; nearby search near Cubbon Park lists only "Cubbon Park" |
 
 ## Defect found and fixed in this audit
 **"Stops near me" listed station entrances and duplicate platforms.** Near Cubbon Park it showed the station three
