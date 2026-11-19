@@ -86,6 +86,25 @@ def community_imports(base: str) -> list[int]:
     return [f["import_id"] for f in feeds if f["kind"] == "COMMUNITY"]
 
 
+def staff_headers(base: str, key_headers: dict[str, str], staff: dict[str, str]) -> dict[str, str]:
+    """The credential for an administrator change.
+
+    Without accounts, the shared ADMIN_API_KEY. With accounts running, the key can only assign roles, so a test
+    administrator account is registered, given the role with the key, and signed in, as a real administrator would be.
+    """
+    if not call(base, "GET", "/api/account/status")[1].get("available"):
+        return key_headers
+    status, body = call(base, "POST", "/api/account/register", body=staff)
+    check("a test administrator account is registered", status == 201, body)
+    users = (call(base, "GET", "/api/admin/users", headers=key_headers)[1] or {}).get("users", [])
+    user_id = next((u["id"] for u in users if u["email"] == staff["email"]), None)
+    status, body = call(base, "PUT", f"/api/admin/users/{user_id}/role", headers=key_headers, body={"role": "admin"})
+    check("the shared key gives that account the administrator role", status == 200, body)
+    status, body = call(base, "POST", "/api/account/sign-in", body=staff)
+    check("the administrator signs in with the account", status == 200, body)
+    return {"Authorization": "Bearer " + (body or {}).get("token", "")}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check that data survives a server restart.")
     parser.add_argument("--include-admin-change", action="store_true", help="also check an administrator change")
@@ -98,6 +117,7 @@ def main() -> int:
     admin = {"X-Admin-Key": os.environ.get("ADMIN_API_KEY", "")}
     marker = "persistence check " + secrets.token_hex(4)
     account = {"email": f"persistence-{secrets.token_hex(4)}@example.org", "password": secrets.token_urlsafe(18)}
+    staff = {"email": f"persistence-admin-{secrets.token_hex(4)}@example.org", "password": secrets.token_urlsafe(18)}
 
     server = start(port)
     try:
@@ -119,6 +139,7 @@ def main() -> int:
                 "classification": "UNVERIFIED_FEED", "label": marker})
             check("a journey is saved to the account", status == 201, body)
         if args.include_admin_change:
+            admin = staff_headers(base, admin, staff)
             status, body = call(base, "PATCH", "/api/admin/upcoming/metro_blue", headers=admin,
                                 body={"note": marker, "reason": "Persistence check (test database)"})
             check("an administrator change is written", status == 200, body)
@@ -147,6 +168,12 @@ def main() -> int:
             status, _ = call(base, "POST", "/api/account/delete", headers=bearer,
                              body={"password": account["password"]})
             check("the test account is deleted again", status == 200)
+        if args.include_admin_change and call(base, "GET", "/api/account/status")[1].get("available"):
+            status, body = call(base, "POST", "/api/account/sign-in", body=staff)
+            check("after a restart, the administrator account can sign in", status == 200, body)
+            bearer = {"Authorization": "Bearer " + (body or {}).get("token", "")}
+            status, _ = call(base, "POST", "/api/account/delete", headers=bearer, body={"password": staff["password"]})
+            check("the test administrator account is deleted again", status == 200)
         status, _ = call(base, "DELETE", "/api/my-data", headers=device)
         check("the test data is erased again", status == 200)
     finally:

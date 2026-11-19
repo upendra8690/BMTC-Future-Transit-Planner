@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import KIND_UNKNOWN, WEEKDAY_CODES
 
@@ -226,3 +227,53 @@ class NoticeUpdateIn(BaseModel):
     ends_on: dt.date | None = None
     withdrawn: bool | None = None
     reason: str = Field(min_length=3, max_length=500)
+
+
+# ---------------------------------------------------------------- tickets and payments
+# Words that would mean payment secrets. A request containing any of them is refused: this app never takes a card
+# number, CVV, UPI PIN, OTP or password for a payment. Payment happens on the provider's page or in the UPI app.
+SECRET_WORDS = ("pin", "cvv", "card", "otp", "password", "passcode")
+
+
+def _no_secrets(value: object, depth: int = 0) -> None:
+    if depth > 4:
+        raise ValueError("details are nested too deeply")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if any(word in str(key).lower() for word in SECRET_WORDS):
+                raise ValueError("payment secrets are never accepted here")
+            _no_secrets(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            _no_secrets(item, depth + 1)
+
+
+class QuoteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    product: Literal["BUS_TICKET", "BUS_PASS", "METRO_QR", "COMBINED"]
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("details")
+    @classmethod
+    def _small_and_secret_free(cls, value: dict[str, Any]) -> dict[str, Any]:
+        _no_secrets(value)
+        if len(json.dumps(value)) > 2000:
+            raise ValueError("details are too long")
+        return value
+
+
+class OrderIn(QuoteIn):
+    idempotency_key: str = Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")
+
+
+class PayIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["UPI", "CARD", "NETBANKING"]
+
+
+class RefundIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=3, max_length=300)

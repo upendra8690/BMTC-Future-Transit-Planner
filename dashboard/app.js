@@ -3112,18 +3112,116 @@
       : '<div class="empty">' + esc(t("live.stop_none")) + "</div>");
   }
 
+  // ---------------------------------------------------------------- tickets and payments
+  // Nothing is sold here until authorised ticketing and payment providers are connected. The screen says what each
+  // product needs and shows the account's history, which stays empty until then. The app never makes a ticket, a QR
+  // code or a receipt by itself, and never asks for a UPI PIN, card number, CVV or OTP.
+  var TICKET_NEEDS = ["NEEDS_TICKETING_AGREEMENT", "NEEDS_ONDC_REGISTRATION", "NEEDS_PAYMENT_GATEWAY", "NEEDS_OPERATOR_WALLET", "NEEDS_BANK_INTEGRATION"];
+
+  function rupees(paise) {
+    return "₹" + (Number(paise || 0) / 100).toFixed(2);
+  }
+
+  function ticketRow(title, available, code) {
+    return '<li><div><div class="title">' + esc(title) + "</div>" +
+      (code && TICKET_NEEDS.indexOf(code) !== -1 ? '<div class="muted">' + esc(t("tickets.needs." + code)) + "</div>" : "") + "</div>" +
+      '<div class="row-actions"><span class="badge ' + (available ? "official" : "unverified") + '">' +
+      esc(t(available ? "tickets.can_buy" : "tickets.awaiting")) + "</span></div></li>";
+  }
+
   async function renderTickets(args, token) {
     await loadFeatures();
+    var status;
+    try {
+      status = await api("/api/commerce/status");
+    } catch (err) {
+      if (token === state.viewToken) setView(panelError(err, "rerender"));
+      return;
+    }
+    var accounts = await loadAccountStatus();
     if (token !== state.viewToken) return;
     setView(
       unavailableCard("tickets.title", "tickets.body", "bus_tickets") +
+      '<section class="card"><h2>' + esc(t("tickets.status_title")) + '</h2><p class="muted">' + esc(t("tickets.status_intro")) + "</p>" +
+      '<ul class="list" id="ticketStatus">' +
+      status.products.map(function (row) { return ticketRow(t("tickets.product." + row.product), row.available, row.code); }).join("") +
+      ticketRow(t("tickets.payments"), status.payments.available, status.payments.code) +
+      ticketRow(t("tickets.wallet"), status.wallet.available, status.wallet.code) +
+      ticketRow(t("tickets.ncmc_title"), status.ncmc.available, status.ncmc.code) +
+      '</ul><p class="muted small">' + esc(t("tickets.no_secrets")) + "</p></section>" +
+      '<section class="card"><h2>' + esc(t("tickets.history_title")) + '</h2><div id="ticketHistory"></div></section>' +
       '<section class="card"><h2>' + esc(t("tickets.where")) + "</h2>" +
       "<p>" + esc(t("tickets.bus_channels")) + "</p><p>" + esc(t("tickets.metro_channels")) + '</p><div id="ticketLinks"></div></section>' +
       unavailableCard("tickets.ncmc_title", "tickets.ncmc_body", "ncmc_cards")
     );
+    var box = document.getElementById("ticketHistory");
+    if (!accounts.available) {
+      box.innerHTML = '<p class="muted">' + esc(t("tickets.history_no_accounts")) + "</p>";
+    } else if (!state.session) {
+      box.innerHTML = '<p class="muted">' + esc(t("tickets.history_sign_in")) + '</p><p><a class="button-link" href="#/account">' + esc(t("account.go_sign_in")) + "</a></p>";
+    } else {
+      await loadTicketHistory(token);
+    }
     await fillPanel(document.getElementById("ticketLinks"), token, function () {
       return officialLinks(["bus", "metro"]);
     });
+  }
+
+  function orderHtml(order) {
+    var tickets = order.tickets.map(function (tk) {
+      return "<li>" + esc(t("tickets.order_ticket", { id: tk.provider_ticket_id, until: tk.valid_until ? utcText(tk.valid_until) : t("common.na") })) + "</li>";
+    }).join("");
+    var refunds = order.refunds.map(function (r) {
+      return "<li>" + esc(t("tickets.order_refund", { status: t("tickets.refund_status." + r.status), amount: rupees(r.amount_paise) })) + "</li>";
+    }).join("");
+    return '<li><div><div class="title">' + esc(t("tickets.product." + order.product)) + " · " + esc(rupees(order.amount_paise)) + "</div>" +
+      '<div class="muted">' + esc(t("tickets.order_status." + order.status)) + " · " + esc(utcText(order.created_at)) + "</div>" +
+      (tickets || refunds ? '<ul class="facts">' + tickets + refunds + "</ul>" : "") +
+      (order.refundable ? '<form id="refundForm-' + esc(order.id) + '" class="toolbar"><label class="field grow-240">' + esc(t("tickets.refund_reason")) +
+        '<input name="reason" required minlength="3" maxlength="300" autocomplete="off"></label><div class="align-end"><button type="submit" class="secondary">' +
+        esc(t("tickets.refund")) + "</button></div></form>" : "") +
+      "</div>" + (order.receipt_available ? '<div class="row-actions"><button type="button" class="secondary" data-action="order-receipt" data-id="' +
+        esc(order.id) + '">' + esc(t("tickets.receipt")) + "</button></div>" : "") + "</li>";
+  }
+
+  async function loadTicketHistory(token) {
+    var box = document.getElementById("ticketHistory");
+    if (!box) return;
+    box.innerHTML = loadingInline();
+    var data;
+    try {
+      data = await api("/api/commerce/orders", { auth: true });
+    } catch (err) {
+      if (token === state.viewToken && document.getElementById("ticketHistory")) box.innerHTML = panelError(err, "rerender");
+      return;
+    }
+    if (token !== state.viewToken || !document.getElementById("ticketHistory")) return;
+    box.innerHTML = data.orders.length ? '<ul class="list">' + data.orders.map(orderHtml).join("") + "</ul>"
+      : '<div class="empty">' + esc(t("tickets.history_empty")) + "</div>";
+  }
+
+  async function downloadReceipt(id) {
+    var data;
+    try {
+      data = await api("/api/commerce/orders/" + encodeURIComponent(id) + "/receipt", { auth: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    await saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "receipt-" + data.receipt_number + ".json");
+  }
+
+  async function requestRefund(form, token) {
+    var id = form.id.replace("refundForm-", "");
+    try {
+      await accountRequest(form, "/api/commerce/orders/" + encodeURIComponent(id) + "/refund", "POST",
+        { reason: formValue(form, "reason").trim() }, { auth: true });
+    } catch (err) {
+      fail(err);
+      return;
+    }
+    toast(t("tickets.refund_sent"));
+    await loadTicketHistory(token);
   }
 
   async function renderMetro(args, token) {
@@ -4221,6 +4319,9 @@
       case "user-role":
         changeRole(id, token);
         break;
+      case "order-receipt":
+        downloadReceipt(id);
+        break;
       case "erase-cancel":
         render();
         break;
@@ -4315,7 +4416,8 @@
       case "settingsForm":
         break;
       default:
-        handled = false;
+        if (form.id.indexOf("refundForm-") === 0) requestRefund(form, token);
+        else handled = false;
     }
     if (handled) event.preventDefault();
   });

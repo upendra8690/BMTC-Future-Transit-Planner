@@ -476,3 +476,90 @@ class NotificationPreference(Base):
     service_notices: Mapped[bool] = mapped_column(Boolean, default=False)
     upcoming_changes: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ---------------------------------------------------------------- tickets and payments (no provider connected)
+# Rows here exist only when an authorised ticketing provider and payment provider are connected. Until then nothing
+# can be bought and these tables stay empty. See app/services/commerce.py.
+PRODUCTS = ("BUS_TICKET", "BUS_PASS", "METRO_QR", "COMBINED")
+ORDER_STATUSES = ("CREATED", "PAYMENT_PENDING", "PAID", "ISSUED", "FAILED", "REFUND_REQUESTED", "REFUNDED")
+
+
+class Order(Base):
+    """A purchase through an authorised provider. Kept after an account is deleted, as payment records must be."""
+
+    __tablename__ = "orders"
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key", name="uq_orders_user_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    product: Mapped[str] = mapped_column(String(20))
+    ticket_provider: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    amount_paise: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+    details: Mapped[str] = mapped_column(Text)
+    quote: Mapped[str] = mapped_column(Text)
+    idempotency_key: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Payment(Base):
+    """A payment taken by the payment provider. Only the provider's reference is kept: never card or UPI details."""
+
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    provider_ref: Mapped[str] = mapped_column(String(100), unique=True)
+    method: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20))
+    amount_paise: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TravelTicket(Base):
+    """A ticket or pass issued by the ticketing provider. The QR payload is stored exactly as the provider sent it."""
+
+    __tablename__ = "travel_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    provider_ticket_id: Mapped[str] = mapped_column(String(100))
+    product: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20))
+    valid_from: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    valid_until: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    qr_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Refund(Base):
+    """A refund started with the payment provider; complete only when the provider's signed notification says so."""
+
+    __tablename__ = "refunds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="CASCADE"), index=True)
+    provider_ref: Mapped[str] = mapped_column(String(100), unique=True)
+    amount_paise: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str] = mapped_column(String(300))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PaymentNotification(Base):
+    """Each signed provider notification is processed once: its event id is remembered."""
+
+    __tablename__ = "payment_notifications"
+    __table_args__ = (UniqueConstraint("provider", "event_id", name="uq_payment_notifications_event"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    event_id: Mapped[str] = mapped_column(String(100))
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

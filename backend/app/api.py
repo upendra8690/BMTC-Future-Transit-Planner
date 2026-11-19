@@ -52,10 +52,14 @@ from .schemas import (
     NoticeIn,
     NoticeUpdateIn,
     NotificationIn,
+    OrderIn,
     PasswordChangeIn,
     PasswordIn,
+    PayIn,
     PreferencesIn,
+    QuoteIn,
     RecoverIn,
+    RefundIn,
     RoleIn,
     SavedRouteIn,
     ScenarioIn,
@@ -69,7 +73,17 @@ from .security import (
     require_client_key,
     safe_filename,
 )
-from .services import accounts, announcements, assistant, catalogue, integrations, notices, planner, registry
+from .services import (
+    accounts,
+    announcements,
+    assistant,
+    catalogue,
+    commerce,
+    integrations,
+    notices,
+    planner,
+    registry,
+)
 from .services import scenarios as scn
 from .services import schedule as sched
 from .services.audit import record_audit
@@ -196,6 +210,81 @@ def live_arrivals(stop_id: int, request: Request, db: DbSession) -> dict[str, An
     if stop is None:
         raise HTTPException(status_code=404, detail="Stop not found.")
     return request.app.state.live.arrivals(db, clock.utc_now(), stop)
+
+
+# ---------------------------------------------------------------- tickets and payments (no provider connected)
+
+def _commerce(call: Any) -> Any:
+    try:
+        return call()
+    except commerce.CommerceError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc),
+                            headers={"X-Error-Code": exc.code}) from exc
+
+
+@router.get("/commerce/status", tags=["tickets"])
+def commerce_status(request: Request) -> dict[str, Any]:
+    """Which products can be bought, which payment methods exist, and what each missing one needs."""
+    return request.app.state.commerce.status()
+
+
+@router.post("/commerce/quotes", tags=["tickets"])
+def commerce_quote(data: QuoteIn, request: Request) -> dict[str, Any]:
+    """The official fare from the ticketing provider. 503 while no provider is connected."""
+    return _commerce(lambda: request.app.state.commerce.quote(data.product, data.details))
+
+
+@router.post("/commerce/orders", status_code=201, tags=["tickets"])
+def commerce_order(data: OrderIn, request: Request, db: DbSession) -> dict[str, Any]:
+    shop = request.app.state.commerce
+    _commerce(lambda: shop.require(data.product))
+    user = _signed_in(request, db)
+    return _commerce(lambda: shop.create_order(db, user, data.product, data.details, data.idempotency_key))
+
+
+@router.post("/commerce/orders/{order_id}/pay", tags=["tickets"])
+def commerce_pay(order_id: int, data: PayIn, request: Request, db: DbSession) -> dict[str, Any]:
+    """Starts a payment with the payment provider and returns where to pay. The app never takes card or UPI secrets."""
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.pay(db, user, order_id, data.method))
+
+
+@router.post("/commerce/orders/{order_id}/refund", tags=["tickets"])
+def commerce_refund(order_id: int, data: RefundIn, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.request_refund(db, user, order_id, data.reason))
+
+
+@router.get("/commerce/orders", tags=["tickets"])
+def commerce_history(request: Request, db: DbSession) -> dict[str, Any]:
+    """The signed-in passenger's orders with their payments, tickets and refunds. Empty while nothing can be sold."""
+    user = _signed_in(request, db)
+    return {"orders": request.app.state.commerce.history(db, user)}
+
+
+@router.get("/commerce/orders/{order_id}", tags=["tickets"])
+def commerce_order_detail(order_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.order(db, user, order_id))
+
+
+@router.get("/commerce/orders/{order_id}/receipt", tags=["tickets"])
+def commerce_receipt(order_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    """A record of a payment the provider confirmed. Not a tax invoice and not a ticket."""
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.receipt(db, user, order_id))
+
+
+@router.post("/commerce/notifications/{provider}", tags=["tickets"])
+async def commerce_notification(request: Request,
+                                provider: str = ApiPath(..., pattern="^[a-z0-9-]{2,50}$")) -> dict[str, Any]:
+    """Signed notifications from the payment provider. The signature is checked by the provider's class."""
+    body = await request.body()
+    if len(body) > 64 * 1024:
+        raise HTTPException(status_code=413, detail="Notification too large.")
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    with request.app.state.db.session() as db:
+        return _commerce(lambda: request.app.state.commerce.notification(db, provider, headers, body))
 
 
 # ---------------------------------------------------------------- health and metadata
@@ -1114,7 +1203,8 @@ def account_recover(data: RecoverIn, request: Request, db: DbSession) -> dict[st
 
 @router.get("/account/export", tags=["account"])
 def account_export(request: Request, db: DbSession) -> dict[str, Any]:
-    return accounts.export(db, _signed_in(request, db))
+    user = _signed_in(request, db)
+    return {**accounts.export(db, user), "orders": request.app.state.commerce.history(db, user)}
 
 
 @router.post("/account/delete", tags=["account"])

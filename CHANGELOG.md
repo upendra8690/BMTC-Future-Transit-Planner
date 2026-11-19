@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased (branch `v4`): tickets and payments, integration-ready; CI fix, 2026-11-20
+- **Orders, payments, issued tickets, refunds and notifications** (migration 0006) and
+  `backend/app/services/commerce.py`: provider interfaces for a ticketing provider (quote, issue, cancel) and a
+  payment provider (start, signed notification, refund). An order is paid only after the provider's signed
+  notification for the exact amount; a ticket exists only when the provider issued it, and its QR payload is stored
+  exactly as sent; a failed issue after payment is refunded automatically; each notification is processed once;
+  card numbers, CVVs, UPI PINs, OTPs and passwords are refused; payment records stay when an account is deleted.
+- **No provider is connected**, so every purchase answers 503 with what is needed, and histories are empty. The
+  workflows are tested with test doubles that exist only in `tests/test_commerce.py`.
+- **Tickets screen:** what can be bought (nothing yet) and exactly what each item needs; "My tickets and payments"
+  for signed-in passengers, with receipts and refund requests once anything can be sold; four languages.
+- **CI fix:** the PostgreSQL persistence check made an administrator change with the shared key while accounts were
+  on, which the account change of 19 Nov now refuses. It now registers a test administrator, gives it the role with
+  the key and signs in, as a real administrator would.
+- **Tests:** pytest 596 passed, 5 skipped (24 in `tests/test_commerce.py`); new `tests/browser/tickets_check.py`
+  12/12.
+
 ## Unreleased (branch `v4`): live-tracking subsystem (off until BMTC authorises a feed), 2026-11-20
 - **GTFS-Realtime provider adapter** (`backend/app/services/realtime.py`): reads VehiclePositions and TripUpdates
   over HTTPS with an optional access header from the environment, decodes them without a protobuf library, and
