@@ -17,9 +17,10 @@ from . import demo
 from .api import router
 from .config import DASHBOARD_DIR, Settings
 from .database import Database
+from .sandbox_pages import router as sandbox_router
 from .security import RateLimiter, client_ip
 from .services import accounts as accounts_service
-from .services.commerce import Commerce
+from .services.payment_providers import build_commerce
 from .services.realtime import LiveService
 
 LOG = logging.getLogger("bmtc_planner")
@@ -103,8 +104,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.db = db
     app.state.live = LiveService(settings)
-    # No ticketing or payment provider is connected: nothing can be bought (app/services/commerce.py).
-    app.state.commerce = Commerce()
+    # Payment and ticketing providers come from the settings; by default none, so nothing can be bought.
+    app.state.commerce = build_commerce(settings)
     app.state.accounts_reason = accounts_service.availability(
         settings.accounts_enabled, settings.accounts_allow_sqlite, settings.database_url)
     if settings.accounts_enabled and app.state.accounts_reason:
@@ -148,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     app.include_router(router, prefix="/api")
+    app.include_router(sandbox_router)  # 404 unless the sandbox gateway is configured (demonstration servers only)
 
     if DASHBOARD_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(DASHBOARD_DIR), html=True), name="dashboard")

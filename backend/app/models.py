@@ -514,6 +514,8 @@ class Payment(Base):
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), index=True)
     provider: Mapped[str] = mapped_column(String(50))
     provider_ref: Mapped[str] = mapped_column(String(100), unique=True)
+    # This app's own id for the attempt (BTP + date + random), sent to the provider as the receipt.
+    transaction_id: Mapped[str | None] = mapped_column(String(40), nullable=True, unique=True, index=True)
     method: Mapped[str] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(20))
     amount_paise: Mapped[int] = mapped_column(Integer)

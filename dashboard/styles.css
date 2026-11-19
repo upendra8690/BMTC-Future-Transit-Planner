@@ -887,3 +887,7 @@ body:not([data-view="tools"]) .year-picker { display: none; }
 .facts { margin: 8px 0; padding-left: 20px; }
 .facts li { margin: 2px 0; }
 progress { display: block; width: 100%; max-width: 260px; height: 10px; margin-top: 6px; accent-color: var(--official); }
+
+/* sandbox gateway pages (demonstration servers only) */
+.sandbox-page { max-width: 720px; margin: 16px auto; padding: 0 16px; }
+.sandbox-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; margin: 12px 0; }

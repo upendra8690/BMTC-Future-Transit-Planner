@@ -25,6 +25,7 @@ DYNAMIC_PREFIXES = (
     "providers.integration.", "integ.cap.", "notices.kind.", "notices.mode.", "notices.status.", "account.reason.",
     "account.role.", "live.state.", "live.fresh.", "live.kind.",
     "tickets.product.", "tickets.needs.", "tickets.order_status.", "tickets.refund_status.",
+    "tickets.method.", "tickets.payment_status.",
 )
 # Storage keys the dashboard may write. The admin key must never be one of them.
 STORED_KEYS = {

@@ -128,6 +128,17 @@ class Settings:
     realtime_classification: str = "OFFICIAL_VERIFIED"
     realtime_poll_seconds: int = 20
     realtime_stale_seconds: int = 120
+    # Payments and ticketing (app/services/payment_providers.py). Empty: nothing can be bought. Key secrets and the
+    # webhook secret are secrets: set them in the hosting dashboard, never in GitHub.
+    payment_provider: str = ""
+    payment_environment: str = "production"
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    public_base_url: str = ""
+    merchant_name: str = "Bengaluru Transit Planner"
+    ticketing_provider: str = ""
+    payment_sandbox_state: Path = DATA_DIR / "payment_sandbox.json"
 
     @classmethod
     def from_env(cls, env_file: Path | None = None) -> Settings:
@@ -179,4 +190,13 @@ class Settings:
                                      or "OFFICIAL_VERIFIED"),
             realtime_poll_seconds=_get_int("REALTIME_POLL_SECONDS", 20, low=5, high=600),
             realtime_stale_seconds=_get_int("REALTIME_STALE_SECONDS", 120, low=30, high=600),
+            payment_provider=os.environ.get("PAYMENT_PROVIDER", "").strip().lower(),
+            payment_environment=os.environ.get("PAYMENT_ENVIRONMENT", "production").strip().lower() or "production",
+            razorpay_key_id=os.environ.get("RAZORPAY_KEY_ID", "").strip(),
+            razorpay_key_secret=os.environ.get("RAZORPAY_KEY_SECRET", "").strip(),
+            razorpay_webhook_secret=os.environ.get("RAZORPAY_WEBHOOK_SECRET", "").strip(),
+            public_base_url=os.environ.get("PUBLIC_BASE_URL", "").strip(),
+            merchant_name=os.environ.get("MERCHANT_NAME", "").strip() or "Bengaluru Transit Planner",
+            ticketing_provider=os.environ.get("TICKETING_PROVIDER", "").strip().lower(),
+            payment_sandbox_state=Path(os.environ.get("PAYMENT_SANDBOX_STATE") or (DATA_DIR / "payment_sandbox.json")),
         )

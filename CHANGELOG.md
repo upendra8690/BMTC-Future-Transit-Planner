@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased (branch `v4`): UPI payment architecture, sandbox environment, BMTC ticketing adapter, 2026-11-20
+- **Server-side payment confirmation:** an order is paid only by the gateway's signed webhook or by the gateway's
+  status API asked by this server ("Check payment status", after a restart, or `POST /api/admin/payments/reconcile`).
+  Returning from a UPI app proves nothing. Unique transaction ids (`BTP...`, migration 0007); one payment attempt at
+  a time; pending payments expire after 30 minutes and a late success is refunded automatically; failed refunds are
+  recorded; every step is audited.
+- **Razorpay adapter** (`backend/app/services/payment_providers.py`): UPI payment links (UPI Intent on phones, QR on
+  desktops), single-use UPI QR codes, status checks, refunds and HMAC-signed webhooks. Merchant settings are checked
+  at start-up (live keys only in production, test keys only in the sandbox, https address, secrets present). Tested
+  against recorded responses only; it needs merchant onboarding to be verified.
+- **Sandbox environment** for demonstration servers only (`DEMO_MODE=1`, `PAYMENT_ENVIRONMENT=sandbox`): a simulated
+  gateway with a choice of outcome (approve, approve without webhook, decline, pending, time-out) and a simulated
+  ticketing provider. ₹1 test amounts, no money, no QR codes, and "DEMONSTRATION ONLY — NOT VALID FOR TRAVEL" on every
+  screen and receipt. It can never be combined with a production provider.
+- **BMTC ticketing adapter:** refuses every call (`AWAITING_BMTC_API_SPECIFICATION`) until BMTC shares its API.
+- **App:** a purchase form (only where a product can be bought), an order page that checks with the gateway on
+  return, transaction ids and payment states, receipts and refunds; four languages.
+- **Tests:** pytest 634 passed, 5 skipped (17 sandbox scenarios, 21 Razorpay adapter tests);
+  `tests/browser/payments_sandbox_check.py` 15/15.
+
 ## Unreleased (branch `v4`): tickets and payments, integration-ready; CI fix, 2026-11-20
 - **Orders, payments, issued tickets, refunds and notifications** (migration 0006) and
   `backend/app/services/commerce.py`: provider interfaces for a ticketing provider (quote, issue, cancel) and a

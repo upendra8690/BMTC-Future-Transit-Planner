@@ -33,6 +33,7 @@ class TestOperator:
     __test__ = False
     name = "test-operator"
     products = ("BUS_TICKET", "BUS_PASS", "METRO_QR", "COMBINED")
+    environment = "production"
 
     def __init__(self, fail_issue: bool = False, refuse_cancel: bool = False) -> None:
         self.fail_issue = fail_issue
@@ -60,9 +61,13 @@ class TestGateway:
     __test__ = False
     name = "test-gateway"
     methods = ("UPI",)
+    environment = "production"
 
-    def start(self, order, method):
+    def start(self, order, payment):
         return PaymentStart(f"pay_{order.id}", {"type": "redirect", "url": f"https://gateway.example.invalid/{order.id}"})
+
+    def fetch_status(self, payment):
+        return PaymentEvent("status", payment.provider_ref, "PENDING", 0)
 
     def read_notification(self, headers, body):
         expected = hmac.new(SECRET, body, hashlib.sha256).hexdigest()
@@ -113,7 +118,7 @@ def test_without_providers_every_product_says_what_it_needs(client):
     assert set(products) == {"BUS_TICKET", "BUS_PASS", "METRO_QR", "COMBINED"}
     assert all(p["available"] is False and p["code"] and p["needs"] for p in products.values())
     assert products["METRO_QR"]["code"] == "NEEDS_ONDC_REGISTRATION"
-    assert status["payments"] == {"available": False, "methods": [], "code": "NEEDS_PAYMENT_GATEWAY",
+    assert status["payments"] == {"available": False, "provider": None, "methods": [], "code": "NEEDS_PAYMENT_GATEWAY",
                                   "needs": "A merchant agreement with a licensed payment aggregator"}
     assert status["wallet"]["available"] is False
     assert status["ncmc"]["available"] is False
@@ -276,7 +281,7 @@ def test_purchases_are_audited_and_exported_with_the_account(shop):
     with shop.app.state.db.session() as db:
         actions = [e.action for e in db.scalars(select(AuditLog).order_by(AuditLog.id))]
     purchase = [a for a in actions if a.split(".")[0] in ("order", "payment", "ticket")]
-    assert purchase == ["order.create", "payment.succeeded", "ticket.issued"]
+    assert purchase == ["order.create", "payment.start", "payment.succeeded", "ticket.issued"]
     exported = shop.get("/api/account/export").json()
     assert exported["orders"][0]["id"] == order["id"]
 

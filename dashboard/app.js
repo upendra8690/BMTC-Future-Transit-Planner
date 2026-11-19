@@ -3129,8 +3129,38 @@
       esc(t(available ? "tickets.can_buy" : "tickets.awaiting")) + "</span></div></li>";
   }
 
+  function sandboxBanner() {
+    return '<div class="banner demo-mode" role="alert"><strong>' + esc(t("tickets.sandbox_title")) + "</strong>" + esc(t("tickets.sandbox_body")) + "</div>";
+  }
+
+  function buyCardHtml(status, accounts) {
+    var products = status.products.filter(function (row) { return row.available; });
+    if (!products.length) return "";
+    var title = "<h2>" + esc(t(status.sandbox ? "tickets.buy_test_title" : "tickets.buy_title")) + "</h2>";
+    if (!accounts.available || !state.session) {
+      return '<section class="card">' + title + '<p class="muted">' + esc(t("tickets.buy_sign_in")) + '</p><p><a class="button-link" href="#/account">' + esc(t("account.go_sign_in")) + "</a></p></section>";
+    }
+    var count = function (name, label, value) {
+      return '<label class="field">' + esc(t(label)) + '<input name="' + name + '" type="number" min="0" max="9" step="1" value="' + value + '" required></label>';
+    };
+    return '<section class="card">' + title + '<form id="buyForm" class="form-grid">' +
+      '<label class="field">' + esc(t("tickets.product_label")) + '<select name="product">' + products.map(function (row) {
+        return '<option value="' + esc(row.product) + '">' + esc(t("tickets.product." + row.product)) + "</option>";
+      }).join("") + "</select></label>" +
+      count("adult", "tickets.adults", 1) + count("child", "tickets.children", 0) +
+      '<label class="field">' + esc(t("tickets.method_label")) + '<select name="pay_method">' + status.payments.methods.map(function (m) {
+        return '<option value="' + esc(m) + '">' + esc(t("tickets.method." + m)) + "</option>";
+      }).join("") + "</select></label>" +
+      '<div class="align-end"><button type="submit">' + esc(t("tickets.continue")) + "</button></div></form>" +
+      '<p class="muted small">' + esc(t("tickets.verify_note")) + "</p></section>";
+  }
+
   async function renderTickets(args, token) {
     await loadFeatures();
+    if (args[0] === "order" && args[1]) {
+      await renderOrder(args[1], token);
+      return;
+    }
     var status;
     try {
       status = await api("/api/commerce/status");
@@ -3141,6 +3171,7 @@
     var accounts = await loadAccountStatus();
     if (token !== state.viewToken) return;
     setView(
+      (status.sandbox ? sandboxBanner() : "") + buyCardHtml(status, accounts) +
       unavailableCard("tickets.title", "tickets.body", "bus_tickets") +
       '<section class="card"><h2>' + esc(t("tickets.status_title")) + '</h2><p class="muted">' + esc(t("tickets.status_intro")) + "</p>" +
       '<ul class="list" id="ticketStatus">' +
@@ -3168,8 +3199,10 @@
   }
 
   function orderHtml(order) {
+    var demo = order.environment === "sandbox";
     var tickets = order.tickets.map(function (tk) {
-      return "<li>" + esc(t("tickets.order_ticket", { id: tk.provider_ticket_id, until: tk.valid_until ? utcText(tk.valid_until) : t("common.na") })) + "</li>";
+      return "<li>" + esc(demo ? t("tickets.demo_record", { id: tk.provider_ticket_id })
+        : t("tickets.order_ticket", { id: tk.provider_ticket_id, until: tk.valid_until ? utcText(tk.valid_until) : t("common.na") })) + "</li>";
     }).join("");
     var refunds = order.refunds.map(function (r) {
       return "<li>" + esc(t("tickets.order_refund", { status: t("tickets.refund_status." + r.status), amount: rupees(r.amount_paise) })) + "</li>";
@@ -3180,8 +3213,10 @@
       (order.refundable ? '<form id="refundForm-' + esc(order.id) + '" class="toolbar"><label class="field grow-240">' + esc(t("tickets.refund_reason")) +
         '<input name="reason" required minlength="3" maxlength="300" autocomplete="off"></label><div class="align-end"><button type="submit" class="secondary">' +
         esc(t("tickets.refund")) + "</button></div></form>" : "") +
-      "</div>" + (order.receipt_available ? '<div class="row-actions"><button type="button" class="secondary" data-action="order-receipt" data-id="' +
-        esc(order.id) + '">' + esc(t("tickets.receipt")) + "</button></div>" : "") + "</li>";
+      "</div>" + '<div class="row-actions">' + (demo ? '<span class="badge alert">' + esc(t("tickets.demo_badge")) + "</span>" : "") +
+      '<a class="button secondary" href="#/tickets/order/' + esc(encodeURIComponent(order.id)) + '">' + esc(t("tickets.open")) + "</a>" +
+      (order.receipt_available ? '<button type="button" class="secondary" data-action="order-receipt" data-id="' +
+        esc(order.id) + '">' + esc(t("tickets.receipt")) + "</button>" : "") + "</div></li>";
   }
 
   async function loadTicketHistory(token) {
@@ -3198,6 +3233,100 @@
     if (token !== state.viewToken || !document.getElementById("ticketHistory")) return;
     box.innerHTML = data.orders.length ? '<ul class="list">' + data.orders.map(orderHtml).join("") + "</ul>"
       : '<div class="empty">' + esc(t("tickets.history_empty")) + "</div>";
+  }
+
+  // ---------------------------------------------------------------- one order: the return from the payment page
+  // Coming back from the provider's page or a UPI app proves nothing. The order page asks this server, which asks the
+  // payment provider server to server; only that answer (or the provider's signed webhook) marks an order paid.
+  function orderDetailHtml(order) {
+    var demo = order.environment === "sandbox";
+    var payments = order.payments.map(function (pay) {
+      return "<li>" + esc(t("tickets.transaction", { id: pay.transaction_id || pay.reference, method: t("tickets.method." + pay.method),
+        status: t("tickets.payment_status." + pay.status) })) + "</li>";
+    }).join("");
+    return (demo ? sandboxBanner() : "") +
+      '<section class="card"><p><a href="#/tickets">&larr; ' + esc(t("tickets.back")) + "</a></p>" +
+      "<h2>" + esc(t("tickets.order_title", { id: order.id })) + "</h2>" +
+      '<ul class="list" id="orderSummary">' + orderHtml(order) + "</ul>" +
+      (payments ? '<ul class="facts" id="orderPayments">' + payments + "</ul>" : "") +
+      '<div class="toolbar mt-8">' +
+      (order.checkable ? '<button type="button" data-action="order-verify" data-id="' + esc(order.id) + '">' + esc(t("tickets.check_status")) + "</button>" : "") +
+      (order.payable ? '<button type="button" data-action="order-pay" data-id="' + esc(order.id) + '" data-method="' + esc((order.payments[0] || {}).method || "UPI") + '">' + esc(t("tickets.pay_again")) + "</button>" : "") +
+      (demo ? '<a class="button secondary" href="/sandbox">' + esc(t("tickets.sandbox_console")) + "</a>" : "") +
+      '</div><p class="muted small" id="orderNote">' + esc(t("tickets.verify_note")) + "</p></section>";
+  }
+
+  async function renderOrder(id, token, skipCheck) {
+    setView(loadingCard(t("tickets.checking")));
+    var order;
+    var note = "";
+    try {
+      order = await api("/api/commerce/orders/" + encodeURIComponent(id), { auth: true });
+      if (order.checkable && !skipCheck) {
+        try {
+          order = await api("/api/commerce/orders/" + encodeURIComponent(id) + "/verify", { method: "POST", auth: true });
+        } catch (err) {
+          if (err.status !== 504) throw err;
+          note = t("tickets.timeout");
+        }
+      }
+    } catch (err) {
+      if (token === state.viewToken) setView(panelError(err, "rerender"));
+      return;
+    }
+    if (token !== state.viewToken) return;
+    setView(orderDetailHtml(order));
+    if (note) {
+      var box = document.getElementById("orderNote");
+      if (box) box.textContent = note;
+      toast(note);
+    }
+  }
+
+  function newOrderKey() {
+    var bytes = new Uint8Array(12);
+    window.crypto.getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+  }
+
+  async function goToPayment(orderId, method) {
+    var paying = await api("/api/commerce/orders/" + encodeURIComponent(orderId) + "/pay", { method: "POST", auth: true, json: { method: method } });
+    var next = paying.next_action || {};
+    // Only the provider's own page (or this server's sandbox gateway) is opened; the app never shows a payment form.
+    if (next.url && (/^https:\/\//.test(next.url) || /^\/sandbox\/pay\/[A-Za-z0-9_]+$/.test(next.url))) {
+      location.assign(next.url);
+      return;
+    }
+    location.hash = "#/tickets/order/" + encodeURIComponent(orderId);
+  }
+
+  async function submitBuy(form) {
+    var adult = Number(formValue(form, "adult")) || 0;
+    var child = Number(formValue(form, "child")) || 0;
+    if (adult + child < 1) {
+      toast(t("tickets.need_passenger"));
+      return;
+    }
+    busy(form, true);
+    try {
+      var order = await api("/api/commerce/orders", { method: "POST", auth: true, json: {
+        product: formValue(form, "product"), details: { passengers: { adult: adult, child: child } }, idempotency_key: newOrderKey()
+      } });
+      await goToPayment(order.id, formValue(form, "pay_method"));
+    } catch (err) {
+      fail(err);
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  async function verifyOrder(id, token) {
+    try {
+      await api("/api/commerce/orders/" + encodeURIComponent(id) + "/verify", { method: "POST", auth: true });
+    } catch (err) {
+      toast(err.status === 504 ? t("tickets.timeout") : err.message);
+    }
+    if (token === state.viewToken) await renderOrder(id, token, true);
   }
 
   async function downloadReceipt(id) {
@@ -3221,7 +3350,8 @@
       return;
     }
     toast(t("tickets.refund_sent"));
-    await loadTicketHistory(token);
+    if (document.getElementById("orderSummary")) await renderOrder(id, token, true);
+    else await loadTicketHistory(token);
   }
 
   async function renderMetro(args, token) {
@@ -4322,6 +4452,12 @@
       case "order-receipt":
         downloadReceipt(id);
         break;
+      case "order-verify":
+        verifyOrder(id, token);
+        break;
+      case "order-pay":
+        goToPayment(id, node.getAttribute("data-method") || "UPI").catch(fail);
+        break;
       case "erase-cancel":
         render();
         break;
@@ -4385,6 +4521,9 @@
         break;
       case "adminKeyForm":
         saveAdminKey(form.elements.key);
+        break;
+      case "buyForm":
+        submitBuy(form);
         break;
       case "liveFilter":
         state.liveRoute = String(form.elements.route.value || "").trim().slice(0, 40);

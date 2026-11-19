@@ -249,6 +249,25 @@ def commerce_pay(order_id: int, data: PayIn, request: Request, db: DbSession) ->
     return _commerce(lambda: request.app.state.commerce.pay(db, user, order_id, data.method))
 
 
+@router.post("/commerce/orders/{order_id}/verify", tags=["tickets"])
+def commerce_verify(order_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    """Asks the payment provider, server to server, whether the payment arrived. The only way an order becomes paid
+    apart from the provider's signed webhook: returning from a UPI app or a browser redirect proves nothing."""
+    user = _signed_in(request, db)
+    return _commerce(lambda: request.app.state.commerce.verify(db, user, order_id))
+
+
+@router.post("/admin/payments/reconcile", tags=["admin"])
+def admin_reconcile_payments(request: Request, db: DbSession) -> dict[str, Any]:
+    """Checks every pending payment with the provider, for example after a restart."""
+    require_admin(request)
+    result = request.app.state.commerce.reconcile_pending(db)
+    record_audit(db, actor=request.state.admin_actor, action="payments.reconcile", entity="payments",
+                 detail=result, ip=client_ip(request))
+    db.commit()
+    return result
+
+
 @router.post("/commerce/orders/{order_id}/refund", tags=["tickets"])
 def commerce_refund(order_id: int, data: RefundIn, request: Request, db: DbSession) -> dict[str, Any]:
     user = _signed_in(request, db)
