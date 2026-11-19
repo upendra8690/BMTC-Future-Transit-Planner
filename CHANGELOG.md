@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased (branch `v4`): audit and Phase 2 commuter features, 2026-11-19
+- **Service notices (migration 0005).** Administrators post short notices that repeat an official source: a gov.in or
+  nic.in site, bmrc.co.in, or the official BMTC or BMRCL account on X. Each needs a reason, ends within 31 days, is
+  written to the audit log and can be withdrawn. Home shows the notices running today, each with its source linked,
+  or says plainly that there is no live alerts feed. API: `GET /api/notices`; `GET/POST /api/admin/notices`;
+  `PATCH /api/admin/notices/{id}`.
+- **Journey planner.** Swap start and destination; "Use my location" fills the nearest stop or station; "Share this
+  journey" gives a link (`#/journey/<from>/<to>/<modes>/<label>`) that plans the same journey when opened.
+- **Quick destinations** on Home: major Metro stations, shown only if they exist in the loaded data, with its label.
+- **Fixed:** "Stops near me" listed station entrances and each platform separately (near Cubbon Park, the station three
+  times and five entrances). Entrances are left out and each station is listed once; a regression test fails on the
+  old code.
+- **Audit documents** in `docs/audit/`: AUDIT, FEATURE_GAP_ANALYSIS (against Namma BMTC 2.0), SYSTEM_ARCHITECTURE,
+  SECURITY_AUDIT and IMPLEMENTATION_ROADMAP.
+- **Tests:** pytest 535 passed, 5 skipped; new browser check `tests/browser/phase2_check.py` 18/18; real-mode 14/14;
+  screen widths 22/22; upcoming editor 17/17; axe: no violations on 15 screens in 2 themes.
+
 ## Unreleased (branch `v4`) — PostgreSQL proven; accounts and roles built but off; data coverage audit, 2026-11-18
 - **PostgreSQL.** The psycopg 3.2 driver is added, and `postgres://` and `postgresql://` addresses are accepted.
   - A CI job on PostgreSQL 16 runs the migrations twice, imports the community Metro feed twice (once only in

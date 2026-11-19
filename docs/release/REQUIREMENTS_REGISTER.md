@@ -24,21 +24,21 @@ sources below. When an authority supplies its own requirements, they replace the
 | **EXT** | Requires an external provider (payment, SMS, app store, auditor) |
 | **DEC** | Requires a decision by the government or the owner |
 
-## Summary (101 requirements, counted from the tables below; updated after the Stage 1 fixes of 18 Nov 2026)
+## Summary (105 requirements, counted from the tables below; updated 19 Nov 2026)
 | Class | Count | Share |
 |---|---|---|
-| IV Implemented and verified | 32 | 32 % |
+| IV Implemented and verified | 37 | 35 % |
 | INV Implemented, not verified on the target platform | 7 | 7 % |
-| P Partially implemented | 13 | 13 % |
-| M Missing, buildable without permission | 5 | 5 % |
-| GOV Needs government data, API or permission | 28 | 28 % |
+| P Partially implemented | 13 | 12 % |
+| M Missing, buildable without permission | 4 | 4 % |
+| GOV Needs government data, API or permission | 28 | 27 % |
 | EXT Needs an external provider | 10 | 10 % |
 | DEC Needs a government or owner decision | 6 | 6 % |
 
 **What the figures mean:**
-- **Verified coverage is 32 %.** 51 % of requirements exist in some form (IV, INV and P together).
-- **44 %** cannot be completed by engineering alone (GOV, EXT and DEC).
-- **5 %** are missing but can be built now.
+- **Verified coverage is 35 %.** 54 % of requirements exist in some form (IV, INV and P together).
+- **42 %** cannot be completed by engineering alone (GOV, EXT and DEC).
+- **4 %** are missing but can be built now.
 
 Bus information, live transport, ticketing and payments make up most of the blocked share. None of them can become real
 without written permission and official data.
@@ -98,6 +98,9 @@ Security: an official feed's credentials stay in the hosting environment; the fe
 | D-09 | Travel-time information | OB | Duration per option and ride; Metro times approximate | — | pytest; public check | IV |
 | D-10 | Leave now or choose a date and time | OB | Plan screen | — | e2e | IV |
 | D-11 | Correct wording per mode | STD | The wait names the mode of the first ride (Metro train, bus, other) | — | Browser check: no "first bus" on a Metro journey (18 Nov 2026) | IV |
+| D-12 | Swap start and destination | OB | Swap button | — | `phase2_check.py` | IV |
+| D-13 | Start from my location (nearest stop or station) | OB | Nearest stop or station, never an entrance | Location permission | `phase2_check.py`; regression test | IV |
+| D-14 | Share a journey and open a shared journey | OB | Journey links; Web Share, clipboard or on-page link | — | `phase2_check.py` | IV |
 
 ## E. Ticketing, passes and notices
 Security: no ticket, QR code, receipt or balance is ever produced without a provider; tests enforce this.
@@ -106,7 +109,7 @@ Security: no ticket, QR code, receipt or balance is ever produced without a prov
 |---|---|---|---|---|---|---|
 | E-01 | Digital bus tickets, passes, renewal | OB, NB | Refusing adapters; links to official channels | BMTC ticketing agreement | pytest; e2e | GOV |
 | E-02 | Ticket validation, QR codes, receipts, refunds, history | OB | None (deliberately) | BMTC validation infrastructure and rules | pytest proves no QR or receipt is produced | GOV |
-| E-03 | Service announcements by administrators (with official source links and end dates) | OB | Upcoming-transport register only | None for applicant-authored notices that cite official sources | — | M |
+| E-03 | Service announcements by administrators (with official source links and end dates) | OB | Service notices on Home; admin editor; official-source allow-list; 31-day limit; audit log | — | `tests/test_notices.py`; `phase2_check.py` | IV |
 
 ## F. Payments
 Security: never store card numbers or UPI PINs; verify webhooks; idempotent requests; reconcile daily.
@@ -135,6 +138,7 @@ Security: never store card numbers or UPI PINs; verify webhooks; idempotent requ
 | G-11 | Upcoming transport with status labels | OB | Register with sources and history | — | pytest 17; browser 17 | IV |
 | G-12 | Rule-based travel assistant | OB | Fixed rules, app data only | — | pytest | IV |
 | G-13 | Feature list states only what is true | OB | Fares reported only when shown; temporary server storage reported | — | pytest (`tests/test_client_ip_and_labels.py`) | IV |
+| G-14 | Quick destinations | OB | Major Metro stations present in the data, labelled | — | `phase2_check.py` | IV |
 
 ## H. Namma Metro
 | ID | Requirement | Source | Built today | Dependency or blocker | Evidence | Class |

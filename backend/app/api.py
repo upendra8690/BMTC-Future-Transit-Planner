@@ -49,6 +49,8 @@ from .schemas import (
     AnnouncementIn,
     AnnouncementUpdateIn,
     DataSourceIn,
+    NoticeIn,
+    NoticeUpdateIn,
     NotificationIn,
     PasswordChangeIn,
     PasswordIn,
@@ -67,7 +69,7 @@ from .security import (
     require_client_key,
     safe_filename,
 )
-from .services import accounts, announcements, assistant, catalogue, integrations, planner, registry
+from .services import accounts, announcements, assistant, catalogue, integrations, notices, planner, registry
 from .services import scenarios as scn
 from .services import schedule as sched
 from .services.audit import record_audit
@@ -284,6 +286,48 @@ def admin_update_upcoming(
                                     ip=client_ip(request),
                                     today=_service_today(request, db))
     except announcements.AnnouncementError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.get("/notices", tags=["system"])
+def service_notices(request: Request, db: DbSession) -> dict[str, Any]:
+    """Service notices running today. Each repeats an official source, which it links to; there is no live alerts
+    feed, so this list is empty unless an administrator has posted a notice."""
+    return notices.list_active(db, _service_today(request, db))
+
+
+@router.get("/admin/notices", tags=["admin"])
+def admin_list_notices(request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
+    return notices.list_for_admin(db, _service_today(request, db))
+
+
+@router.post("/admin/notices", status_code=201, tags=["admin"])
+def admin_create_notice(data: NoticeIn, request: Request, db: DbSession) -> dict[str, Any]:
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
+    values = data.model_dump(exclude={"reason"})
+    values["title"], values["body"] = values["title"].strip(), values["body"].strip()
+    try:
+        return notices.create(db, values, reason=data.reason, actor=request.state.admin_actor, ip=client_ip(request),
+                              today=_service_today(request, db))
+    except notices.NoticeError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.patch("/admin/notices/{notice_id}", tags=["admin"])
+def admin_update_notice(notice_id: Annotated[int, ApiPath(ge=1)], data: NoticeUpdateIn, request: Request,
+                        db: DbSession) -> dict[str, Any]:
+    require_admin(request, roles=(ROLE_ADMIN, ROLE_EDITOR))
+    changes: dict[str, Any] = {}
+    for field in sorted(data.model_fields_set - {"reason"}):
+        value = getattr(data, field)
+        if value is None:
+            raise HTTPException(status_code=422, detail=f"{field} cannot be empty.")
+        changes[field] = value.strip() if isinstance(value, str) else value
+    try:
+        return notices.update(db, notice_id, changes, reason=data.reason, actor=request.state.admin_actor,
+                              ip=client_ip(request), today=_service_today(request, db))
+    except notices.NoticeError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 

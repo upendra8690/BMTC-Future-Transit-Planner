@@ -355,6 +355,11 @@ def stop_dict(stop: Stop, classification: str) -> dict[str, Any]:
     }
 
 
+# GTFS location_type: 0 stop or platform, 1 station. Entrances (2), generic nodes (3) and boarding areas (4) are not
+# places a journey starts from, so "near me" never lists them.
+BOARDING_LOCATION_TYPES = (0, 1)
+
+
 def nearby_stops(
     session: Session, classification: str, *, lat: float, lon: float, radius_m: int, limit: int
 ) -> list[dict[str, Any]]:
@@ -367,21 +372,36 @@ def nearby_stops(
     candidates = session.scalars(
         select(Stop).where(
             Stop.import_id.in_(import_ids),
+            Stop.location_type.in_(BOARDING_LOCATION_TYPES),
             Stop.lat.is_not(None),
             Stop.lon.is_not(None),
             Stop.lat.between(lat - dlat, lat + dlat),
             Stop.lon.between(lon - dlon, lon + dlon),
         )
     ).all()
-    scored = []
+    # A station can appear as the station itself and as each of its platforms, all with one name. It is listed once,
+    # at its nearest point, and represented by a platform (which has departures) when there is one.
+    places: dict[tuple[int, str], dict[str, Any]] = {}
     for stop in candidates:
         distance = haversine_km(lat, lon, stop.lat, stop.lon) * 1000
-        if distance <= radius_m:
-            item = stop_dict(stop, classification)
-            item["distance_m"] = round(distance)
-            scored.append(item)
-    scored.sort(key=lambda item: item["distance_m"])
-    return scored[:limit]
+        if distance > radius_m:
+            continue
+        key = (stop.import_id, fold(stop.name))
+        rank = (0 if stop.location_type == 0 else 1, distance)
+        place = places.get(key)
+        if place is None:
+            places[key] = {"stop": stop, "rank": rank, "distance": distance}
+            continue
+        place["distance"] = min(place["distance"], distance)
+        if rank < place["rank"]:
+            place["stop"], place["rank"] = stop, rank
+    ordered = sorted(places.values(), key=lambda place: place["distance"])[:limit]
+    results = []
+    for place in ordered:
+        item = stop_dict(place["stop"], classification)
+        item["distance_m"] = round(place["distance"])
+        results.append(item)
+    return results
 
 
 def route_detail(session: Session, route: Route, classification: str) -> dict[str, Any]:

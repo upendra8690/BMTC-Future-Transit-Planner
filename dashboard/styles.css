@@ -860,3 +860,11 @@ body:not([data-view="tools"]) .year-picker { display: none; }
   background: #431407;
   color: #ffedd5;
 }
+
+/* Service notices, quick destinations and journey tools (4.0) */
+.badge.alert { background: var(--danger-bg); color: var(--danger); }
+.notices .title { font-weight: 700; margin-top: 6px; }
+.notices p { margin: 4px 0 0; }
+.small-print { font-size: 0.85rem; margin-top: 8px; }
+.journey-tools { margin-top: 10px; gap: 8px; flex-wrap: wrap; }
+#homeQuickChips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

@@ -1201,7 +1201,24 @@
     BUS_AND_METRO: "journey.label_bus_metro"
   };
 
+  // A journey link: #/journey/<from>/<to>/<modes>/<classification>. Opening one plans that journey.
+  function journeyFromLink(args) {
+    if (!args || args.length < 2) return null;
+    var dec = function (x) {
+      try { return decodeURIComponent(x || ""); } catch (e) { return ""; }
+    };
+    var link = { from: dec(args[0]).slice(0, 80), to: dec(args[1]).slice(0, 80), modes: dec(args[2]) || "all", cls: dec(args[3]) };
+    return link.from.trim().length >= 2 && link.to.trim().length >= 2 ? link : null;
+  }
+
   function renderJourney(args, token) {
+    if (!state.pendingJourney) {
+      var linked = journeyFromLink(args);
+      if (linked) {
+        useClassification(linked.cls);
+        state.pendingJourney = linked;
+      }
+    }
     setView(
       '<section class="card"><h2>' + esc(t("journey.title")) + "</h2>" +
       '<p class="muted">' + esc(t("journey.intro")) + "</p>" +
@@ -1210,6 +1227,10 @@
       '<div class="form-grid">' +
       '<label class="field">' + esc(t("journey.from")) + '<input name="origin" required minlength="2" maxlength="80" autocomplete="off"></label>' +
       '<label class="field">' + esc(t("journey.to")) + '<input name="destination" required minlength="2" maxlength="80" autocomplete="off"></label>' +
+      "</div>" +
+      '<div class="toolbar journey-tools">' +
+      '<button type="button" class="secondary" data-action="locate-origin">' + esc(t("journey.use_location")) + "</button>" +
+      '<button type="button" class="secondary" data-action="swap-journey" aria-label="' + esc(t("journey.swap_label")) + '">⇅ ' + esc(t("journey.swap")) + "</button>" +
       "</div>" +
       '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.when")) + "</legend>" +
       '<div class="checks">' +
@@ -1243,7 +1264,9 @@
       form.elements.destination.value = pending.to;
       var mode = form.querySelector('input[name="modes"][value="' + (JOURNEY_MODES.indexOf(pending.modes) !== -1 ? pending.modes : "all") + '"]');
       if (mode) mode.checked = true;
-      submitJourney(form, token);
+      // A quick destination fills only the destination: the passenger adds where they start.
+      if (String(pending.from || "").trim()) submitJourney(form, token);
+      else form.elements.origin.focus();
     }
   }
 
@@ -1276,10 +1299,79 @@
     try {
       var data = await api("/api/plan?" + new URLSearchParams(params).toString());
       if (seq !== state.searchToken || token !== state.viewToken || !box.isConnected) return;
-      box.innerHTML = journeyHtml(data);
+      box.innerHTML = journeyHtml(data) + shareButtonHtml(data);
     } catch (err) {
       if (seq === state.searchToken && token === state.viewToken && box.isConnected) box.innerHTML = panelError(err, "rerender");
     }
+  }
+
+  function shareButtonHtml(data) {
+    if (!data || !data.options || !data.options.length) return "";
+    return '<div class="toolbar"><button type="button" class="secondary" data-action="share-journey"' +
+      ' data-from="' + esc(data.origin_query || "") + '" data-to="' + esc(data.destination_query || "") + '"' +
+      ' data-modes="' + esc(data.travel_modes || "all") + '" data-cls="' + esc(data.classification || state.classification) + '">' +
+      esc(t("journey.share")) + '</button></div><div id="shareBox"></div>';
+  }
+
+  async function shareJourney(node) {
+    var parts = [node.getAttribute("data-from"), node.getAttribute("data-to"), node.getAttribute("data-modes") || "all",
+      node.getAttribute("data-cls") || state.classification].map(function (x) { return encodeURIComponent(x || ""); });
+    var url = location.origin + location.pathname + "#/journey/" + parts.join("/");
+    var title = t("journey.share_title", { from: node.getAttribute("data-from") || "", to: node.getAttribute("data-to") || "" });
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: title, url: url });
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        toast(t("journey.link_copied"));
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+    }
+    var shareBox = document.getElementById("shareBox");
+    if (!shareBox) return;
+    shareBox.innerHTML = '<label class="field">' + esc(t("journey.share_link")) +
+      '<input readonly value="' + esc(url) + '"></label>';
+    var linkInput = shareBox.querySelector("input");
+    linkInput.focus();
+    linkInput.select();
+  }
+
+  // Fills "From" with the nearest stop or station. The location is used once, in this request, and never stored.
+  function locateOrigin(node) {
+    var form = document.getElementById("journeyForm");
+    if (!form) return;
+    if (!navigator.geolocation) {
+      toast(t("journey.no_geolocation"));
+      return;
+    }
+    node.disabled = true;
+    toast(t("journey.locating"));
+    navigator.geolocation.getCurrentPosition(async function (pos) {
+      try {
+        var data = await api("/api/stops/nearby?" + new URLSearchParams({
+          lat: pos.coords.latitude.toFixed(5), lon: pos.coords.longitude.toFixed(5), radius_m: "1500", limit: "1",
+          classification: state.classification
+        }).toString());
+        var stop = data.results && data.results[0];
+        if (!stop) {
+          toast(t("journey.no_stop_near"));
+          return;
+        }
+        if (form.isConnected) form.elements.origin.value = stop.name;
+        toast(t("journey.located", { name: stop.name, m: fmtNum(stop.distance_m) }));
+      } catch (err) {
+        toast(err && err.message ? err.message : t("journey.no_stop_near"));
+      } finally {
+        node.disabled = false;
+      }
+    }, function () {
+      node.disabled = false;
+      toast(t("journey.location_refused"));
+    }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
   }
 
   function journeyHtml(data) {
@@ -1914,6 +2006,28 @@
       '<label class="field">' + esc(t("admin.upcoming_note")) + '<input name="note" maxlength="300"></label>' +
       '<label class="field">' + esc(t("admin.upcoming_reason")) + '<input name="reason" required minlength="3" maxlength="500" autocomplete="off"></label>' +
       '<div class="align-end"><button type="submit">' + esc(t("admin.upcoming_save")) + "</button></div></form></section>" +
+      '<section class="card"><h2>' + esc(t("admin.notices_title")) + "</h2>" +
+      '<p class="muted">' + esc(t("admin.notices_help")) + "</p>" +
+      '<div id="adminNotices">' + loadingInline() + "</div>" +
+      '<form id="noticeWithdrawForm" class="form-grid" hidden>' +
+      '<label class="field">' + esc(t("admin.notice_withdraw_reason")) + '<input name="reason" required minlength="3" maxlength="500" autocomplete="off"></label>' +
+      '<input type="hidden" name="notice_id">' +
+      '<div class="row-actions align-end"><button type="submit" class="danger">' + esc(t("admin.notice_withdraw")) + "</button>" +
+      '<button type="button" class="secondary" data-action="notice-withdraw-cancel">' + esc(t("common.cancel")) + "</button></div></form>" +
+      "<h3>" + esc(t("admin.notice_new")) + "</h3>" +
+      '<form id="noticeForm" class="form-grid">' +
+      '<label class="field">' + esc(t("admin.notice_title")) + '<input name="title" required minlength="5" maxlength="120" autocomplete="off"></label>' +
+      '<label class="field">' + esc(t("admin.notice_body")) + '<textarea name="body" rows="2" maxlength="600"></textarea></label>' +
+      '<label class="field">' + esc(t("admin.notice_kind")) + '<select name="kind">' +
+      ["DISRUPTION", "DIVERSION", "INFORMATION"].map(function (k) { return '<option value="' + k + '">' + esc(t("notices.kind." + k)) + "</option>"; }).join("") + "</select></label>" +
+      '<label class="field">' + esc(t("admin.notice_mode")) + '<select name="mode">' +
+      ["BUS", "METRO", "ALL"].map(function (m) { return '<option value="' + m + '">' + esc(t("notices.mode." + m)) + "</option>"; }).join("") + "</select></label>" +
+      '<label class="field">' + esc(t("admin.notice_source_title")) + '<input name="source_title" required minlength="3" maxlength="200"></label>' +
+      '<label class="field">' + esc(t("admin.notice_source_url")) + '<input name="source_url" type="url" required maxlength="500" placeholder="https://"></label>' +
+      '<label class="field">' + esc(t("admin.notice_starts")) + '<input name="starts_on" type="date" required></label>' +
+      '<label class="field">' + esc(t("admin.notice_ends")) + '<input name="ends_on" type="date" required></label>' +
+      '<label class="field">' + esc(t("admin.upcoming_reason")) + '<input name="reason" required minlength="3" maxlength="500" autocomplete="off"></label>' +
+      '<div class="align-end"><button type="submit">' + esc(t("admin.notice_save")) + "</button></div></form></section>" +
       '<section class="card"><h2>' + esc(t("admin.upload_title")) + "</h2>" +
       '<p class="muted">' + esc(t("admin.upload_help")) + "</p>" +
       '<form id="uploadForm" class="form-grid">' +
@@ -2134,6 +2248,7 @@
       api("/api/admin/stats", { admin: true }),
       api("/api/admin/audit-logs?limit=50", { admin: true }),
       api("/api/upcoming"),
+      api("/api/admin/notices", { admin: true }),
     ]);
     if (token !== state.viewToken || !document.getElementById("adminBody")) return;
     setAdminNotice("");
@@ -2142,6 +2257,71 @@
     renderAdminStats(results[2]);
     renderAdminAudit(results[3].entries);
     renderAdminUpcoming(results[4]);
+    renderAdminNotices(results[5]);
+  }
+
+  // ---------------------------------------------------------------- administration: service notices
+  function renderAdminNotices(data) {
+    var box = document.getElementById("adminNotices");
+    var form = document.getElementById("noticeForm");
+    if (!box) return;
+    box.innerHTML = data.notices.length ? '<ul class="list">' + data.notices.map(function (n) {
+      var open = n.status === "ACTIVE" || n.status === "SCHEDULED";
+      return '<li><div><div class="title">' + esc(n.title) + '</div><div class="muted">' +
+        esc(t("notices.kind." + n.kind)) + " · " + esc(t("notices.mode." + n.mode)) + " · " +
+        esc(formatCalendarDate(n.starts_on)) + " – " + esc(formatCalendarDate(n.ends_on)) + "</div></div>" +
+        '<div class="row-actions"><span class="badge ' + (n.status === "ACTIVE" ? "official" : "neutral") + '">' + esc(t("notices.status." + n.status)) + "</span>" +
+        (open ? '<button type="button" class="danger" data-action="notice-withdraw" data-id="' + esc(n.id) + '">' + esc(t("admin.notice_withdraw")) + "</button>" : "") +
+        "</div></li>";
+    }).join("") + "</ul>" : '<div class="empty">' + esc(t("admin.notice_none")) + "</div>";
+    if (form && !form.elements.starts_on.value) {
+      form.elements.starts_on.value = data.today;
+      var end = new Date(data.today + "T00:00:00Z");
+      end.setUTCDate(end.getUTCDate() + 7);
+      form.elements.ends_on.value = end.toISOString().slice(0, 10);
+    }
+  }
+
+  async function submitNotice(form, token) {
+    var body = {};
+    ["title", "body", "kind", "mode", "source_title", "source_url", "starts_on", "ends_on", "reason"].forEach(function (f) {
+      body[f] = String(form.elements[f].value || "").trim();
+    });
+    busy(form, true);
+    try {
+      await api("/api/admin/notices", { admin: true, method: "POST", json: body });
+      form.reset();
+      toast(t("admin.notice_saved"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    } finally {
+      busy(form, false);
+    }
+  }
+
+  function withdrawNotice(node) {
+    var form = document.getElementById("noticeWithdrawForm");
+    if (!form) return;
+    form.elements.notice_id.value = node.getAttribute("data-id") || "";
+    form.elements.reason.value = "";
+    form.hidden = false;
+    form.elements.reason.focus();
+  }
+
+  async function submitNoticeWithdrawal(form, token) {
+    busy(form, true);
+    try {
+      await api("/api/admin/notices/" + encodeURIComponent(form.elements.notice_id.value),
+        { admin: true, method: "PATCH", json: { withdrawn: true, reason: String(form.elements.reason.value || "").trim() } });
+      form.hidden = true;
+      toast(t("admin.notice_withdrawn"));
+      await refreshAdminData(token);
+    } catch (err) {
+      adminFailure(err, token);
+    } finally {
+      busy(form, false);
+    }
   }
 
   // ---------------------------------------------------------------- administration: upcoming transport
@@ -2469,6 +2649,10 @@
       '<button type="submit" name="kind" value="routes">' + esc(t("home.find_route")) + "</button>" +
       '<button type="submit" name="kind" value="stops" class="secondary">' + esc(t("home.find_stop")) + "</button></div></form>" +
       recentHtml() + "</section>" +
+      '<section class="card" id="homeNotices"><h2>' + esc(t("notices.title")) + '</h2><div id="homeNoticesBody" aria-live="polite">' +
+      loadingInline() + "</div></section>" +
+      '<section class="card" id="homeQuick" hidden><h2>' + esc(t("home.quick_title")) + "</h2>" +
+      '<p class="muted">' + esc(t("home.quick_help")) + '</p><div class="chips" id="homeQuickChips"></div></section>' +
       '<section class="card map-card"><div class="card-head"><h2>' + esc(t("home.map_title")) + "</h2>" +
       '<button type="button" class="secondary" data-action="home-nearby">' + esc(t("home.near_me")) + "</button></div>" +
       '<div id="homeMap" class="map home-map" role="region" aria-label="' + esc(t("home.map_title")) + '"></div></section>' +
@@ -2495,6 +2679,80 @@
       }
     } else {
       showHomeMap();
+    }
+    loadHomeNotices(token);
+    loadQuickDestinations(token);
+  }
+
+  // ---------------------------------------------------------------- service notices (official sources only)
+  // The app has no live alerts feed. A notice appears only if an administrator copied it from an official source,
+  // which it links to; it ends on its stated date.
+  async function loadHomeNotices(token) {
+    var box = document.getElementById("homeNoticesBody");
+    if (!box) return;
+    try {
+      var data = await api("/api/notices");
+      if (token !== state.viewToken || !box.isConnected) return;
+      box.innerHTML = noticesHtml(data.notices || []);
+    } catch (err) {
+      if (token === state.viewToken && box.isConnected) box.innerHTML = '<p class="muted">' + esc(t("notices.unavailable")) + "</p>";
+    }
+  }
+
+  function noticesHtml(list) {
+    if (!list.length) return '<p class="muted">' + esc(t("notices.none")) + "</p>";
+    return '<ul class="list notices">' + list.map(function (n) {
+      var href = safeHref(n.source && n.source.url);
+      var source = esc(t("notices.source", { title: n.source ? n.source.title : "" }));
+      return '<li class="notice-item"><div>' +
+        '<span class="badge ' + (n.kind === "DISRUPTION" ? "alert" : "neutral") + '">' + esc(t("notices.kind." + n.kind)) + "</span> " +
+        '<span class="badge neutral">' + esc(t("notices.mode." + n.mode)) + "</span>" +
+        '<div class="title">' + esc(n.title) + "</div>" + (n.body ? "<p>" + esc(n.body) + "</p>" : "") +
+        '<p class="muted">' + esc(t("notices.until", { date: formatCalendarDate(n.ends_on) })) + " · " +
+        (href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + source + "</a>" : source) +
+        "</p></div></li>";
+    }).join("") + '</ul><p class="muted small-print">' + esc(t("notices.footnote")) + "</p>";
+  }
+
+  // ---------------------------------------------------------------- quick destinations (major Metro stations)
+  // Shown only for stations that exist in the loaded timetable, with that timetable's label.
+  var QUICK_DESTINATIONS = [
+    ["Majestic", "Nadaprabhu Kempegowda Station, Majestic"], ["MG Road", "Mahatma Gandhi Road"],
+    ["Indiranagar", "Indiranagar"], ["Whitefield", "Whitefield (Kadugodi)"], ["Electronic City", "Electronic City"],
+    ["Jayanagar", "Jayanagar"], ["Cubbon Park", "Cubbon Park"], ["Vidhana Soudha", "Dr. B. R. Ambedkar Station, Vidhana Soudha"],
+    ["Silk Board", "Central Silk Board"], ["Banashankari", "Banashankari"], ["RV Road", "Rashtreeya Vidyalaya Road"],
+    ["Baiyappanahalli", "Baiyappanahalli"]
+  ];
+
+  async function loadQuickDestinations(token) {
+    var section = document.getElementById("homeQuick");
+    var chips = document.getElementById("homeQuickChips");
+    if (!section || !chips) return;
+    try {
+      var cls = state.classification;
+      var data = await api("/api/metro/stations?classification=" + encodeURIComponent(cls) + "&limit=500");
+      if (!data.stations.length && cls === "OFFICIAL_VERIFIED") {
+        cls = "UNVERIFIED_FEED";
+        data = await api("/api/metro/stations?classification=" + cls + "&limit=500");
+      }
+      if (token !== state.viewToken || !chips.isConnected) return;
+      var names = {};
+      data.stations.forEach(function (st) { names[st.name] = true; });
+      var found = QUICK_DESTINATIONS.filter(function (q) { return names[q[1]]; });
+      if (!found.length) return;
+      chips.innerHTML = badge(cls) + " " + found.map(function (q) {
+        return '<button type="button" class="chip-button" data-action="quick-dest" data-name="' + esc(q[1]) + '" data-cls="' + esc(cls) + '">' + esc(q[0]) + "</button>";
+      }).join("");
+      section.hidden = false;
+    } catch (err) {
+      // Without the station list the card stays hidden; nothing is guessed.
+    }
+  }
+
+  function useClassification(cls) {
+    if (cls === "OFFICIAL_VERIFIED" || cls === "UNVERIFIED_FEED") {
+      state.classification = cls;
+      storage.set(PREFIX + "classification", cls);
     }
   }
 
@@ -3210,6 +3468,36 @@
       case "plan-fav-journey":
         planSavedJourney(node);
         break;
+      case "quick-dest":
+        useClassification(node.getAttribute("data-cls"));
+        state.pendingJourney = { from: "", to: node.getAttribute("data-name") || "", modes: "metro" };
+        if (location.hash === "#/journey") render();
+        else location.hash = "#/journey";
+        break;
+      case "swap-journey": {
+        var jf = document.getElementById("journeyForm");
+        if (jf) {
+          var before = jf.elements.origin.value;
+          jf.elements.origin.value = jf.elements.destination.value;
+          jf.elements.destination.value = before;
+          jf.elements.origin.focus();
+        }
+        break;
+      }
+      case "locate-origin":
+        locateOrigin(node);
+        break;
+      case "share-journey":
+        shareJourney(node);
+        break;
+      case "notice-withdraw":
+        withdrawNotice(node);
+        break;
+      case "notice-withdraw-cancel": {
+        var withdrawForm = document.getElementById("noticeWithdrawForm");
+        if (withdrawForm) withdrawForm.hidden = true;
+        break;
+      }
       case "home-nearby":
         state.autoNearby = true;
         location.hash = "#/nearby";
@@ -3271,6 +3559,12 @@
         break;
       case "upcomingForm":
         submitUpcoming(form, token);
+        break;
+      case "noticeForm":
+        submitNotice(form, token);
+        break;
+      case "noticeWithdrawForm":
+        submitNoticeWithdrawal(form, token);
         break;
       case "uploadForm":
         submitUpload(form, token);

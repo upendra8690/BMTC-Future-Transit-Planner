@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from typing import Literal
 
@@ -191,3 +192,37 @@ class NotificationIn(BaseModel):
 
 class RoleIn(BaseModel):
     role: Literal["passenger", "editor", "admin"]
+
+
+# ---------------------------------------------------------------- service notices
+NoticeKind = Literal["DISRUPTION", "DIVERSION", "INFORMATION"]
+NoticeMode = Literal["BUS", "METRO", "ALL"]
+
+
+class NoticeIn(BaseModel):
+    """A service notice copied from an official source. The source rules are checked in services/notices.py."""
+
+    title: str = Field(min_length=5, max_length=120)
+    body: str = Field(default="", max_length=600)
+    kind: NoticeKind
+    mode: NoticeMode
+    source_title: str = Field(min_length=3, max_length=200)
+    source_url: str = Field(max_length=500, pattern=r"^https://\S+$")
+    starts_on: dt.date
+    ends_on: dt.date
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class NoticeUpdateIn(BaseModel):
+    """Only the fields that are sent change. Set withdrawn to true to hide a notice at once."""
+
+    title: str | None = Field(default=None, min_length=5, max_length=120)
+    body: str | None = Field(default=None, max_length=600)
+    kind: NoticeKind | None = None
+    mode: NoticeMode | None = None
+    source_title: str | None = Field(default=None, min_length=3, max_length=200)
+    source_url: str | None = Field(default=None, max_length=500, pattern=r"^https://\S+$")
+    starts_on: dt.date | None = None
+    ends_on: dt.date | None = None
+    withdrawn: bool | None = None
+    reason: str = Field(min_length=3, max_length=500)

@@ -391,6 +391,35 @@ class TransportAnnouncementChange(Base):
     announcement: Mapped[TransportAnnouncement] = relationship(back_populates="changes")
 
 
+# ---------------------------------------------------------------- service notices (written by administrators)
+NOTICE_KINDS = ("DISRUPTION", "DIVERSION", "INFORMATION")
+NOTICE_MODES = ("BUS", "METRO", "ALL")
+
+
+class ServiceNotice(Base):
+    """A short service notice written by an administrator from an official source, shown until its end date.
+
+    It is information only: the journey planner never reads it. Every notice links to the official source it repeats,
+    and ends within a month. Withdrawing a notice hides it at once; it is kept, with the audit log, as a record.
+    """
+
+    __tablename__ = "service_notices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(20))
+    mode: Mapped[str] = mapped_column(String(10))
+    source_title: Mapped[str] = mapped_column(String(200))
+    source_url: Mapped[str] = mapped_column(String(500))
+    starts_on: Mapped[dt.date] = mapped_column(Date)
+    ends_on: Mapped[dt.date] = mapped_column(Date, index=True)
+    withdrawn: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 # ---------------------------------------------------------------- passenger accounts (off unless storage is permanent)
 ROLE_PASSENGER, ROLE_EDITOR, ROLE_ADMIN = "passenger", "editor", "admin"
 ROLES = (ROLE_PASSENGER, ROLE_EDITOR, ROLE_ADMIN)
