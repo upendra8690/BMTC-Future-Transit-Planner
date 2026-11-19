@@ -47,7 +47,7 @@ production use. The full checklist (OWASP ASVS, API Top 10, MASVS, DPDP, GIGW, C
 | S5 | One shared administrator key | Medium | Open: per-person roles exist and switch on with accounts (needs PostgreSQL) |
 | H1 | No permanent database or backups on free hosting | Medium for a pilot | Open: needs the owner's PostgreSQL |
 | A1 | Android wrapper not run on a device | Medium | Open |
-| S4 | CSP allows inline styles | Low | Open |
+| S4 | CSP allowed inline styles | Low | Fixed 19 Nov 2026: no inline styles; `style-src 'self'`; tested by `test_the_dashboard_policy_allows_no_inline_styles` and `tests/browser/map_and_policy_check.py` |
 | — | "Stops near me" listed station entrances (functional defect) | — | **Fixed** in this round, with a regression test |
 | — | No independent penetration test | — | Recommended before production |
 

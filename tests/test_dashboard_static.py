@@ -345,3 +345,13 @@ def test_no_form_control_hides_a_form_property():
     for name in ("index.html", "app.js"):
         found = reserved.findall(read(name))
         assert not found, f"{name}: form controls named {found}"
+
+
+def test_markup_has_no_style_attributes_so_the_policy_needs_no_unsafe_inline():
+    """The security policy allows styles only from the app's own stylesheet. Inline style attributes would be refused,
+    so none may appear in the page or in markup the script builds. Colours from data are set through the DOM."""
+    for name in ("app.js", "index.html"):
+        text = read(name)
+        assert 'style="' not in text, f"inline style attribute in {name}"
+        assert "<style" not in text, f"style element in {name}"
+        assert 'setAttribute("style"' not in text

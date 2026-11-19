@@ -11,7 +11,7 @@ Based on OWASP Top 10 and the OWASP API Security Top 10. This release's evidence
 | Authorisation and owner isolation | Saved routes, scenarios and preferences are filtered by device-key hash | pytest: other device cannot read, delete or erase; probes | Pass |
 | Input validation | Pydantic models; length, range and pattern limits on every query (`modes`, `q`, capability name) | pytest 422 cases; probes | Pass |
 | SQL injection | SQLAlchemy bound parameters only; no string-built SQL | Injection-shaped probes; bandit | Pass |
-| XSS | Every value escaped before HTML is built; CSP `script-src 'self'` | Stored-XSS probe in a real browser | Pass; `style-src 'unsafe-inline'` remains (S4, low) |
+| XSS | Every value escaped before HTML is built; CSP `script-src 'self'` | Stored-XSS probe in a real browser | Pass; `style-src 'self'` with no inline styles (S4 fixed 19 Nov 2026) |
 | CSRF | No cookies or ambient credentials; keys travel in headers the browser does not add on its own | Design review | Not applicable |
 | Rate limiting | Per-client limit (default 120 requests per minute), behind Render's proxy per visitor | pytest `test_rate_limit.py`; 429 observed in the browser run | Pass |
 | Secrets | Read from environment only; `.env` and `data/` git-ignored; Render generates `ADMIN_API_KEY` | `render.yaml`; repository search | Pass |
@@ -30,7 +30,7 @@ Based on OWASP Top 10 and the OWASP API Security Top 10. This release's evidence
 ## Open findings
 | ID | Finding | Severity | Plan |
 |---|---|---|---|
-| S4 | CSP allows inline styles (`style-src 'unsafe-inline'`) | Low | Move inline `style=` attributes to classes |
+| S4 | CSP allowed inline styles (`style-src 'unsafe-inline'`) | Low | Fixed 19 Nov 2026: no inline styles; `style-src 'self'`; tested by `test_the_dashboard_policy_allows_no_inline_styles` and `tests/browser/map_and_policy_check.py` |
 | S5 | One shared admin key, so admin actions cannot be traced to a person | Medium | Per-person admin accounts with roles, once accounts exist |
 | — | No hosted database backups | Medium (for a pilot) | Configure on the Postgres provider before any pilot |
 | — | Free hosting has no persistent disk; device data is lost on restart | Medium (for a pilot) | Persistent Postgres before any pilot |

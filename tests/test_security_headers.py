@@ -76,3 +76,10 @@ def test_hsts_is_sent_over_https_and_not_over_plain_http(settings):
         assert secure.get("/").headers["strict-transport-security"] == "max-age=31536000"
     with TestClient(app, base_url="http://testserver") as plain:
         assert "strict-transport-security" not in plain.get("/api/health").headers
+
+
+def test_the_dashboard_policy_allows_no_inline_styles(client):
+    policy = client.get("/").headers["content-security-policy"]
+    assert "style-src 'self';" in policy
+    assert "unsafe-inline" not in policy
+    assert "unsafe-eval" not in policy

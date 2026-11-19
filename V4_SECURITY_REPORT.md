@@ -10,7 +10,7 @@ table is in `docs/launch/SECURITY_AUDIT.md`.
 | Authentication — passengers | NOT IMPLEMENTED | No accounts. Data is tied to a random device key, stored on the server only as a SHA-256 hash |
 | Authorisation and data isolation | PASS | Another device cannot read, delete or erase this device's data (pytest, probes, e2e) |
 | SQL injection | PASS | Bound parameters only (bandit clean); injection-shaped input probes |
-| XSS | PASS | All values escaped; CSP `script-src 'self'`; stored-XSS probe in a real browser. Open: `style-src 'unsafe-inline'` (S4, low) |
+| XSS | PASS | All values escaped; CSP `script-src 'self'`; stored-XSS probe in a real browser. `style-src 'self'`, no inline styles (S4 fixed 19 Nov 2026) |
 | CSRF | Not applicable | No cookies or ambient credentials; keys travel in headers a browser does not add on its own |
 | Rate limiting | PASS | Per-client limit, default 120 per minute (pytest); HTTP 429 observed during this work |
 | API validation | PASS | Lengths, ranges and patterns on every input (pytest 422 cases; e2e form checks) |
@@ -38,5 +38,5 @@ table is in `docs/launch/SECURITY_AUDIT.md`.
 | S5 | One shared admin key, so admin actions cannot be traced to a person | Medium | Per-person admin accounts after passenger accounts |
 | — | Free hosting: no persistent database, no backups | Medium (for a pilot) | Neon Postgres with backups before any pilot |
 | A1 | Android shell link and back-button fix not compiled | Medium | Build the v4 APK and test on a phone |
-| S4 | CSP allows inline styles | Low | Move inline `style=` attributes to CSS classes |
+| S4 | CSP allowed inline styles | Low | Fixed 19 Nov 2026: no inline styles; `style-src 'self'`; tested by `test_the_dashboard_policy_allows_no_inline_styles` and `tests/browser/map_and_policy_check.py` |
 | — | No independent penetration test | — | Before production use |

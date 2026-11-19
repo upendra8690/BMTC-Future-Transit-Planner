@@ -601,7 +601,7 @@
 
   function panelError(err, action) {
     return '<div class="banner error" role="alert"><strong>' + esc(t("common.error")) + "</strong>" + esc(err.message || t("msg.unexpected")) +
-      '<div style="margin-top:8px"><button type="button" class="secondary" data-action="' + esc(action) + '">' + esc(t("common.retry")) + "</button></div></div>";
+      '<div class="mt-8"><button type="button" class="secondary" data-action="' + esc(action) + '">' + esc(t("common.retry")) + "</button></div></div>";
   }
 
   function setView(html) {
@@ -652,13 +652,26 @@
   }
 
   // Fills one panel with the result of job(). Stale answers are dropped; errors stay inside the panel.
+  // Colours that come from data (a Metro line's colour) are set through the DOM, because the page's security policy
+  // allows no style attributes in markup. Only "#rrggbb" or one of the app's own colour variables is accepted.
+  function paintColours(root) {
+    var nodes = root && root.querySelectorAll ? root.querySelectorAll("[data-colour]") : [];
+    for (var i = 0; i < nodes.length; i += 1) {
+      var colour = nodes[i].getAttribute("data-colour") || "";
+      if (/^#[0-9A-Fa-f]{6}$/.test(colour) || /^var\(--[a-z-]+\)$/.test(colour)) nodes[i].style.borderColor = colour;
+    }
+  }
+
   async function fillPanel(panel, token, job, searchSeq) {
     if (!panel) return;
     panel.innerHTML = loadingInline();
     try {
       var html = await job();
       var stale = searchSeq !== undefined && searchSeq !== state.searchToken;
-      if (!stale && isCurrent(panel, token)) panel.innerHTML = html;
+      if (!stale && isCurrent(panel, token)) {
+        panel.innerHTML = html;
+        paintColours(panel);
+      }
     } catch (err) {
       var stillWanted = searchSeq === undefined || searchSeq === state.searchToken;
       if (stillWanted && isCurrent(panel, token)) panel.innerHTML = panelError(err, "rerender");
@@ -688,6 +701,75 @@
       return '<button type="button" data-action="cls" data-cls="' + code + '" aria-pressed="' + pressed + '">' + esc(classLabel(code)) + "</button>";
     }
     return '<div class="seg" role="group" aria-label="' + esc(t("cls.label")) + '">' + option("OFFICIAL_VERIFIED") + option("UNVERIFIED_FEED") + "</div>";
+  }
+
+  // ---------------------------------------------------------------- journey: choosing a place on the map
+  // The map only helps to find a stop. A tap (or the map's centre) lists the nearest stops and stations in the chosen
+  // data, and the passenger picks one as the start or the destination. No place is invented.
+  function toggleMapPicker(button) {
+    var box = document.getElementById("pickMapBox");
+    if (!box) return;
+    var open = box.hidden;
+    box.hidden = !open;
+    if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
+    if (!open) {
+      destroyMap();
+      return;
+    }
+    var map = makeMap("pickMap");
+    if (!map) return;
+    map.setView(BENGALURU, 12);
+    map.on("click", function (event) {
+      pickNear(event.latlng.lat, event.latlng.lng);
+    });
+  }
+
+  function pickAtCentre() {
+    if (!state.map) return;
+    var centre = state.map.getCenter();
+    pickNear(centre.lat, centre.lng);
+  }
+
+  async function pickNear(lat, lon) {
+    var list = document.getElementById("pickResults");
+    if (!list) return;
+    var L = window.L;
+    if (state.markers && L) {
+      state.markers.clearLayers();
+      L.circleMarker([lat, lon], { radius: 7, color: "#b91c1c", weight: 3 }).addTo(state.markers);
+    }
+    list.innerHTML = loadingInline();
+    var data;
+    try {
+      data = await api("/api/stops/nearby?" + new URLSearchParams({
+        lat: lat.toFixed(6), lon: lon.toFixed(6), radius_m: "1500", limit: "5", classification: state.classification
+      }).toString());
+    } catch (err) {
+      list.innerHTML = '<div class="banner error" role="alert">' + esc(err && err.message ? err.message : t("msg.unexpected")) + "</div>";
+      return;
+    }
+    if (!document.getElementById("pickResults")) return;
+    if (!data.results.length) {
+      list.innerHTML = '<div class="empty">' + esc(t("journey.map_none")) + "</div>";
+      return;
+    }
+    list.innerHTML = '<ul class="list">' + data.results.map(function (stop) {
+      return '<li><div><div class="title">' + esc(stop.name) + '</div><div class="muted">' + esc(t("journey.map_distance", { m: stop.distance_m })) + "</div></div>" +
+        '<div class="row-actions"><button type="button" class="secondary" data-action="pick-origin" data-name="' + esc(stop.name) + '">' + esc(t("journey.map_start")) + "</button>" +
+        '<button type="button" class="secondary" data-action="pick-destination" data-name="' + esc(stop.name) + '">' + esc(t("journey.map_end")) + "</button></div></li>";
+    }).join("") + "</ul>";
+    if (state.markers && L) {
+      data.results.forEach(function (stop) {
+        L.circleMarker([stop.lat, stop.lon], { radius: 5, color: "#1d4ed8", weight: 2 }).bindTooltip(esc(stop.name)).addTo(state.markers);
+      });
+    }
+  }
+
+  function pickPlace(field, name) {
+    var form = document.getElementById("journeyForm");
+    if (!form || !name) return;
+    form.elements[field].value = name;
+    toast(t(field === "origin" ? "journey.map_set_start" : "journey.map_set_end", { name: name }));
   }
 
   // ---------------------------------------------------------------- maps (guarded: the map is optional)
@@ -802,11 +884,11 @@
       '<section class="card"><h2>' + esc(t("routes.title")) + "</h2>" +
       '<p class="muted">' + esc(t("routes.intro", { year: state.year, cls: classLabel(state.classification) })) + "</p>" +
       segmentedClassification() +
-      '<form id="routeSearch" class="toolbar" role="search" style="margin-top:12px">' +
-      '<label class="field" style="flex:1 1 240px">' + esc(t("routes.search_label")) +
+      '<form id="routeSearch" class="mt-12 toolbar" role="search">' +
+      '<label class="grow-240 field">' + esc(t("routes.search_label")) +
       '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("routes.search_placeholder")) + '"></label>' +
       '<button type="submit">' + esc(t("common.search")) + "</button></form>" +
-      '<div id="routeResults" style="margin-top:12px"></div></section>' +
+      '<div class="mt-12" id="routeResults"></div></section>' +
       '<section class="card"><h2>' + esc(t("routes.saved_title")) + '</h2><div id="savedRoutes"></div></section>'
     );
     var routeQuery = takePendingQuery("routeSearch");
@@ -861,7 +943,7 @@
       '<button type="button" data-action="tt-load" data-id="' + esc(detail.id) + '">' + esc(t("route.show_timetable")) + "</button>" +
       '<button type="button" class="secondary" data-action="tt-csv" data-id="' + esc(detail.id) + '">' + esc(t("common.download_csv")) + "</button>" +
       '<button type="button" class="secondary" data-action="save-route" data-gtfs="' + esc(detail.gtfs_route_id) + '" data-cls="' + esc(detail.classification) + '" data-label="' + esc(title) + '">' + esc(t("route.save")) + "</button></div>" +
-      '<div id="timetable" style="margin-top:12px"></div></section>' +
+      '<div class="mt-12" id="timetable"></div></section>' +
       '<section class="card"><h2>' + esc(t("route.stops_title")) + "</h2>" + directions + "</section>"
     );
     drawRouteMap(detail);
@@ -987,8 +1069,8 @@
       '<section class="card"><h2>' + esc(t("stops.title")) + "</h2>" +
       '<p class="muted">' + esc(t("stops.intro")) + "</p>" +
       segmentedClassification() +
-      '<form id="stopSearch" class="toolbar" role="search" style="margin-top:12px">' +
-      '<label class="field" style="flex:1 1 240px">' + esc(t("stops.search_label")) +
+      '<form id="stopSearch" class="mt-12 toolbar" role="search">' +
+      '<label class="grow-240 field">' + esc(t("stops.search_label")) +
       '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("stops.search_placeholder")) + '"></label>' +
       '<button type="submit">' + esc(t("common.search")) + "</button>" +
       '<button type="button" class="secondary" data-action="nearby-me">' + esc(t("stops.nearby")) + "</button></form>" +
@@ -1074,17 +1156,17 @@
         "</td><td>" + esc(dayLabel(d.departure_local, today)) + "</td><td>" + esc(minutes) + "</td></tr>";
     }).join("");
     var body = data.departures.length
-      ? '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.departures") })) + '" style="margin-top:12px"><table><thead><tr><th>' + esc(t("stop.col_time")) + "</th><th>" + esc(t("stop.col_route")) +
+      ? '<div class="mt-12 table-wrap" tabindex="0" role="region" aria-label="' + esc(t("common.table_scroll", { name: t("table.departures") })) + '"><table><thead><tr><th>' + esc(t("stop.col_time")) + "</th><th>" + esc(t("stop.col_route")) +
         "</th><th>" + esc(t("stop.col_towards")) + "</th><th>" + esc(t("stop.col_day")) + "</th><th>" + esc(t("journey.col_wait")) +
         "</th></tr></thead><tbody>" + rows + "</tbody></table></div>"
-      : '<div class="empty" style="margin-top:12px">' + esc(messageFor(data.message_code, data.message)) + "</div>";
+      : '<div class="mt-12 empty">' + esc(messageFor(data.message_code, data.message)) + "</div>";
     setView(
       '<section class="card"><p><a href="#/stops">&larr; ' + esc(t("stop.back")) + "</a></p>" +
       "<h2>" + esc(t("stop.title", { name: data.stop.name })) + "</h2><p>" + badge(data.stop.classification) + "</p>" +
       '<p class="muted">' + esc(t("stop.intro", { zone: data.service_timezone })) + "</p>" +
       '<div class="toolbar"><button type="button" class="secondary" data-action="rerender">' + esc(t("common.refresh")) + "</button></div>" +
       body +
-      '<p class="muted" style="margin-top:12px">' + esc(t("clock.scheduled_only")) + "</p></section>" +
+      '<p class="mt-12 muted">' + esc(t("clock.scheduled_only")) + "</p></section>" +
       stopExtrasHtml(data.stop)
     );
     await fillPanel(document.getElementById("stopRoutes"), token, async function () {
@@ -1234,7 +1316,7 @@
       '<section class="card"><h2>' + esc(t("journey.title")) + "</h2>" +
       '<p class="muted">' + esc(t("journey.intro")) + "</p>" +
       segmentedClassification() +
-      '<form id="journeyForm" style="margin-top:12px">' +
+      '<form class="mt-12" id="journeyForm">' +
       '<div class="form-grid">' +
       '<label class="field">' + esc(t("journey.from")) + '<input name="origin" required minlength="2" maxlength="80" autocomplete="off"></label>' +
       '<label class="field">' + esc(t("journey.to")) + '<input name="destination" required minlength="2" maxlength="80" autocomplete="off"></label>' +
@@ -1242,22 +1324,27 @@
       '<div class="toolbar journey-tools">' +
       '<button type="button" class="secondary" data-action="locate-origin">' + esc(t("journey.use_location")) + "</button>" +
       '<button type="button" class="secondary" data-action="swap-journey" aria-label="' + esc(t("journey.swap_label")) + '">⇅ ' + esc(t("journey.swap")) + "</button>" +
+      '<button type="button" class="secondary" data-action="map-pick" aria-controls="pickMapBox" aria-expanded="false">' + esc(t("journey.map_pick")) + "</button>" +
       "</div>" +
-      '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.when")) + "</legend>" +
+      '<div id="pickMapBox" class="mt-8" hidden><p class="muted small">' + esc(t("journey.map_hint")) + "</p>" +
+      '<div id="pickMap" class="map pick-map"></div>' +
+      '<div class="toolbar mt-8"><button type="button" class="secondary" data-action="map-centre">' + esc(t("journey.map_centre")) + "</button></div>" +
+      '<div id="pickResults" aria-live="polite"></div></div>' +
+      '<fieldset class="mt-12"><legend>' + esc(t("journey.when")) + "</legend>" +
       '<div class="checks">' +
       '<label><input type="radio" name="when" value="now" checked> ' + esc(t("journey.now")) + "</label>" +
       '<label><input type="radio" name="when" value="date"> ' + esc(t("journey.on_date")) + "</label>" +
       "</div>" +
-      '<label class="field" style="margin-top:8px">' + esc(t("journey.date")) +
+      '<label class="mt-8 field">' + esc(t("journey.date")) +
       '<input name="date" type="date" value="' + esc(defaultDate()) + '" disabled></label>' +
       "</fieldset>" +
-      '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.changes_legend")) + "</legend>" +
+      '<fieldset class="mt-12"><legend>' + esc(t("journey.changes_legend")) + "</legend>" +
       '<div class="checks">' +
       '<label><input type="radio" name="changes" value="0"> ' + esc(t("journey.changes_0")) + "</label>" +
       '<label><input type="radio" name="changes" value="1"> ' + esc(t("journey.changes_1")) + "</label>" +
       '<label><input type="radio" name="changes" value="2" checked> ' + esc(t("journey.changes_2")) + "</label>" +
       "</div></fieldset>" +
-      '<fieldset style="margin-top:12px"><legend>' + esc(t("journey.modes_legend")) + "</legend>" +
+      '<fieldset class="mt-12"><legend>' + esc(t("journey.modes_legend")) + "</legend>" +
       '<div class="checks">' +
       '<label><input type="radio" name="modes" value="all" checked> ' + esc(t("journey.modes_all")) + "</label>" +
       '<label><input type="radio" name="modes" value="bus"> ' + esc(t("journey.modes_bus")) + "</label>" +
@@ -1265,7 +1352,7 @@
       "</div></fieldset>" +
       '<div class="toolbar"><button type="submit">' + esc(t("journey.submit")) + "</button></div>" +
       "</form>" +
-      '<div id="journeyResults" style="margin-top:12px" aria-live="polite"></div></section>'
+      '<div class="mt-12" id="journeyResults" aria-live="polite"></div></section>'
     );
     var pending = state.pendingJourney;
     state.pendingJourney = null;
@@ -1569,7 +1656,7 @@
     setView(
       '<section class="card"><div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + " " + esc(t("scn.permanent")) + "</strong>" +
       esc(t("scn.notice")) + "</div>" +
-      '<p class="muted" style="margin-top:10px">' + esc(t("scn.device_note")) + "</p>" +
+      '<p class="mt-10 muted">' + esc(t("scn.device_note")) + "</p>" +
       '<div class="toolbar"><label class="field">' + esc(t("scn.year_filter")) +
       '<select id="scnYearFilter"><option value="">' + esc(t("scn.all_years")) + "</option>" + yearOptions + "</select></label>" +
       '<button type="button" data-action="scn-new">' + esc(t("scn.new")) + "</button>" +
@@ -1650,8 +1737,8 @@
       "<h3>" + esc(t("scn.stops_title", { max: MAX_SCENARIO_STOPS })) + "</h3>" +
       '<div id="scnStops"></div>' +
       '<div class="toolbar"><button type="button" class="secondary" data-action="scn-add-stop">' + esc(t("scn.add_stop")) + "</button></div>" +
-      '<label class="field" style="margin-top:12px">' + esc(t("scn.notes")) + '<textarea name="description" maxlength="1000">' + esc(v.description || "") + "</textarea></label>" +
-      '<div class="toolbar" style="margin-top:14px"><button type="submit">' + esc(t(s ? "scn.save_changes" : "scn.create")) + "</button>" +
+      '<label class="mt-12 field">' + esc(t("scn.notes")) + '<textarea name="description" maxlength="1000">' + esc(v.description || "") + "</textarea></label>" +
+      '<div class="mt-14 toolbar"><button type="submit">' + esc(t(s ? "scn.save_changes" : "scn.create")) + "</button>" +
       '<button type="button" class="secondary" data-action="scn-cancel">' + esc(t("common.cancel")) + "</button></div>" +
       '<div id="scnError" class="banner error" role="alert" hidden></div>' +
       "</form>";
@@ -1667,13 +1754,13 @@
     box.innerHTML = '<div class="form-grid">' + state.scenarioStops.map(function (stop, i) {
       var lat = stop.lat === null || stop.lat === undefined ? "" : String(stop.lat);
       var lon = stop.lon === null || stop.lon === undefined ? "" : String(stop.lon);
-      return '<div class="card" style="margin:0">' +
+      return '<div class="m-0 card">' +
         '<label class="field">' + esc(t("scn.stop_name", { n: i + 1 })) + '<input data-stop="' + i + '" data-field="name" maxlength="200" value="' + esc(stop.name || "") + '"></label>' +
-        '<div class="form-grid" style="margin-top:8px">' +
+        '<div class="mt-8 form-grid">' +
         '<label class="field">' + esc(t("scn.lat")) + '<input data-stop="' + i + '" data-field="lat" type="number" step="any" min="-90" max="90" value="' + esc(lat) + '"></label>' +
         '<label class="field">' + esc(t("scn.lon")) + '<input data-stop="' + i + '" data-field="lon" type="number" step="any" min="-180" max="180" value="' + esc(lon) + '"></label>' +
         "</div>" +
-        '<button type="button" class="danger" data-action="scn-remove-stop" data-index="' + i + '" style="margin-top:8px">' + esc(t("scn.remove_stop")) + "</button></div>";
+        '<button type="button" class="mt-8 danger" data-action="scn-remove-stop" data-index="' + i + '">' + esc(t("scn.remove_stop")) + "</button></div>";
     }).join("") + "</div>";
   }
 
@@ -1817,13 +1904,13 @@
   async function renderCompare(args, token) {
     setView(
       '<section class="card"><div class="banner scenario"><strong>' + badge("ESTIMATED_SCENARIO") + "</strong>" + esc(t("scn.notice")) + "</div>" +
-      '<h2 style="margin-top:12px">' + esc(t("cmp.title")) + "</h2>" +
+      '<h class="mt-12"2>' + esc(t("cmp.title")) + "</h2>" +
       '<div class="toolbar">' +
       '<label class="field">' + esc(t("cmp.a")) + '<select id="cmpA"></select></label>' +
       '<label class="field">' + esc(t("cmp.b")) + '<select id="cmpB"></select></label>' +
       '<button type="button" data-action="cmp-run">' + esc(t("cmp.run")) + "</button>" +
       '<button type="button" class="secondary" data-action="cmp-pdf">' + esc(t("cmp.pdf")) + "</button></div>" +
-      '<div id="cmpResult" style="margin-top:12px"></div></section>' +
+      '<div class="mt-12" id="cmpResult"></div></section>' +
       '<section class="card"><h2>' + esc(t("cmp.years_title")) + '</h2><div id="yearsCompare"></div></section>'
     );
     await Promise.all([
@@ -2001,7 +2088,7 @@
       '<form id="sourceDecisionForm" class="form-grid" hidden aria-labelledby="decisionQuestion">' +
       '<label class="field"><span id="decisionQuestion"></span><input name="note" required maxlength="500" autocomplete="off"></label>' +
       '<input type="hidden" name="source_id"><input type="hidden" name="verified">' +
-      '<div class="row-actions" style="align-self:end"><button type="submit" id="decisionSubmit"></button>' +
+      '<div class="align-end row-actions"><button type="submit" id="decisionSubmit"></button>' +
       '<button type="button" class="secondary" data-action="decision-cancel">' + esc(t("common.cancel")) + "</button></div></form>" +
       "<h3>" + esc(t("admin.add_source")) + "</h3>" +
       '<form id="sourceForm" class="form-grid">' +
@@ -2012,7 +2099,7 @@
       '<label class="field">' + esc(t("admin.src_kind")) + '<select name="kind">' +
       '<option value="OFFICIAL">OFFICIAL</option><option value="COMMUNITY">COMMUNITY</option>' +
       '<option value="SYNTHETIC_DEMO">SYNTHETIC_DEMO</option><option value="UNKNOWN" selected>UNKNOWN</option></select></label>' +
-      '<div style="align-self:end"><button type="submit">' + esc(t("admin.src_add")) + "</button></div></form></section>" +
+      '<div class="align-end"><button type="submit">' + esc(t("admin.src_add")) + "</button></div></form></section>" +
       '<section class="card"><h2>' + esc(t("admin.upcoming_title")) + "</h2>" +
       '<p class="muted">' + esc(t("admin.upcoming_help")) + "</p>" +
       '<form id="upcomingForm" class="form-grid">' +
@@ -2059,11 +2146,11 @@
       '<form id="uploadForm" class="form-grid">' +
       '<label class="field">' + esc(t("admin.upload_source")) + '<select name="data_source_id" id="uploadSource" required></select></label>' +
       '<label class="field">' + esc(t("admin.upload_file")) + '<input name="file" type="file" accept=".zip,application/zip" required></label>' +
-      '<div style="align-self:end"><button type="submit">' + esc(t("admin.upload_submit")) + "</button></div></form>" +
-      '<div id="uploadResult" style="margin-top:12px"></div></section>' +
+      '<div class="align-end"><button type="submit">' + esc(t("admin.upload_submit")) + "</button></div></form>" +
+      '<div class="mt-12" id="uploadResult"></div></section>' +
       '<section class="card"><h2>' + esc(t("admin.imports")) + '</h2><div id="adminImports">' + loadingInline() + "</div></section>" +
       '<section class="card"><h2>' + esc(t("admin.db_title")) + '</h2><div id="adminStats">' + loadingInline() + "</div>" +
-      '<div class="toolbar" style="margin-top:8px"><button type="button" class="secondary" data-action="backup">' + esc(t("admin.backup")) + "</button></div></section>" +
+      '<div class="mt-8 toolbar"><button type="button" class="secondary" data-action="backup">' + esc(t("admin.backup")) + "</button></div></section>" +
       '<section class="card"><h2>' + esc(t("admin.audit")) + '</h2><div id="adminAudit">' + loadingInline() + "</div></section>";
     applyAdminScope();
 
@@ -2870,10 +2957,10 @@
     setView(
       '<section class="card"><div class="card-head"><h2>' + esc(t("metro.title")) + "</h2>" + featureChip("metro") + "</div>" +
       '<p class="muted">' + esc(t("metro.intro")) + "</p>" + segmentedClassification() +
-      '<div id="metroLines" style="margin-top:12px"></div></section>' +
+      '<div class="mt-12" id="metroLines"></div></section>' +
       '<section class="card"><h2>' + esc(t("metro.stations")) + "</h2>" +
       '<form id="metroSearch" class="toolbar" role="search">' +
-      '<label class="field" style="flex:1 1 240px">' + esc(t("metro.search_label")) +
+      '<label class="grow-240 field">' + esc(t("metro.search_label")) +
       '<input name="q" type="search" maxlength="80" autocomplete="off" placeholder="' + esc(t("metro.search_placeholder")) + '"></label>' +
       '<button type="submit">' + esc(t("common.search")) + '</button></form><div id="metroStations"></div></section>' +
       '<section class="card"><h2>' + esc(t("metro.tickets_title")) + "</h2><p>" + esc(t("tickets.metro_channels")) + "</p>" +
@@ -2907,7 +2994,7 @@
     return '<ul class="list">' + data.stations.map(function (st) {
         var lines = st.lines.map(function (line) {
           var colour = /^[0-9A-Fa-f]{6}$/.test(line.color || "") ? "#" + line.color : "var(--scenario)";
-          return '<span class="line-chip" style="border-color:' + colour + '">' + esc(line.route_number) + "</span>";
+          return '<span class="line-chip" data-colour="' + esc(colour) + '">' + esc(line.route_number) + "</span>";
         }).join(" ");
         return '<li><div><div class="title">' + esc(st.name) + '</div><div class="muted">' + lines + "</div></div>" +
           '<div class="row-actions"><a class="button secondary" href="#/stops/' + esc(encodeURIComponent(st.id)) + '">' + esc(t("stops.departures")) + "</a></div></li>";
@@ -3515,7 +3602,7 @@
     setView('<section class="card"><div class="card-head"><h2>' + esc(t("assist.title")) + "</h2>" + featureChip("ai_assistant") + "</div>" +
       '<p class="muted">' + esc(t("assist.intro")) + "</p>" +
       '<form id="assistForm" class="toolbar" role="search">' +
-      '<label class="field" style="flex:1 1 280px">' + esc(t("assist.label")) +
+      '<label class="grow-280 field">' + esc(t("assist.label")) +
       '<input name="q" type="search" required maxlength="200" autocomplete="off" placeholder="' + esc(t("assist.placeholder")) + '"></label>' +
       '<button type="submit">' + esc(t("assist.ask")) + "</button></form>" +
       '<p class="muted small">' + esc(t("assist.english_only")) + "</p>" +
@@ -3523,7 +3610,7 @@
         return '<button type="button" class="chip-button" data-action="assist-example" data-q="' + esc(q) + '">' + esc(q) + "</button>";
       }).join(" ") + "</div>" +
       segmentedClassification() +
-      '<div id="assistAnswer" style="margin-top:12px" aria-live="polite"></div></section>');
+      '<div class="mt-12" id="assistAnswer" aria-live="polite"></div></section>');
   }
 
   function assistLink(href, key) {
@@ -3893,6 +3980,18 @@
         state.pendingJourney = { from: "", to: node.getAttribute("data-name") || "", modes: "metro" };
         if (location.hash === "#/journey") render();
         else location.hash = "#/journey";
+        break;
+      case "map-pick":
+        toggleMapPicker(node);
+        break;
+      case "map-centre":
+        pickAtCentre();
+        break;
+      case "pick-origin":
+        pickPlace("origin", node.getAttribute("data-name"));
+        break;
+      case "pick-destination":
+        pickPlace("destination", node.getAttribute("data-name"));
         break;
       case "swap-journey": {
         var jf = document.getElementById("journeyForm");

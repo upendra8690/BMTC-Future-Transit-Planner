@@ -27,7 +27,7 @@ assessment, not a certification or a professional penetration test.
 | S1 | Server access log recorded search text and "stops near me" coordinates with the client IP | Medium (privacy) | `docs/PRIVACY.md` (Logs); uvicorn default access log | Container starts uvicorn with `--no-access-log`; app logs only method, path without query, status and time for changes | Fixed in code; effective on the next deploy |
 | S2 | No erasure: a person could not delete their server-side data | Medium (privacy/DPDP) | No endpoint existed | `DELETE /api/my-data` + UI with confirmation; audit entry stores counts only, no IP | 2 API tests; Edge workflow 4/4 |
 | S3 | Live HTTPS site sends no `Strict-Transport-Security` | Low | Header check of the live 3.0 site: absent | HSTS (1 year) on HTTPS responses | Unit test; live retest after deploy |
-| S4 | CSP allows `'unsafe-inline'` styles | Low | `DASHBOARD_CSP` | Open: move inline `style=` attributes to classes, then drop it | — |
+| S4 | CSP allows `'unsafe-inline'` styles | Low | `DASHBOARD_CSP` | Fixed 19 Nov 2026: no inline styles; `style-src 'self'`; tested by `test_the_dashboard_policy_allows_no_inline_styles` and `tests/browser/map_and_policy_check.py` | — |
 | S5 | One shared admin key; no per-person accounts, MFA or lockout | Medium (accountability) | `docs/SECURITY_ASVS.md` V6 | Open: role-based admin accounts planned | — |
 | S6 | Probe expected 400 for saved-routes list without a device key; app returns an empty list | Informational | Probe output | None needed: nothing is disclosed; writes without a key are refused | Probe expectation corrected |
 | S7 | Rate limit is in memory, per instance; resets on restart | Low | `security.py` | Accepted for a single-instance demo; use a shared store if scaled out | — |

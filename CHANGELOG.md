@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased (branch `v4`): map selection and a stricter style policy, 2026-11-19
+- **Choose on map** in the journey planner: tap the map (or list stops near its centre) to see the nearest stops and
+  stations in the chosen data, with distances, then "Start here" or "Go here". Places come only from the loaded data.
+- **Security finding S4 fixed:** the 33 inline style attributes are now classes, Metro line colours are set through
+  the DOM, and the dashboard policy is `style-src 'self'` with no `'unsafe-inline'`. A static test forbids style
+  attributes, a header test checks the policy, and a browser check opens 20 screens, the admin screen and the maps
+  with no refusal.
+- **Tests:** new `tests/browser/map_and_policy_check.py` 13/13; phase 2 18/18, real mode 14/14, screen widths 22/22,
+  upcoming editor 17/17, accounts 24/24.
+
 ## Unreleased (branch `v4`): administrator accounts and account screens, 2026-11-19
 - **Individual administrator accounts replace the shared key wherever accounts run.** With a permanent database and
   `ACCOUNTS_ENABLED=1`, administration uses each person's account and records it as `user:<id>`. The shared

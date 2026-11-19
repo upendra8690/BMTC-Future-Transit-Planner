@@ -26,7 +26,7 @@ DASHBOARD_CSP = (
     "default-src 'self'; "
     "object-src 'none'; "
     "script-src 'self'; "
-    "style-src 'self' 'unsafe-inline'; "
+    "style-src 'self'; "
     "img-src 'self' data: https://*.tile.openstreetmap.org; "
     "connect-src 'self'; "
     "manifest-src 'self'; "

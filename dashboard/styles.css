@@ -874,3 +874,11 @@ body:not([data-view="tools"]) .year-picker { display: none; }
 .mt-8 { margin-top: 8px; }
 .mt-12 { margin-top: 12px; }
 .recovery-code { font-size: 1.15rem; letter-spacing: 0.06em; user-select: all; }
+
+/* spacing utilities (the security policy allows no style attributes in markup) */
+.mt-10 { margin-top: 10px; }
+.mt-14 { margin-top: 14px; }
+.m-0 { margin: 0; }
+.grow-240 { flex: 1 1 240px; }
+.grow-280 { flex: 1 1 280px; }
+.pick-map { height: 300px; margin-top: 8px; }
