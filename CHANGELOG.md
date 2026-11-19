@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (branch `v4`): integration register, feature matrix, completion report, Android test attempt, 2026-11-20
+- `docs/integrations/INTEGRATION_REGISTER.md`: every BMTC and BMRCL integration, with the required API or data,
+  authorisation, contact or agreement, implementation and testing status, and the remaining dependency.
+- `docs/integrations/CSM_INTEGRATION_REQUEST.md`: a draft technical integration request to BMTC's Chief Systems
+  Manager. It has not been sent.
+- `docs/release/FEATURE_MATRIX.md`: all 105 requirements, each with one of five statuses, its test evidence and what
+  is missing.
+- `docs/release/COMPLETION_REPORT_2026-11-20.md`.
+- **Android:** an emulator (API 36, WHPX) was set up and booted, but the local APK build failed. pub.dev connections
+  were refused on the build computer (errno 10013), so **no app test ran on an emulator or device**
+  (`docs/release/ANDROID_EMULATOR_TEST.md`). The build script (`scripts/android/build_test_apk.ps1`) and the emulator
+  check (`tests/android/emulator_check.py`) are committed for the next attempt.
+- Full browser regression on the final code: map and policy 13/13, phase 2 18/18, real mode 14/14, widths 22/22,
+  upcoming 17/17, accounts 24/24, live 15/15, sandbox payments 15/15, tickets 12/12.
+
 ## Unreleased (branch `v4`): the owner's logo as the app's brand, 2026-11-20
 - **New logo** (`assets/brand/logo-source.png`, the owner's blue-and-cyan transit logo) in every place:
   - PWA icons (any and maskable), Apple touch icon, favicon (PNG and a 16/32/48 px ICO), splash screen and header;

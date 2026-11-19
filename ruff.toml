@@ -31,6 +31,8 @@ ignore = []
 # Command-line scripts print their results as JSON, and some call the local interpreter.
 "scripts/**" = ["T201", "S603", "S607"]
 "tests/browser/**" = ["T201", "S603", "S607"]
+# The emulator check drives adb (a fixed SDK path) and reports on the console.
+"tests/android/**" = ["T201", "S603", "S607"]
 # The end-to-end crawler is an operator tool like the audit scripts: its browser selectors and checks are long lines.
 "tests/browser/e2e_check.py" = ["T201", "S603", "S607", "E501"]
 # The mutation check prints one line per broken rule and its result.

@@ -1,5 +1,16 @@
 # Repository audit: Bengaluru Transit Planner 4.0
 
+> **Update, 20 November 2026.** Since this audit:
+> - individual administrator accounts and the account screens exist (`b589e30`);
+> - the content security policy has no inline styles, so S4 is fixed (`50c8935`);
+> - the live-tracking adapter (`228420a`) and the payment architecture with its sandbox (`2549b74`, `170612e`) are
+>   built and waiting for official access;
+> - the owner's logo is in use (`3c226db`).
+>
+> The current status of all 105 requirements is in `docs/release/FEATURE_MATRIX.md`. The day's results are in
+> `docs/release/COMPLETION_REPORT_2026-11-20.md`, and the integrations in `docs/integrations/INTEGRATION_REGISTER.md`.
+> The text below is the audit as written on 19 November.
+
 Audit of branch `v4` on 19 November 2026, including the Phase 2 changes in the same commit as this file. Status labels
 used everywhere in `docs/audit/`:
 
