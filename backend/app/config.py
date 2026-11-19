@@ -119,6 +119,15 @@ class Settings:
     # True on hosting whose disk is erased on every restart (Render's free plan with SQLite). The app then tells
     # passengers that items saved on the server can be lost, and points them to what is kept on their own device.
     ephemeral_storage: bool = False
+    # Live vehicles and arrival estimates (GTFS-Realtime). Empty URLs: not connected, which is the case until BMTC
+    # authorises access. See app/services/realtime.py. REALTIME_AUTH_HEADER is a secret and is never returned.
+    realtime_vehicles_url: str = ""
+    realtime_trip_updates_url: str = ""
+    realtime_auth_header: str = ""
+    realtime_source_kind: str = "OFFICIAL"
+    realtime_classification: str = "OFFICIAL_VERIFIED"
+    realtime_poll_seconds: int = 20
+    realtime_stale_seconds: int = 120
 
     @classmethod
     def from_env(cls, env_file: Path | None = None) -> Settings:
@@ -162,4 +171,12 @@ class Settings:
             accounts_allow_sqlite=_flag("ACCOUNTS_ALLOW_SQLITE"),
             client_ip_header=_header_name("CLIENT_IP_HEADER"),
             ephemeral_storage=_flag("EPHEMERAL_STORAGE"),
+            realtime_vehicles_url=os.environ.get("REALTIME_VEHICLES_URL", "").strip(),
+            realtime_trip_updates_url=os.environ.get("REALTIME_TRIP_UPDATES_URL", "").strip(),
+            realtime_auth_header=os.environ.get("REALTIME_AUTH_HEADER", "").strip(),
+            realtime_source_kind=os.environ.get("REALTIME_SOURCE_KIND", "OFFICIAL").strip().upper() or "OFFICIAL",
+            realtime_classification=(os.environ.get("REALTIME_CLASSIFICATION", "").strip()
+                                     or "OFFICIAL_VERIFIED"),
+            realtime_poll_seconds=_get_int("REALTIME_POLL_SECONDS", 20, low=5, high=600),
+            realtime_stale_seconds=_get_int("REALTIME_STALE_SECONDS", 120, low=30, high=600),
         )

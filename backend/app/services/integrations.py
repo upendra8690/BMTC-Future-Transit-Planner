@@ -73,9 +73,16 @@ def adapter(capability: str) -> NotAuthorised:
         raise IntegrationUnavailableError(capability, "UNKNOWN_CAPABILITY", None) from None
 
 
-def status() -> dict[str, Any]:
+def status(live_connected: bool = False) -> dict[str, Any]:
+    """``live_connected`` is true only when an official GTFS-Realtime feed is configured and answering."""
+    rows = []
+    for a in ADAPTERS.values():
+        row = a.describe()
+        if a.capability == "live_vehicles" and live_connected:
+            row.update(connected=True, status="CONNECTED", code=None)
+        rows.append(row)
     return {
         "note": "No ticket, pass, QR code, payment, wallet balance or live position is ever produced by this app "
                 "until an authorised provider is connected.",
-        "integrations": [a.describe() for a in ADAPTERS.values()],
+        "integrations": rows,
     }

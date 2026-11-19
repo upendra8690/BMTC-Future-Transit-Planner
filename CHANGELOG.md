@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased (branch `v4`): live-tracking subsystem (off until BMTC authorises a feed), 2026-11-20
+- **GTFS-Realtime provider adapter** (`backend/app/services/realtime.py`): reads VehiclePositions and TripUpdates
+  over HTTPS with an optional access header from the environment, decodes them without a protobuf library, and
+  matches trips, routes and stops with the official timetable. Connecting BMTC's feed needs only settings
+  (`REALTIME_*`, see `docs/integrations/LIVE_TRACKING.md`).
+- **Live screen:** map and list of vehicles with route, direction, next stop, route progress, last update and
+  freshness ("Live" or "Delayed"); route filter; vehicle details with every stop ahead and its live estimate, or
+  its scheduled time labelled "Scheduled"; live arrivals on each stop page, labelled "Live estimate".
+- **Safeguards:** without a feed every live answer is "not connected" and no vehicle is shown (the public service
+  today). Positions older than 10 minutes are never shown. A test feed is refused unless `DEMO_MODE=1`, and then
+  every screen says "TEST FEED — NOT REAL VEHICLES" and live tracking never counts as available.
+- **API:** `GET /api/live/status`, `/api/live/vehicles`, `/api/live/vehicles/{id}`, `/api/live/stops/{id}/arrivals`.
+- **Tests:** pytest 572 passed, 5 skipped (26 new in `tests/test_realtime.py`); new `tests/browser/live_check.py`
+  15/15; every other browser check passes (one Kannada check now waits for the re-rendered list instead of reading
+  it too early).
+
 ## Unreleased (branch `v4`): map selection and a stricter style policy, 2026-11-19
 - **Choose on map** in the journey planner: tap the map (or list stops near its centre) to see the nearest stops and
   stations in the chosen data, with distances, then "Start here" or "Go here". Places come only from the loaded data.

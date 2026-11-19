@@ -159,6 +159,45 @@ def _scenario_response(scenario: Scenario, request: Request, warnings: list[str]
     return body
 
 
+# ---------------------------------------------------------------- live vehicles (GTFS-Realtime; off until authorised)
+
+def _live_official(request: Request) -> bool:
+    live = request.app.state.live
+    return bool(live.official and live.status(clock.utc_now())["available"])
+
+
+@router.get("/live/status", tags=["live"])
+def live_status(request: Request) -> dict[str, Any]:
+    """Whether a live feed is connected, how fresh it is, and what is needed when it is not."""
+    return request.app.state.live.status(clock.utc_now())
+
+
+@router.get("/live/vehicles", tags=["live"])
+def live_vehicles(request: Request, db: DbSession,
+                  route: str = Query("", max_length=40, description="Route number or GTFS route id")) -> dict[str, Any]:
+    """Vehicles from the live feed, matched with the timetable. Positions older than 10 minutes are left out."""
+    return request.app.state.live.vehicles(db, clock.utc_now(), route)
+
+
+@router.get("/live/vehicles/{vehicle_id}", tags=["live"])
+def live_vehicle(request: Request, db: DbSession,
+                 vehicle_id: str = ApiPath(..., min_length=1, max_length=100)) -> dict[str, Any]:
+    """One vehicle with its route progress and an estimate for each stop still ahead (or the scheduled time)."""
+    found = request.app.state.live.vehicle(db, clock.utc_now(), vehicle_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="That vehicle is not in the live feed now.")
+    return found
+
+
+@router.get("/live/stops/{stop_id}/arrivals", tags=["live"])
+def live_arrivals(stop_id: int, request: Request, db: DbSession) -> dict[str, Any]:
+    """Live arrival estimates at one stop. Scheduled departures stay on their own endpoint, under their own label."""
+    stop = db.get(Stop, stop_id)
+    if stop is None:
+        raise HTTPException(status_code=404, detail="Stop not found.")
+    return request.app.state.live.arrivals(db, clock.utc_now(), stop)
+
+
 # ---------------------------------------------------------------- health and metadata
 
 @router.get("/health", tags=["system"])
@@ -200,7 +239,7 @@ def meta(request: Request) -> dict[str, Any]:
         "affiliation": (
             "Not affiliated with, endorsed by or authorised by BMTC, BMRCL, Namma Metro or any transport operator."
         ),
-        "live_positions_available": False,
+        "live_positions_available": _live_official(request),
         "live_positions_note": (
             "No verified real-time feed is connected, so no live bus or train positions are shown. "
             "Every time is scheduled."
@@ -237,7 +276,8 @@ def features(request: Request, db: DbSession) -> dict[str, Any]:
     settings = request.app.state.settings
     return {"version": APP_VERSION, "demo_mode": settings.demo_mode,
             "server_storage_persistent": not settings.ephemeral_storage,
-            "features": catalogue.feature_states(db, accounts_running=request.app.state.accounts_reason is None)}
+            "features": catalogue.feature_states(db, accounts_running=request.app.state.accounts_reason is None,
+                                                 live=request.app.state.live.status(clock.utc_now()))}
 
 
 @router.get("/services", tags=["system"])
@@ -344,9 +384,9 @@ def data_freshness(request: Request, db: DbSession) -> dict[str, Any]:
 
 
 @router.get("/integrations", tags=["system"])
-def integration_status() -> dict[str, Any]:
+def integration_status(request: Request) -> dict[str, Any]:
     """Provider integrations (live vehicles, tickets, passes, Metro QR, payments, NCMC) and what each one needs."""
-    return integrations.status()
+    return integrations.status(live_connected=_live_official(request))
 
 
 @router.post("/integrations/{capability}/request", tags=["system"])

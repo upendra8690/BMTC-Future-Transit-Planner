@@ -62,6 +62,7 @@
     accounts: null,
     accountJourneys: null,
     recoveryCode: "",
+    liveRoute: "",
     clock: null,
     clockFailed: false,
     clockOffsetMs: 0,
@@ -1167,8 +1168,10 @@
       '<div class="toolbar"><button type="button" class="secondary" data-action="rerender">' + esc(t("common.refresh")) + "</button></div>" +
       body +
       '<p class="mt-12 muted">' + esc(t("clock.scheduled_only")) + "</p></section>" +
+      '<section class="card" id="stopLiveCard" hidden><h2>' + esc(t("live.stop_title")) + '</h2><div id="stopLive"></div></section>' +
       stopExtrasHtml(data.stop)
     );
+    loadStopLive(stopId, token);
     await fillPanel(document.getElementById("stopRoutes"), token, async function () {
       var routes = await api("/api/stops/" + encodeURIComponent(stopId) + "/routes?classification=" + encodeURIComponent(state.classification));
       if (!routes.routes.length) return '<div class="empty">' + esc(t("stop.routes_none")) + "</div>";
@@ -2923,18 +2926,190 @@
       "<p>" + esc(t(bodyKey)) + "</p>" + (reason ? '<p class="muted">' + esc(reason) + "</p>" : "") + "</section>";
   }
 
+  // ---------------------------------------------------------------- live vehicles (only from an authorised feed)
+  // Every live item comes from the operator's GTFS-Realtime feed through /api/live. Without a connected feed this
+  // screen says so and shows no vehicle. A scheduled time is always labelled "Scheduled", never shown as live.
+  var LIVE_REFRESH_MS = 20000;
+
+  function liveBanner(status) {
+    if (!status || status.official) return "";
+    return '<div class="banner demo-mode" role="alert"><strong>' + esc(t("live.test_title")) + "</strong>" + esc(t("live.test_body")) + "</div>";
+  }
+
+  function ageText(seconds) {
+    if (seconds === null || seconds === undefined) return t("common.na");
+    if (seconds < 60) return t("live.age_seconds", { n: fmtNum(seconds) });
+    return t("live.age_minutes", { n: fmtNum(Math.round(seconds / 60)) });
+  }
+
+  function freshnessBadge(freshness) {
+    return '<span class="badge ' + (freshness === "FRESH" ? "official" : "unverified") + '">' + esc(t("live.fresh." + freshness)) + "</span>";
+  }
+
+  function liveStateCard(status) {
+    return '<section class="card"><h2>' + esc(t("live.feed_title")) + "</h2><p>" + esc(t("live.state." + status.state)) + "</p>" +
+      (status.reason && status.state !== "NOT_CONNECTED" ? '<p class="muted small">' + esc(t("live.reason_code", { code: status.reason })) + "</p>" : "") +
+      (status.official && status.available ? "" : '<p class="muted small">' + esc(t("live.needs_text")) + "</p>") + "</section>";
+  }
+
+  function scheduledCardsHtml() {
+    return '<section class="card"><h2>' + esc(t("live.scheduled_title")) + "</h2><p>" + esc(t("live.scheduled_body")) + "</p>" +
+      '<p><a class="button-link" href="#/nearby">' + esc(t("live.scheduled_link")) + "</a></p></section>" +
+      '<section class="card"><h2>' + esc(t("live.official_title")) + '</h2><div id="liveLinks"></div></section>';
+  }
+
+  function routeLabel(route) {
+    return route ? String(route.number || "") : t("live.not_matched");
+  }
+
   async function renderLive(args, token) {
     await loadFeatures();
+    var status;
+    try {
+      status = await api("/api/live/status");
+    } catch (err) {
+      if (token === state.viewToken) setView(panelError(err, "rerender"));
+      return;
+    }
     if (token !== state.viewToken) return;
-    setView(
-      unavailableCard("live.unavailable_title", "live.body", "live_tracking") +
-      '<section class="card"><h2>' + esc(t("live.scheduled_title")) + "</h2><p>" + esc(t("live.scheduled_body")) + "</p>" +
-      '<p><a class="button-link" href="#/nearby">' + esc(t("live.scheduled_link")) + "</a></p></section>" +
-      '<section class="card"><h2>' + esc(t("live.official_title")) + '</h2><div id="liveLinks"></div></section>'
-    );
+    if (!status.available) {
+      setView(unavailableCard("live.unavailable_title", "live.body", "live_tracking") + liveStateCard(status) + scheduledCardsHtml());
+    } else if (args[0] === "vehicle" && args[1]) {
+      await renderLiveVehicle(decodeURIComponent(args[1]), token);
+      return;
+    } else {
+      setView(liveBanner(status) +
+        '<section class="card"><div class="card-head"><h2>' + esc(t("live.title")) + '</h2><span id="liveState"></span></div>' +
+        '<p class="muted small" id="liveFeedLine"></p>' +
+        '<form id="liveFilter" class="toolbar" role="search"><label class="field grow-240">' + esc(t("live.route_filter")) +
+        '<input name="route" maxlength="40" autocomplete="off" value="' + esc(state.liveRoute || "") + '"></label>' +
+        '<div class="align-end"><button type="submit">' + esc(t("live.filter")) + "</button></div></form>" +
+        '<div id="liveMap" class="map mt-12"></div><div id="liveList" class="mt-12" aria-live="polite">' + loadingInline() + "</div></section>" +
+        liveStateCard(status) + scheduledCardsHtml());
+      var map = makeMap("liveMap");
+      if (map) map.setView(BENGALURU, 11);
+      await refreshLive(token, true);
+    }
     await fillPanel(document.getElementById("liveLinks"), token, function () {
       return officialLinks(["bus"]);
     });
+  }
+
+  function liveVehicleHtml(v) {
+    return '<li><div><div class="title">' + esc(routeLabel(v.route)) + (v.headsign ? " &rarr; " + esc(v.headsign) : "") + "</div>" +
+      '<div class="muted">' + esc(v.label) + (v.next_stop ? " · " + esc(t("live.next_stop", { name: v.next_stop.name })) : "") +
+      " · " + esc(t("live.updated_ago", { age: ageText(v.age_seconds) })) + "</div>" +
+      (v.progress ? '<progress max="100" value="' + esc(v.progress.percent) + '" aria-label="' +
+        esc(t("live.progress", { n: v.progress.stop_number, total: v.progress.stops_total })) + '"></progress>' : "") +
+      '</div><div class="row-actions">' + freshnessBadge(v.freshness) +
+      '<a class="button secondary" href="#/live/vehicle/' + esc(encodeURIComponent(v.vehicle_id)) + '">' + esc(t("live.details")) + "</a></div></li>";
+  }
+
+  async function refreshLive(token, fit) {
+    var list = document.getElementById("liveList");
+    if (!list) return;
+    var data;
+    try {
+      data = await api("/api/live/vehicles?" + new URLSearchParams({ route: state.liveRoute || "" }).toString());
+    } catch (err) {
+      if (token === state.viewToken && document.getElementById("liveList")) list.innerHTML = panelError(err, "rerender");
+      return;
+    }
+    if (token !== state.viewToken || !document.getElementById("liveList")) return;
+    var status = data.status;
+    document.getElementById("liveState").innerHTML = status.available ? freshnessBadge(status.state === "LIVE" ? "FRESH" : "STALE") : "";
+    document.getElementById("liveFeedLine").textContent = t("live.feed_line", { age: ageText(status.feed_age_seconds), poll: status.poll_seconds });
+    if (!data.available) {
+      list.innerHTML = '<div class="empty">' + esc(t("live.state." + status.state)) + "</div>";
+    } else {
+      list.innerHTML = (data.vehicles.length ? '<ul class="list">' + data.vehicles.map(liveVehicleHtml).join("") + "</ul>"
+        : '<div class="empty">' + esc(t(state.liveRoute ? "live.none_route" : "live.none")) + "</div>") +
+        (data.hidden_old ? '<p class="muted small">' + esc(t("live.hidden_old", { n: data.hidden_old })) + "</p>" : "");
+    }
+    var L = window.L;
+    if (state.map && state.markers && L) {
+      state.markers.clearLayers();
+      var points = [];
+      data.vehicles.forEach(function (v) {
+        points.push([v.lat, v.lon]);
+        L.circleMarker([v.lat, v.lon], { radius: 8, weight: 3, color: v.freshness === "FRESH" ? "#1d4ed8" : "#6b7280" })
+          .bindTooltip(esc(routeLabel(v.route) + " · " + v.label))
+          .on("click", function () { location.hash = "#/live/vehicle/" + encodeURIComponent(v.vehicle_id); })
+          .addTo(state.markers);
+      });
+      // No animation: the screen may be re-rendered (a filter, a refresh) while an animated zoom is still running,
+      // and Leaflet fails if its map is removed mid-animation.
+      if (fit && points.length) state.map.fitBounds(points, { maxZoom: 14, padding: [24, 24], animate: false });
+    }
+    setTimeout(function () {
+      if (token === state.viewToken && document.getElementById("liveList")) refreshLive(token, false);
+    }, LIVE_REFRESH_MS);
+  }
+
+  async function renderLiveVehicle(id, token) {
+    var data;
+    try {
+      data = await api("/api/live/vehicles/" + encodeURIComponent(id));
+    } catch (err) {
+      if (token !== state.viewToken) return;
+      setView('<section class="card"><p><a href="#/live">&larr; ' + esc(t("live.back")) + '</a></p><div class="banner error" role="alert">' +
+        esc(err.status === 404 ? t("live.vehicle_gone") : err.message) + "</div></section>");
+      return;
+    }
+    if (token !== state.viewToken) return;
+    if (!data.available) {
+      render();
+      return;
+    }
+    var v = data.vehicle;
+    var rows = data.upcoming.map(function (u) {
+      return "<tr><td>" + esc(u.stop.name) + "</td><td>" + esc(u.scheduled ? formatClockTime(u.scheduled) : t("common.na")) + "</td><td>" +
+        esc(u.estimate ? formatClockTime(u.estimate) : "—") + '</td><td><span class="badge ' + (u.kind === "LIVE_ESTIMATE" ? "official" : "neutral") + '">' +
+        esc(t("live.kind." + u.kind)) + "</span></td></tr>";
+    }).join("");
+    setView(liveBanner(data.status) +
+      '<section class="card"><p><a href="#/live">&larr; ' + esc(t("live.back")) + "</a></p>" +
+      "<h2>" + esc(routeLabel(v.route)) + (v.headsign ? " &rarr; " + esc(v.headsign) : "") + "</h2>" +
+      "<p>" + freshnessBadge(v.freshness) + " " + esc(t("live.updated_ago", { age: ageText(v.age_seconds) })) + "</p>" +
+      '<ul class="facts"><li>' + esc(t("live.vehicle")) + ": " + esc(v.label) + "</li>" +
+      (v.current_stop ? "<li>" + esc(t("live.current_stop", { name: v.current_stop.name })) + "</li>" : "") +
+      (v.next_stop ? "<li>" + esc(t("live.next_stop", { name: v.next_stop.name })) + "</li>" : "") +
+      (v.speed_kmph !== null && v.speed_kmph !== undefined ? "<li>" + esc(t("live.speed", { n: v.speed_kmph })) + "</li>" : "") +
+      (v.progress ? "<li>" + esc(t("live.progress", { n: v.progress.stop_number, total: v.progress.stops_total })) +
+        ' <progress max="100" value="' + esc(v.progress.percent) + '" aria-hidden="true"></progress></li>' : "") +
+      "</ul>" +
+      '<div class="toolbar"><button type="button" class="secondary" data-action="rerender">' + esc(t("common.refresh")) + "</button></div>" +
+      '<div id="liveVehicleMap" class="map mt-12"></div>' +
+      "<h3>" + esc(t("live.upcoming_title")) + "</h3>" +
+      (rows ? '<div class="table-wrap" tabindex="0" role="region" aria-label="' + esc(t("live.upcoming_title")) + '"><table><thead><tr><th>' +
+        esc(t("live.col_stop")) + "</th><th>" + esc(t("live.col_scheduled")) + "</th><th>" + esc(t("live.col_estimate")) + "</th><th></th></tr></thead><tbody>" +
+        rows + "</tbody></table></div>" : '<div class="empty">' + esc(t("live.not_matched")) + "</div>") +
+      '<p class="muted small mt-8">' + esc(t("live.estimate_note")) + "</p></section>");
+    var map = makeMap("liveVehicleMap");
+    if (map && window.L) {
+      map.setView([v.lat, v.lon], 15);
+      window.L.circleMarker([v.lat, v.lon], { radius: 9, weight: 3, color: "#1d4ed8" }).bindTooltip(esc(v.label)).addTo(state.markers);
+    }
+  }
+
+  async function loadStopLive(stopId, token) {
+    var data;
+    try {
+      data = await api("/api/live/stops/" + encodeURIComponent(stopId) + "/arrivals");
+    } catch (_) {
+      return;
+    }
+    var card = document.getElementById("stopLiveCard");
+    if (token !== state.viewToken || !card || !data.available) return;
+    card.hidden = false;
+    document.getElementById("stopLive").innerHTML = liveBanner(data.status) + (data.arrivals.length
+      ? '<ul class="list">' + data.arrivals.map(function (a) {
+        return '<li><div><div class="title">' + esc(routeLabel(a.route)) + (a.headsign ? " &rarr; " + esc(a.headsign) : "") + "</div>" +
+          '<div class="muted">' + esc(formatClockTime(a.estimate)) + " · " + esc(t("live.in_minutes", { n: fmtNum(a.minutes) })) +
+          (a.vehicle_label ? " · " + esc(a.vehicle_label) : "") + "</div></div>" +
+          '<div class="row-actions"><span class="badge official">' + esc(t("live.kind." + a.kind)) + "</span></div></li>";
+      }).join("") + "</ul>"
+      : '<div class="empty">' + esc(t("live.stop_none")) + "</div>");
   }
 
   async function renderTickets(args, token) {
@@ -4109,6 +4284,10 @@
         break;
       case "adminKeyForm":
         saveAdminKey(form.elements.key);
+        break;
+      case "liveFilter":
+        state.liveRoute = String(form.elements.route.value || "").trim().slice(0, 40);
+        render();
         break;
       case "accountSignInForm":
         signIn(form);

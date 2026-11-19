@@ -19,6 +19,7 @@ from .config import DASHBOARD_DIR, Settings
 from .database import Database
 from .security import RateLimiter, client_ip
 from .services import accounts as accounts_service
+from .services.realtime import LiveService
 
 LOG = logging.getLogger("bmtc_planner")
 
@@ -100,6 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.db = db
+    app.state.live = LiveService(settings)
     app.state.accounts_reason = accounts_service.availability(
         settings.accounts_enabled, settings.accounts_allow_sqlite, settings.database_url)
     if settings.accounts_enabled and app.state.accounts_reason:

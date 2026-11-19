@@ -59,11 +59,19 @@ def _has_shown_fares(db: Session) -> bool:
     return bool(db.scalar(query))
 
 
-def feature_states(db: Session, accounts_running: bool = False) -> list[dict[str, Any]]:
+def feature_states(db: Session, accounts_running: bool = False,
+                   live: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Each feature with its state and a reason code. Reason codes are translated by the app.
 
     ``accounts_running`` is true when the server keeps accounts (ACCOUNTS_ENABLED with a permanent database).
+    ``live`` is the live feed's status: live tracking is AVAILABLE only with an official feed that is answering.
     """
+    if live and live.get("available") and live.get("official"):
+        live_state: tuple[str, str | None] = (AVAILABLE, None)
+    elif live and live.get("available"):
+        live_state = (UNAVAILABLE, "TEST_FEED_ONLY")
+    else:
+        live_state = (UNAVAILABLE, "NO_AUTHORISED_LIVE_FEED")
     bus = _has_routes(db, BUS_ROUTE_TYPES)
     metro = _has_routes(db, METRO_ROUTE_TYPES)
     any_data = bus or metro
@@ -84,7 +92,7 @@ def feature_states(db: Session, accounts_running: bool = False) -> list[dict[str
         ("offline", (AVAILABLE, None)),
         ("sos_call", (AVAILABLE, None)),
         ("official_links", (AVAILABLE, None)),
-        ("live_tracking", (UNAVAILABLE, "NO_AUTHORISED_LIVE_FEED")),
+        ("live_tracking", live_state),
         ("bus_tickets", (UNAVAILABLE, "NEEDS_TICKETING_AGREEMENT")),
         ("bus_passes", (UNAVAILABLE, "NEEDS_TICKETING_AGREEMENT")),
         ("metro_tickets", (UNAVAILABLE, "NEEDS_ONDC_REGISTRATION")),

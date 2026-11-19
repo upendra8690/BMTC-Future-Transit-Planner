@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 BASE = sys.argv[1].rstrip("/") + "/"
 KEY = Path(sys.argv[2]).read_text(encoding="utf-8").strip()
@@ -93,8 +93,13 @@ with sync_playwright() as p:
 
     # Kannada: the new labels are translated.
     page.select_option("#langSelect", "kn")
-    page.wait_for_selector("#upcomingList .project", timeout=20000)
-    check("labels are translated into Kannada", "ಪತ್ರಿಕಾ ವರದಿ (ಅಧಿಕೃತವಲ್ಲ)" in page.inner_text("#upcomingList"))
+    # The list is re-rendered after the language changes, so wait for the translated text rather than the old list.
+    try:
+        expect(page.locator("#upcomingList")).to_contain_text("ಪತ್ರಿಕಾ ವರದಿ (ಅಧಿಕೃತವಲ್ಲ)", timeout=20000)
+        translated = True
+    except AssertionError:
+        translated = False
+    check("labels are translated into Kannada", translated, page.inner_text("#upcomingList")[:200])
     page.select_option("#langSelect", "en")
 
     check("no script errors", not errors, errors[:3])
