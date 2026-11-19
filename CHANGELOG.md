@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (branch `v4`): the owner's logo as the app's brand, 2026-11-20
+- **New logo** (`assets/brand/logo-source.png`, the owner's blue-and-cyan transit logo) in every place:
+  - PWA icons (any and maskable), Apple touch icon, favicon (PNG and a 16/32/48 px ICO), splash screen and header;
+  - Android launcher sources for CI (legacy, adaptive foreground and background, native splash);
+  - every Android density in `android/launcher_icons` for review;
+  - Play Store icon.
+
+  All are made by `scripts/make_brand_icons.py`.
+- The name stays Bengaluru Transit Planner, and the app stays labelled independent. `assets/brand/README.md` records
+  that this is not an operator logo, and flags that its Vidhana Soudha-like building could be read as government
+  backing.
+- The service worker cache moves to v7, so installed apps pick up the new icons.
+- **Tests:** `tests/test_branding.py` (15): sizes, transparency, safe zones, every Android density, the favicon, the
+  manifest and the independence statement.
+
 ## Unreleased (branch `v4`): UPI payment architecture, sandbox environment, BMTC ticketing adapter, 2026-11-20
 - **Server-side payment confirmation:** an order is paid only by the gateway's signed webhook or by the gateway's
   status API asked by this server ("Check payment status", after a restart, or `POST /api/admin/payments/reconcile`).

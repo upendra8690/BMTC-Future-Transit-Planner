@@ -13,7 +13,7 @@ on:
     paths:
       - "android/**"
       - "dashboard/icons/**"
-      - "assets/app-icon.svg"
+      - "assets/brand/**"
       - ".github/workflows/android-apk.yml"
   workflow_dispatch:
     inputs:
@@ -91,7 +91,7 @@ jobs:
           fi
           grep -nE 'compileSdk|targetSdk' "$gradle_file"
 
-      - name: App icon and launch screen (assets/app-icon.svg, rendered into assets/icon/)
+      - name: App icon and launch screen (from assets/brand/logo-source.png via scripts/make_brand_icons.py)
         run: |
           flutter pub add --dev flutter_launcher_icons flutter_native_splash
           cat > flutter_launcher_icons.yaml <<'EOF'
